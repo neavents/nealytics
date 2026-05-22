@@ -19,12 +19,6 @@ jobs:
           - os: ubuntu-24.04-arm
             rid: linux-arm64
             artifact: nealytics-engine-linux-arm64
-          - os: macos-latest
-            rid: osx-arm64
-            artifact: nealytics-engine-osx-arm64
-          - os: windows-latest
-            rid: win-x64
-            artifact: nealytics-engine-win-x64
 
     runs-on: ${{ matrix.os }}
 
@@ -43,24 +37,17 @@ jobs:
           -r ${{ matrix.rid }}
           -o publish/
 
-      - name: Package (Linux / macOS)
-        if: runner.os != 'Windows'
+      - name: Package
         run: |
           cd publish
           chmod +x Nealytics.Engine
           tar -czf ../${{ matrix.artifact }}.tar.gz Nealytics.Engine
 
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
-        run: Compress-Archive -Path publish/Nealytics.Engine.exe -DestinationPath ${{ matrix.artifact }}.zip
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: |
-            ${{ matrix.artifact }}.tar.gz
-            ${{ matrix.artifact }}.zip
+          path: ${{ matrix.artifact }}.tar.gz
 
   release:
     needs: build
@@ -79,6 +66,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: |
-            artifacts/*.tar.gz
-            artifacts/*.zip
+          files: artifacts/*.tar.gz
