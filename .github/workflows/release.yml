@@ -16,7 +16,7 @@ jobs:
           - os: ubuntu-latest
             rid: linux-x64
             artifact: nealytics-engine-linux-x64
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             rid: linux-arm64
             artifact: nealytics-engine-linux-arm64
           - os: macos-latest
