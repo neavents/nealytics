@@ -1,0 +1,17 @@
+**/.git
+**/.vs
+**/.idea
+**/bin
+**/obj
+**/publish
+**/artifacts
+**/*.user
+**/*.suo
+**/.DS_Store
+**/Thumbs.db
+**/.env
+**/.env.*
+**/logs
+CLAUDE.md
+LICENSE
+*.md

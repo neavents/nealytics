@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Nealytics.Engine/Nealytics.Engine.csproj" />
+  </Folder>
+</Solution>
