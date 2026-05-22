@@ -37,10 +37,9 @@ That's it. ClickHouse starts, the schema gets created automatically from [`click
 
 ### Pre-built binary (no SDK needed)
 
-Grab the latest binary from the [Releases](../../releases) page. We publish Native AOT binaries for Linux x64, Linux ARM64, macOS ARM64, and Windows x64. No .NET runtime required it's fully self contained.
+Grab the latest binary from the [Releases](../../releases) page. We publish Native AOT binaries for Linux x64 and Linux ARM64. No .NET runtime required it's fully self contained.
 
 ```bash
-# Linux / macOS
 tar -xzf nealytics-engine-linux-x64.tar.gz
 chmod +x Nealytics.Engine
 
@@ -49,17 +48,6 @@ export TelemetryEngine__JwtSymmetricKey="replace_this_please"
 export TelemetryEngine__AllowedProjectKeys="myapp:mykey123"
 
 ./Nealytics.Engine
-```
-
-```powershell
-# Windows
-Expand-Archive nealytics-engine-win-x64.zip -DestinationPath .
-
-$env:TelemetryEngine__ClickHouseConnectionString="Host=127.0.0.1;Port=9000;Database=nealytics_core;"
-$env:TelemetryEngine__JwtSymmetricKey="replace_this_please"
-$env:TelemetryEngine__AllowedProjectKeys="myapp:mykey123"
-
-.\Nealytics.Engine.exe
 ```
 
 You still need a ClickHouse instance running somewhere the binary is just the API server. Run the [`clickhouse-init.sql`](clickhouse-init.sql) against your ClickHouse to create the schema, or use the Docker Compose file just for the database:
