@@ -1,0 +1,31 @@
+CLAUDE.md
+
+# .NET
+[Bb]in/
+[Oo]bj/
+**/[Bb]in/
+**/[Oo]bj/
+*.user
+*.suo
+.vs/
+*.ncrunchproject
+*.ncrunchsolution
+.idea/
+
+# Build output
+publish/
+artifacts/
+
+# Logs
+logs/
+*.log
+
+# Environment & secrets
+.env
+.env.*
+appsettings.Development.json
+appsettings.Local.json
+
+# OS
+.DS_Store
+Thumbs.db
