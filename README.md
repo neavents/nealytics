@@ -1,12 +1,14 @@
-<p align="center">
+<p align="left">
   <img src="assets/Nealytics.png" alt="Nealytics" width="200" />
 </p>
 
 # Nealytics
 
-High-throughput telemetry engine built on .NET 10 Native AOT and ClickHouse. Ships as a single self-contained binary. No reflection, no runtime code generation, no garbage collection pressure on the hot path.
+High throughput telemetry engine built on .NET 10 Native AOT and ClickHouse. Ships as a single self contained binary. No reflection, no runtime code generation, no garbage collection pressure on the hot path.
 
-We built this because we needed an analytics backend that could ingest tens of thousands of events per second from browser SDKs and server-side clients, store them in a columnar database, and query them back with sub-second latency. Most analytics tools are either SaaS-only or way too heavy to self-host. Nealytics is one binary, one config file, one ClickHouse instance.
+Built this because I wanna use collected data to show my tenants their analytics, I looked up some other tools but none of them offered what I want. the most closest one is TinyBird, good project but I don't wanna pay anything while I can make similar myself. And this an open source project so anyone can benefit from this. 
+
+This service is so fast and very easy to configure. Nealytics is one binary, one config file, one ClickHouse instance.
 
 ---
 
@@ -35,7 +37,7 @@ That's it. ClickHouse starts, the schema gets created automatically from [`click
 
 ### Pre-built binary (no SDK needed)
 
-Grab the latest binary from the [Releases](../../releases) page. We publish Native AOT binaries for Linux x64, Linux ARM64, macOS ARM64, and Windows x64. No .NET runtime required — it's fully self-contained.
+Grab the latest binary from the [Releases](../../releases) page. We publish Native AOT binaries for Linux x64, Linux ARM64, macOS ARM64, and Windows x64. No .NET runtime required it's fully self contained.
 
 ```bash
 # Linux / macOS
@@ -60,7 +62,7 @@ $env:TelemetryEngine__AllowedProjectKeys="myapp:mykey123"
 .\Nealytics.Engine.exe
 ```
 
-You still need a ClickHouse instance running somewhere — the binary is just the API server. Run the [`clickhouse-init.sql`](clickhouse-init.sql) against your ClickHouse to create the schema, or use the Docker Compose file just for the database:
+You still need a ClickHouse instance running somewhere the binary is just the API server. Run the [`clickhouse-init.sql`](clickhouse-init.sql) against your ClickHouse to create the schema, or use the Docker Compose file just for the database:
 
 ```bash
 docker compose up -d telemetry-db
@@ -113,7 +115,7 @@ There are two separate endpoints for sending events. This is intentional.
 
 ### POST `/api/v1/telemetry/track`
 
-Standard HTTP POST. One event per request. Your server-side code, mobile app, or any HTTP client uses this. The request body is parsed using `PipeReader` and `Utf8JsonReader` directly on the raw bytes, no intermediate string allocation.
+Standard HTTP POST. One event per request. Your server side code, mobile app, or any HTTP client uses this. The request body is parsed using `PipeReader` and `Utf8JsonReader` directly on the raw bytes, no intermediate string allocation.
 
 Auth: `X-Project-Key` header or `?k=` query parameter.
 
@@ -125,7 +127,7 @@ So the beacon endpoint accepts a JSON array of events and deserializes them as a
 
 Auth: `?k=` query parameter only (sendBeacon doesn't let you set custom headers).
 
-Both endpoints are rate-limited under the `"ingestion"` policy. You can tune the limits via [`RateLimitPermitCount`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs), [`RateLimitWindowSeconds`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs), and [`RateLimitQueueSize`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs).
+Both endpoints are rate limited under the `"ingestion"` policy. You can tune the limits via [`RateLimitPermitCount`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs), [`RateLimitWindowSeconds`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs), and [`RateLimitQueueSize`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs).
 
 ---
 
@@ -147,7 +149,7 @@ Query params:
 
 ### GET `/api/v1/analytics/sessions`
 
-Session-level aggregation. Groups events by `session_id` and returns per-session metrics: first/last seen, duration, event count. Also includes summary stats across the returned sessions.
+Session level aggregation. Groups events by `session_id` and returns per-session metrics: first/last seen, duration, event count. Also includes summary stats across the returned sessions.
 
 ```bash
 curl "http://localhost:5000/api/v1/analytics/sessions?from=2024-01-01T00:00:00Z&to=2024-12-31T23:59:59Z&limit=100" \
@@ -185,7 +187,7 @@ Response:
 
 The write path and read path use completely different auth mechanisms. This is by design.
 
-**Write path (ingestion):** API keys. Comma-separated list in [`AllowedProjectKeys`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs). Validated against a `FrozenSet<string>` for O(1) exact-match lookups. No substring matching, no wildcards. Pass the key via `X-Project-Key` header or `?k=` query param.
+**Write path (ingestion):** API keys. Comma separated list in [`AllowedProjectKeys`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs). Validated against a `FrozenSet<string>` for O(1) exact match lookups. No substring matching, no wildcards. Pass the key via `X-Project-Key` header or `?k=` query param.
 
 **Read path (queries):** JWT Bearer tokens. The engine validates the signature using the symmetric key in [`JwtSymmetricKey`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs) and extracts `project_id` and `tenant_id` from the token claims. These claims become mandatory WHERE filters on every query. There's no way to read another project's data even if you have a valid token.
 
@@ -237,12 +239,12 @@ Full source: [`TelemetryEngineOptions.cs`](src/Nealytics.Engine/Infrastructure/C
 
 | Variable | Default | What it does |
 |---|---|---|
-| `AllowedProjectKeys` | _(empty)_ | Comma-separated API keys. Empty = all requests rejected. |
-| `MaxRequestBodyBytes` | `1048576` | Max request body size (1 MB). Enforced at Kestrel level and per-endpoint. |
+| `AllowedProjectKeys` | _(empty)_ | Comma separated API keys. Empty = all requests rejected. |
+| `MaxRequestBodyBytes` | `1048576` | Max request body size (1 MB). Enforced at Kestrel level and per endpoint. |
 | `RateLimitPermitCount` | `1000` | Requests allowed per rate limit window |
 | `RateLimitWindowSeconds` | `10` | Rate limit window duration |
 | `RateLimitQueueSize` | `500` | Requests queued when rate limit is hit (before 429) |
-| `CorsAllowedOrigins` | _(empty)_ | Comma-separated allowed origins. Empty = allow any origin. |
+| `CorsAllowedOrigins` | _(empty)_ | Comma separated allowed origins. Empty = allow any origin. |
 
 ### Authentication
 
@@ -264,17 +266,17 @@ Full source: [`TelemetryEngineOptions.cs`](src/Nealytics.Engine/Infrastructure/C
 
 Source: [`WriteAheadLogger.cs`](src/Nealytics.Engine/Infrastructure/Storage/WriteAheadLogger.cs)
 
-Every event that hits an ingestion endpoint is serialized to the WAL file before being published to the in-memory channel. The WAL is a simple newline-delimited JSON file (`telemetry_wal.log`) written with `FileOptions.WriteThrough` for durability, meaning writes go directly to disk, they don't sit in an OS buffer.
+Every event that hits an ingestion endpoint is serialized to the WAL file before being published to the in memory channel. The WAL is a simple newline delimited JSON file (`telemetry_wal.log`) written with `FileOptions.WriteThrough` for durability, meaning writes go directly to disk, they don't sit in an OS buffer.
 
 ### Why we need this
 
-The in-memory channel is fast but volatile. If the process crashes, everything in the channel is gone. The WAL gives us a recovery point. On startup, the batch processor calls `ReplayUncommitted()`, reads every line from the WAL, deserializes it, and pushes it through the normal batch insert pipeline. Only after ALL recovered events are successfully committed to ClickHouse does the WAL get truncated.
+The in memory channel is fast but volatile. If the process crashes, everything in the channel is gone. The WAL gives us a recovery point. On startup, the batch processor calls `ReplayUncommitted()`, reads every line from the WAL, deserializes it, and pushes it through the normal batch insert pipeline. Only after ALL recovered events are successfully committed to ClickHouse does the WAL get truncated.
 
 ### How it avoids allocations
 
 Serialization uses a `[ThreadStatic]` `ArrayBufferWriter<byte>`. Each thread gets its own reusable buffer. The JSON is written directly to the buffer via `Utf8JsonWriter`, a newline is appended, and the raw bytes are written to the file. No string intermediaries, no `byte[]` allocations per event.
 
-The buffer fill and file write both happen under a `SemaphoreSlim` lock. This prevents a subtle race condition where async continuations could hop threads and two concurrent `AppendAsync` calls could end up sharing the same thread-static buffer.
+The buffer fill and file write both happen under a `SemaphoreSlim` lock. This prevents a subtle race condition where async continuations could hop threads and two concurrent `AppendAsync` calls could end up sharing the same thread static buffer.
 
 ### Truncation safety
 
@@ -291,7 +293,7 @@ During normal operation, the batch processor calls `TruncateIfSafeAsync` after e
 
 Source: [`ClickHouseConnectionFactory.cs`](src/Nealytics.Engine/Infrastructure/Storage/ClickHouseConnectionFactory.cs)
 
-Octonica's ClickHouse client has no built-in connection pooling. Every `new ClickHouseConnection()` opens a fresh TCP socket. At high throughput, that's a lot of unnecessary handshakes.
+Octonica's ClickHouse client has no built in connection pooling. Every `new ClickHouseConnection()` opens a fresh TCP socket. At high throughput, that's a lot of unnecessary handshakes.
 
 We built a simple pool on top of `ConcurrentQueue<ClickHouseConnection>`:
 
@@ -299,7 +301,7 @@ We built a simple pool on top of `ConcurrentQueue<ClickHouseConnection>`:
 - **Return:** when a `PooledClickHouseConnection` is disposed via `await using`, the connection goes back to the pool if it's healthy and the pool isn't over capacity. Otherwise it gets disposed for real.
 - **Shutdown:** `DisposeAsync` drains the pool and closes all connections.
 
-The pool is self-healing. If ClickHouse restarts and all pooled connections go stale, the acquire loop silently discards them and creates fresh ones. The batch processor's retry logic handles any transient failures during the reconnection window.
+The pool is self healing. If ClickHouse restarts and all pooled connections go stale, the acquire loop silently discards them and creates fresh ones. The batch processor's retry logic handles any transient failures during the reconnection window.
 
 `PooledClickHouseConnection` is a readonly struct. Zero heap allocation for the wrapper itself.
 
@@ -315,7 +317,7 @@ This is a `BackgroundService` that reads from the bounded channel and inserts in
 
 2. **Main loop**: reads events from the channel until either the batch size is reached (`DatabaseBatchCommitSize`) or the flush timer fires (`ForceFlushIntervalSeconds`). Whichever comes first triggers a batch insert.
 
-3. **Batch insert**: events are decomposed into columnar arrays (one array per column) rented from `ArrayPool<T>.Shared`. The arrays are passed to `ClickHouseColumnWriter.WriteTableAsync` for a single bulk columnar insert. This is significantly faster than row-by-row inserts.
+3. **Batch insert**: events are decomposed into columnar arrays (one array per column) rented from `ArrayPool<T>.Shared`. The arrays are passed to `ClickHouseColumnWriter.WriteTableAsync` for a single bulk columnar insert. This is significantly faster than row by row inserts.
 
 4. **Retry**: if the ClickHouse insert fails, it retries with exponential backoff (1s, 2s, 4s, 8s, up to `RetryBackoffCeilingMs`). After `MaxInsertRetries` failures, it logs critical and moves on. The data is safe in the WAL and will be replayed on next restart.
 
@@ -346,11 +348,11 @@ SETTINGS index_granularity = 8192;
 
 Design decisions:
 
-- **`LowCardinality`** on `project_id` and `event_type` because these have few distinct values across millions of rows. ClickHouse stores them as dictionary-encoded integers internally.
+- **`LowCardinality`** on `project_id` and `event_type` because these have few distinct values across millions of rows. ClickHouse stores them as dictionary encoded integers internally.
 - **`ZSTD(1)`** compression on `metadata_json` because JSON strings are highly compressible and this column can be large.
 - **ORDER BY** is `(project_id, tenant_id, event_type, timestamp)`. All queries filter by project and tenant first (from JWT claims), so these are the primary sort keys. Event type and timestamp come next for the most common aggregation patterns.
 - **`DateTime64(3, 'UTC')`** gives millisecond precision in UTC. Good enough for analytics, avoids timezone headaches.
-- **`MergeTree`** engine. No deduplication (that would be `ReplacingMergeTree`). If you need exactly-once semantics, use `event_id` for dedup in your queries.
+- **`MergeTree`** engine. No deduplication (that would be `ReplacingMergeTree`). If you need exactly once semantics, use `event_id` for dedup in your queries.
 
 ---
 
@@ -367,7 +369,7 @@ Source: [`TelemetryDiagnostics.cs`](src/Nealytics.Engine/Infrastructure/Diagnost
 | `nealytics_read_queries_total` | Counter | Query endpoint executions |
 | `nealytics_storage_write_duration_seconds` | Histogram | Time spent per batch insert (including retries) |
 | `nealytics_query_read_duration_seconds` | Histogram | Time spent per read query |
-| `nealytics_queue_depth_current` | Gauge | Current number of events in the in-memory channel |
+| `nealytics_queue_depth_current` | Gauge | Current number of events in the in memory channel |
 
 ### Tracing
 
@@ -382,7 +384,7 @@ Traces and metrics are exported via OTLP. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to p
 
 ### Logging
 
-Structured JSON logging via Serilog. All log messages use the `LoggerMessage` source generator for zero-allocation logging on the hot path. Log level is controllable via the standard `Logging__LogLevel__Default` environment variable.
+Structured JSON logging via Serilog. All log messages use the `LoggerMessage` source generator for zero allocation logging on the hot path. Log level is controllable via the standard `Logging__LogLevel__Default` environment variable.
 
 ---
 
@@ -403,13 +405,13 @@ This is hardcoded in the middleware pipeline. See [`Program.cs`](src/Nealytics.E
 
 ## Native AOT & Docker
 
-The project compiles to a self-contained native binary. No .NET runtime needed on the host.
+The project compiles to a self contained native binary. No .NET runtime needed on the host.
 
-The [`Dockerfile`](Dockerfile) uses a multi-stage build:
+The [`Dockerfile`](Dockerfile) uses a multi stage build:
 1. **Build stage** (`dotnet/sdk:10.0-preview`): restores, publishes with `-r linux-x64` for Native AOT compilation.
 2. **Runtime stage** (`dotnet/runtime-deps:10.0-preview`): minimal base image with just the native dependencies (libc, OpenSSL). No .NET runtime installed.
 
-The container runs as a non-root `nealytics` user. The WAL directory (`/app/logs/`) is pre-created with correct ownership.
+The container runs as a non root `nealytics` user. The WAL directory (`/app/logs/`) is pre created with correct ownership.
 
 ---
 
@@ -437,11 +439,11 @@ src/Nealytics.Engine/
       SessionAnalyticsResponse.cs         # Response model
   Infrastructure/
     Configuration/
-      TelemetryEngineOptions.cs           # All settings, env-configurable
+      TelemetryEngineOptions.cs           # All settings, env configurable
     Diagnostics/
       TelemetryDiagnostics.cs             # Metrics and tracing
     Security/
-      ApiKeyValidator.cs                  # FrozenSet-backed key validation
+      ApiKeyValidator.cs                  # FrozenSet backed key validation
     Serialization/
       GlobalTelemetryPayload.cs           # Payload contract + AOT JSON context
     Storage/
@@ -449,7 +451,7 @@ src/Nealytics.Engine/
       WriteAheadLogger.cs                 # WAL with crash recovery
 ```
 
-Vertical Slice Architecture. Each feature is self-contained in its own folder. Infrastructure is shared across slices but has no business logic.
+Vertical Slice Architecture. Each feature is self contained in its own folder. Infrastructure is shared across slices but has no business logic.
 
 ---
 
