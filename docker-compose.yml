@@ -1,0 +1,52 @@
+services:
+  telemetry-db:
+    image: clickhouse/clickhouse-server:latest
+    container_name: global_telemetry_db
+    ports:
+      - "9000:9000"
+      - "8123:8123"
+    volumes:
+      - ch_data:/var/lib/clickhouse
+      - ./clickhouse-init.sql:/docker-entrypoint-initdb.d/init.sql
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    restart: always
+
+  telemetry-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: global_telemetry_api
+    ports:
+      - "5000:5000"
+    environment:
+      - ASPNETCORE_URLS=http://+:5000
+      - TelemetryEngine__ClickHouseConnectionString=Host=telemetry-db;Port=9000;Database=nealytics_core;User=default;Password=;
+      - TelemetryEngine__WriteAheadLogDirectory=/app/logs/
+      - TelemetryEngine__AllowedProjectKeys=neavents:projkey123,authhub:projkey456,ita:projkey789
+      - TelemetryEngine__JwtSymmetricKey=replace_this_please
+      - TelemetryEngine__MaxRequestBodyBytes=1048576
+      - TelemetryEngine__MaxQueryLimit=10000
+      - TelemetryEngine__MemoryChannelCapacity=100000
+      - TelemetryEngine__DatabaseBatchCommitSize=10000
+      - TelemetryEngine__ForceFlushIntervalSeconds=3
+      - TelemetryEngine__RateLimitPermitCount=1000
+      - TelemetryEngine__RateLimitWindowSeconds=10
+      - TelemetryEngine__RateLimitQueueSize=500
+      - TelemetryEngine__CorsAllowedOrigins=
+      - TelemetryEngine__JwtClockSkewSeconds=30
+      - TelemetryEngine__MaxInsertRetries=5
+      - TelemetryEngine__RetryBackoffCeilingMs=30000
+      - TelemetryEngine__DefaultSessionQueryRangeHours=24
+      - TelemetryEngine__ConnectionPoolSize=16
+    volumes:
+      - wal_logs:/app/logs/
+    depends_on:
+      - telemetry-db
+    restart: always
+
+volumes:
+  ch_data:
+  wal_logs:
