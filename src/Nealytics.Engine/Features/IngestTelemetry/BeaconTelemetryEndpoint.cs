@@ -56,10 +56,10 @@ public static class BeaconTelemetryEndpoint
                         context.RequestAborted))
                 {
                     if (payload is null
-                        || payload.ProjectId.Length == 0
-                        || payload.TenantId.Length == 0
-                        || payload.SessionId.Length == 0
-                        || payload.EventType.Length == 0)
+                        || string.IsNullOrEmpty(payload.ProjectId)
+                        || string.IsNullOrEmpty(payload.TenantId)
+                        || string.IsNullOrEmpty(payload.SessionId)
+                        || string.IsNullOrEmpty(payload.EventType))
                     {
                         continue;
                     }

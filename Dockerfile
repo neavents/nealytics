@@ -14,8 +14,9 @@ RUN dotnet publish src/Nealytics.Engine/Nealytics.Engine.csproj \
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-preview AS runtime
 WORKDIR /app
 
-RUN addgroup --system nealytics && adduser --system --ingroup nealytics nealytics
-RUN mkdir -p /app/logs && chown -R nealytics:nealytics /app/logs
+RUN useradd -r nealytics 2>/dev/null || true && \
+    mkdir -p /app/logs && \
+    (chown -R nealytics:nealytics /app/logs 2>/dev/null || true)
 
 COPY --from=build /app/publish .
 

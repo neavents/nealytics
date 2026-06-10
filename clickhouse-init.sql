@@ -1,5 +1,7 @@
-CREATE DATABASE IF NOT EXISTS nealytics_core;
+-- clickhouse 25 needs this
+CREATE USER IF NOT EXISTS default IDENTIFIED WITH no_password;
 
+CREATE DATABASE IF NOT EXISTS nealytics_core;
 CREATE TABLE IF NOT EXISTS nealytics_core.global_events
 (
     event_id UUID,

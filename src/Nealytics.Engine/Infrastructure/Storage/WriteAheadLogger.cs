@@ -82,7 +82,7 @@ public sealed class WriteAheadLogger : IAsyncDisposable
         }
     }
 
-    public async Task TruncateIfSafeAsync()
+    public async Task TruncateIfAllCommittedAsync(Func<bool> allCommitted)
     {
         if (Interlocked.Read(ref _appendedBytesSinceLastTruncate) == 0)
         {
@@ -92,6 +92,11 @@ public sealed class WriteAheadLogger : IAsyncDisposable
         await _lock.WaitAsync();
         try
         {
+            if (!allCommitted())
+            {
+                return;
+            }
+
             _fileStream.SetLength(0);
             await _fileStream.FlushAsync();
             Interlocked.Exchange(ref _appendedBytesSinceLastTruncate, 0);
@@ -102,7 +107,7 @@ public sealed class WriteAheadLogger : IAsyncDisposable
         }
     }
 
-    public IReadOnlyList<GlobalTelemetryPayload> ReplayUncommitted()
+    public async Task<IReadOnlyList<GlobalTelemetryPayload>> ReplayUncommittedAsync()
     {
         List<GlobalTelemetryPayload> recovered = new List<GlobalTelemetryPayload>();
         string readPath = _logFilePath;
@@ -115,7 +120,7 @@ public sealed class WriteAheadLogger : IAsyncDisposable
         using FileStream readStream = new FileStream(readPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         using StreamReader reader = new StreamReader(readStream);
 
-        while (reader.ReadLine() is { } line)
+        while (await reader.ReadLineAsync() is { } line)
         {
             if (line.Length == 0)
             {
@@ -129,9 +134,10 @@ public sealed class WriteAheadLogger : IAsyncDisposable
                     TelemetryAotContext.Default.GlobalTelemetryPayload);
 
                 if (payload is not null
-                    && payload.ProjectId.Length > 0
-                    && payload.TenantId.Length > 0
-                    && payload.SessionId.Length > 0)
+                    && !string.IsNullOrEmpty(payload.ProjectId)
+                    && !string.IsNullOrEmpty(payload.TenantId)
+                    && !string.IsNullOrEmpty(payload.SessionId)
+                    && !string.IsNullOrEmpty(payload.EventType))
                 {
                     recovered.Add(payload);
                 }
@@ -140,7 +146,6 @@ public sealed class WriteAheadLogger : IAsyncDisposable
             {
             }
         }
-
         return recovered;
     }
 

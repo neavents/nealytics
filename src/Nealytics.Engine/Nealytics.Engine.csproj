@@ -22,4 +22,9 @@
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Nealytics.Engine.Tests.Unit" />
+    <InternalsVisibleTo Include="Nealytics.Engine.Tests.Integration" />
+  </ItemGroup>
+
 </Project>

@@ -76,10 +76,10 @@ public sealed partial class GetSessionAnalyticsQuery
 
             while (await reader.ReadAsync(cancellationToken))
             {
-                DateTime firstSeen = reader.GetDateTime(1);
-                DateTime lastSeen = reader.GetDateTime(2);
+                DateTime firstSeen = DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc);
+                DateTime lastSeen = DateTime.SpecifyKind(reader.GetDateTime(2), DateTimeKind.Utc);
                 double durationSeconds = (lastSeen - firstSeen).TotalSeconds;
-                int eventCount = Convert.ToInt32(reader.GetValue(3));
+                long eventCount = Convert.ToInt64(reader.GetValue(3));
 
                 SessionSummaryItem item = new SessionSummaryItem
                 {
