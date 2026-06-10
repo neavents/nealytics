@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build
+        run: dotnet build --nologo
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Unit tests
+        run: dotnet test tests/Nealytics.Engine.Tests.Unit --no-build --verbosity normal
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: build
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:latest
+        ports:
+          - 9000:9000
+          - 8123:8123
+        env:
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: ""
+        options: >-
+          --ulimit nofile=262144:262144
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Init ClickHouse schema
+        run: |
+          docker exec ${{ job.services.clickhouse.id }} clickhouse-client -q "
+            CREATE USER IF NOT EXISTS default IDENTIFIED WITH no_password;
+            CREATE DATABASE IF NOT EXISTS nealytics_core;
+            CREATE TABLE IF NOT EXISTS nealytics_core.global_events
+            (
+                event_id UUID,
+                project_id LowCardinality(String),
+                tenant_id String,
+                session_id String,
+                event_type LowCardinality(String),
+                item_id Nullable(String),
+                metadata_json String CODEC(ZSTD(1)),
+                timestamp DateTime64(3, 'UTC')
+            )
+            ENGINE = MergeTree()
+            ORDER BY (project_id, tenant_id, event_type, timestamp)
+            SETTINGS index_granularity = 8192;
+          "
+
+      - name: Integration tests
+        env:
+          TelemetryEngine__ClickHouseConnectionString: "Host=127.0.0.1;Port=9000;Database=nealytics_core;User=default;Password=;"
+          TelemetryEngine__JwtSymmetricKey: "integration-test-key-at-least-32-bytes-long!!"
+          TelemetryEngine__AllowedProjectKeys: "test-key-1,test-key-2"
+          TelemetryEngine__WriteAheadLogDirectory: "/tmp/nealytics-ci-wal/"
+        run: dotnet test tests/Nealytics.Engine.Tests.Integration --no-build --verbosity normal

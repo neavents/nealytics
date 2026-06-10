@@ -23,6 +23,14 @@ public sealed partial class GetProjectTimelineQuery
         "ORDER BY timestamp DESC " +
         "LIMIT {limit:Int32}";
 
+    private const string SqlCommandTextWithCursor =
+        "SELECT event_id, session_id, event_type, item_id, metadata_json, timestamp " +
+        "FROM nealytics_core.global_events " +
+        "WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String} " +
+        "AND timestamp < {cursor:DateTime} " +
+        "ORDER BY timestamp DESC " +
+        "LIMIT {limit:Int32}";
+
     public GetProjectTimelineQuery(
         ClickHouseConnectionFactory connectionFactory,
         ILogger<GetProjectTimelineQuery> logger)
@@ -39,6 +47,7 @@ public sealed partial class GetProjectTimelineQuery
         string projectId,
         string tenantId,
         int limit,
+        DateTime? cursor,
         CancellationToken cancellationToken)
     {
         using Activity? activity = TelemetryDiagnostics.Source.StartActivity("GetProjectTimelineQuery.Execute");
@@ -56,14 +65,16 @@ public sealed partial class GetProjectTimelineQuery
                 await _connectionFactory.AcquireAsync(cancellationToken);
 
             await using ClickHouseCommand command = lease.Connection.CreateCommand();
-            command.CommandText = SqlCommandText;
+            command.CommandText = cursor.HasValue ? SqlCommandTextWithCursor : SqlCommandText;
 
-            ClickHouseParameter projectParam = new ClickHouseParameter { ParameterName = "projectId", Value = projectId };
-            ClickHouseParameter tenantParam = new ClickHouseParameter { ParameterName = "tenantId", Value = tenantId };
-            ClickHouseParameter limitParam = new ClickHouseParameter { ParameterName = "limit", Value = limit };
-            command.Parameters.Add(projectParam);
-            command.Parameters.Add(tenantParam);
-            command.Parameters.Add(limitParam);
+            command.Parameters.Add(new ClickHouseParameter { ParameterName = "projectId", Value = projectId });
+            command.Parameters.Add(new ClickHouseParameter { ParameterName = "tenantId", Value = tenantId });
+            command.Parameters.Add(new ClickHouseParameter { ParameterName = "limit", Value = limit });
+
+            if (cursor.HasValue)
+            {
+                command.Parameters.Add(new ClickHouseParameter { ParameterName = "cursor", Value = cursor.Value });
+            }
 
             await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
@@ -78,7 +89,7 @@ public sealed partial class GetProjectTimelineQuery
                     EventType = reader.GetString(2),
                     ItemId = reader.IsDBNull(3) ? null : reader.GetString(3),
                     MetadataJson = reader.GetString(4),
-                    Timestamp = reader.GetDateTime(5)
+                    Timestamp = DateTime.SpecifyKind(reader.GetDateTime(5), DateTimeKind.Utc)
                 };
                 events.Add(item);
             }

@@ -1,6 +1,7 @@
 namespace Nealytics.Engine.Features.GetSessionAnalytics;
 
 using System;
+using System.Globalization;
 using System.Security.Claims;
 using System.Threading;
 using Microsoft.AspNetCore.Builder;
@@ -29,6 +30,11 @@ public static class GetSessionAnalyticsEndpoint
                 return Results.Forbid();
             }
 
+            if (tokenProjectId.Length > 256 || tokenTenantId.Length > 256)
+            {
+                return Results.BadRequest("Project ID and Tenant ID must not exceed 256 characters.");
+            }
+
             TelemetryEngineOptions engineOptions = options.Value;
             int limit = 100;
 
@@ -43,15 +49,22 @@ public static class GetSessionAnalyticsEndpoint
             DateTime toUtc = now;
 
             StringValues fromValues = context.Request.Query["from"];
-            if (fromValues.Count > 0 && DateTime.TryParse(fromValues[0], out DateTime parsedFrom))
+            if (fromValues.Count > 0 && DateTime.TryParse(fromValues[0], CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal, out DateTime parsedFrom))
             {
                 fromUtc = parsedFrom;
             }
 
             StringValues toValues = context.Request.Query["to"];
-            if (toValues.Count > 0 && DateTime.TryParse(toValues[0], out DateTime parsedTo))
+            if (toValues.Count > 0 && DateTime.TryParse(toValues[0], CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal, out DateTime parsedTo))
             {
                 toUtc = parsedTo;
+            }
+
+            if (fromUtc > toUtc)
+            {
+                return Results.BadRequest("'from' must be before or equal to 'to'.");
             }
 
             SessionAnalyticsResponse response =

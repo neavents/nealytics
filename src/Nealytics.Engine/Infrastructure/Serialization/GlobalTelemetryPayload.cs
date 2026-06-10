@@ -8,14 +8,14 @@ using Nealytics.Engine.Features.GetSessionAnalytics;
 
 public sealed class GlobalTelemetryPayload
 {
-    public Guid EventId { get; init; } = Guid.NewGuid();
+    public Guid EventId { get; set; } = Guid.NewGuid();
     public string ProjectId { get; init; } = string.Empty;
     public string TenantId { get; init; } = string.Empty;
     public string SessionId { get; init; } = string.Empty;
     public string EventType { get; init; } = string.Empty;
     public string? ItemId { get; init; }
-    public string MetadataJson { get; init; } = "{}";
-    public DateTime Timestamp { get; init; } = DateTime.UtcNow;
+    public string MetadataJson { get; set; } = "{}";
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 }
 
 [JsonSourceGenerationOptions(

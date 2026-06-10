@@ -8,5 +8,5 @@ public sealed class SessionSummaryItem
     public DateTime FirstSeen { get; set; }
     public DateTime LastSeen { get; set; }
     public double DurationSeconds { get; set; }
-    public int EventCount { get; set; }
+    public long EventCount { get; set; }
 }

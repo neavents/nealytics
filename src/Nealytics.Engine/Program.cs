@@ -1,5 +1,6 @@
 using System;
 using System.Text;
+using System.Threading;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
@@ -18,6 +19,7 @@ using Nealytics.Engine.Infrastructure.Diagnostics;
 using Nealytics.Engine.Infrastructure.Security;
 using Nealytics.Engine.Infrastructure.Serialization;
 using Nealytics.Engine.Infrastructure.Storage;
+using Octonica.ClickHouseClient;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using Serilog;
@@ -137,6 +139,21 @@ app.MapTelemetryIngestion();
 app.MapBeaconIngestion();
 app.MapGetProjectTimeline();
 app.MapGetSessionAnalytics();
-app.MapGet("/health", () => Results.Ok());
+app.MapGet("/health", async (ClickHouseConnectionFactory connectionFactory) =>
+{
+    try
+    {
+        await using PooledClickHouseConnection lease =
+            await connectionFactory.AcquireAsync(CancellationToken.None);
+        await using ClickHouseCommand cmd = lease.Connection.CreateCommand();
+        cmd.CommandText = "SELECT 1";
+        await cmd.ExecuteScalarAsync(CancellationToken.None);
+        return Results.Ok();
+    }
+    catch (Exception)
+    {
+        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    }
+});
 
 app.Run();

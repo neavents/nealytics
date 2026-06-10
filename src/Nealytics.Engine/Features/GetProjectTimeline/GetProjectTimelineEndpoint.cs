@@ -1,6 +1,7 @@
 namespace Nealytics.Engine.Features.GetProjectTimeline;
 
 using System;
+using System.Globalization;
 using System.Security.Claims;
 using System.Threading;
 using Microsoft.AspNetCore.Builder;
@@ -23,10 +24,14 @@ public static class GetProjectTimelineEndpoint
             ClaimsPrincipal user = context.User;
             string? tokenProjectId = user.FindFirst("project_id")?.Value;
             string? tokenTenantId = user.FindFirst("tenant_id")?.Value;
-
             if (string.IsNullOrWhiteSpace(tokenProjectId) || string.IsNullOrWhiteSpace(tokenTenantId))
             {
                 return Results.Forbid();
+            }
+
+            if (tokenProjectId.Length > 256 || tokenTenantId.Length > 256)
+            {
+                return Results.BadRequest("Project ID and Tenant ID must not exceed 256 characters.");
             }
 
             int maxLimit = options.Value.MaxQueryLimit;
@@ -38,8 +43,16 @@ public static class GetProjectTimelineEndpoint
                 limit = Math.Clamp(parsedLimit, 1, maxLimit);
             }
 
+            DateTime? cursor = null;
+            if (context.Request.Query.TryGetValue("before", out StringValues beforeValues)
+                && DateTime.TryParse(beforeValues[0], CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind, out DateTime parsedCursor))
+            {
+                cursor = parsedCursor;
+            }
+
             ProjectTimelineResponse response =
-                await query.ExecuteAsync(tokenProjectId, tokenTenantId, limit, cancellationToken);
+                await query.ExecuteAsync(tokenProjectId, tokenTenantId, limit, cursor, cancellationToken);
 
             return Results.Ok(response);
         })
