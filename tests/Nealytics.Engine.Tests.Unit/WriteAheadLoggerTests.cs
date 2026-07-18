@@ -140,14 +140,65 @@ public class WriteAheadLoggerTests : UnitTestBase, IAsyncDisposable
         recovered[0].ProjectId.Should().Be("good");
     }
 
+    private static GlobalTelemetryPayload Event(string projectId = "p") =>
+        new GlobalTelemetryPayload { ProjectId = projectId, TenantId = "t", SessionId = "s", EventType = "e" };
+
     [Fact]
-    public async Task TruncateIfAllCommittedAsync_Truncates_WhenConditionTrue()
+    public async Task AcknowledgeCommitAsync_Truncates_WhenAllAppendedRecordsCommitted()
     {
         {
             await using var wal = new WriteAheadLogger(_options);
-            var payload = new GlobalTelemetryPayload { ProjectId = "p", TenantId = "t", SessionId = "s", EventType = "e" };
-            await wal.AppendAsync(payload, CancellationToken.None);
-            await wal.TruncateIfAllCommittedAsync(() => true);
+            await wal.AppendAsync(Event(), CancellationToken.None);
+            await wal.AppendAsync(Event(), CancellationToken.None);
+            wal.UncommittedRecordCount.Should().Be(2);
+
+            await wal.AcknowledgeCommitAsync(2);
+
+            wal.UncommittedRecordCount.Should().Be(0);
+        }
+
+        var content = await File.ReadAllTextAsync(WalPath);
+        content.Should().BeEmpty("WAL is safe to truncate once every appended record is committed");
+    }
+
+    [Fact]
+    public async Task AcknowledgeCommitAsync_PreservesWal_WhenUncommittedRecordsRemain()
+    {
+        // This is the core of the fix: a batch of already-published events commits,
+        // but a later event (still only in the WAL) MUST survive so a crash cannot lose it.
+        {
+            await using var wal = new WriteAheadLogger(_options);
+            await wal.AppendAsync(Event("committed-1"), CancellationToken.None);
+            await wal.AppendAsync(Event("committed-2"), CancellationToken.None);
+            // Event that is durably in the WAL but not part of the committed batch yet
+            // (mirrors the append-before-publish window in the ingestion endpoint).
+            await wal.AppendAsync(Event("in-flight"), CancellationToken.None);
+
+            // Only the two already-published events are acknowledged as committed.
+            await wal.AcknowledgeCommitAsync(2);
+
+            wal.UncommittedRecordCount.Should().Be(1);
+        }
+
+        var content = await File.ReadAllTextAsync(WalPath);
+        content.Should().Contain("\"in-flight\"",
+            "an uncommitted event must not be dropped from the WAL when an unrelated batch commits");
+    }
+
+    [Fact]
+    public async Task AcknowledgeCommitAsync_Truncates_OnceRemainingRecordsAlsoCommit()
+    {
+        {
+            await using var wal = new WriteAheadLogger(_options);
+            await wal.AppendAsync(Event(), CancellationToken.None);
+            await wal.AppendAsync(Event(), CancellationToken.None);
+            await wal.AppendAsync(Event(), CancellationToken.None);
+
+            await wal.AcknowledgeCommitAsync(2);
+            wal.UncommittedRecordCount.Should().Be(1);
+
+            await wal.AcknowledgeCommitAsync(1);
+            wal.UncommittedRecordCount.Should().Be(0);
         }
 
         var content = await File.ReadAllTextAsync(WalPath);
@@ -155,25 +206,128 @@ public class WriteAheadLoggerTests : UnitTestBase, IAsyncDisposable
     }
 
     [Fact]
-    public async Task TruncateIfAllCommittedAsync_Skips_WhenConditionFalse()
+    public async Task AcknowledgeCommitAsync_NoOps_WhenNothingAppended()
     {
-        {
-            await using var wal = new WriteAheadLogger(_options);
-            var payload = new GlobalTelemetryPayload { ProjectId = "p", TenantId = "t", SessionId = "s", EventType = "e" };
-            await wal.AppendAsync(payload, CancellationToken.None);
-            await wal.TruncateIfAllCommittedAsync(() => false);
-        }
-
-        var content = await File.ReadAllTextAsync(WalPath);
-        content.Should().Contain("\"p\"", "WAL should not be truncated when condition is false");
+        await using var wal = new WriteAheadLogger(_options);
+        await wal.AcknowledgeCommitAsync(0);
+        await wal.AcknowledgeCommitAsync(5);
+        wal.UncommittedRecordCount.Should().Be(0);
     }
 
     [Fact]
-    public async Task TruncateIfAllCommittedAsync_NoOps_WhenNothingAppended()
+    public async Task Startup_SealsExistingLog_AndNewAppendsSurviveRecoveryTruncation()
+    {
+        // Process 1 crashed with an un-flushed event in the WAL.
+        await WriteAndCloseAsync(Event("crashed"));
+
+        // Process 2 boots: the old log is sealed for replay, a fresh active log is opened,
+        // and a NEW event arrives concurrently while recovery is still in progress.
+        {
+            await using var process2 = new WriteAheadLogger(_options);
+            process2.HasSealedSegment.Should().BeTrue("the pre-existing WAL must be sealed for recovery");
+
+            await process2.AppendAsync(Event("live"), CancellationToken.None);
+
+            var recovered = await process2.ReplayUncommittedAsync();
+            recovered.Should().ContainSingle().Which.ProjectId.Should().Be("crashed");
+
+            // Recovery finishes and deletes ONLY the sealed segment.
+            await process2.DeleteSealedSegmentAsync();
+            process2.HasSealedSegment.Should().BeFalse();
+
+            // The concurrently-appended live event was never committed, so it stays in the active log.
+            process2.UncommittedRecordCount.Should().Be(1);
+        }
+        // process2 crashes (dispose flushes the active log to disk).
+
+        // Process 3 boots and must recover the live event that process 2 never committed.
+        await using var process3 = new WriteAheadLogger(_options);
+        var recoveredAfterSecondCrash = await process3.ReplayUncommittedAsync();
+
+        recoveredAfterSecondCrash.Should().ContainSingle(
+            "the live event appended during recovery must not be lost across a second crash")
+            .Which.ProjectId.Should().Be("live");
+    }
+
+    [Fact]
+    public async Task DeleteSealedSegmentAsync_RemovesReplayFile()
+    {
+        await WriteAndCloseAsync(Event());
+        await using var wal = new WriteAheadLogger(_options);
+
+        wal.HasSealedSegment.Should().BeTrue();
+        await wal.DeleteSealedSegmentAsync();
+        wal.HasSealedSegment.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DeleteSealedSegmentAsync_NoOps_WhenNoSealedSegment()
     {
         await using var wal = new WriteAheadLogger(_options);
-        await wal.TruncateIfAllCommittedAsync(() => true);
-        // Should not throw — just no-op
+        wal.HasSealedSegment.Should().BeFalse();
+
+        await wal.DeleteSealedSegmentAsync();
+
+        wal.HasSealedSegment.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Startup_WithLeftoverSealedSegment_MergesActiveLogIntoIt()
+    {
+        Directory.CreateDirectory(_tempDir);
+        string sealedPath = Path.Combine(_tempDir, "telemetry_wal.replay");
+
+        await File.WriteAllTextAsync(sealedPath,
+            "{\"eventId\":\"" + Guid.NewGuid() + "\",\"projectId\":\"from-sealed\",\"tenantId\":\"t\",\"sessionId\":\"s\",\"eventType\":\"e\",\"metadataJson\":\"{}\",\"timestamp\":\"2026-07-10T00:00:00Z\"}\n");
+
+        await File.WriteAllTextAsync(WalPath,
+            "{\"eventId\":\"" + Guid.NewGuid() + "\",\"projectId\":\"from-active\",\"tenantId\":\"t\",\"sessionId\":\"s\",\"eventType\":\"e\",\"metadataJson\":\"{}\",\"timestamp\":\"2026-07-10T00:00:00Z\"}\n");
+
+        await using var wal = new WriteAheadLogger(_options);
+        var recovered = await wal.ReplayUncommittedAsync();
+
+        recovered.Should().HaveCount(2, "a leftover sealed segment must be merged with the active log, not dropped");
+        recovered.Select(r => r.ProjectId).Should().Contain(new[] { "from-sealed", "from-active" });
+        File.Exists(WalPath).Should().BeTrue();
+        new FileInfo(WalPath).Length.Should().Be(0, "the active log is consumed into the sealed segment");
+    }
+
+    [Fact]
+    public async Task ReplayUncommittedAsync_SkipsBlankLines()
+    {
+        Directory.CreateDirectory(_tempDir);
+        await File.WriteAllTextAsync(WalPath,
+            "{\"eventId\":\"" + Guid.NewGuid() + "\",\"projectId\":\"a\",\"tenantId\":\"t\",\"sessionId\":\"s\",\"eventType\":\"e\",\"metadataJson\":\"{}\",\"timestamp\":\"2026-07-10T00:00:00Z\"}\n" +
+            "\n" +
+            "{\"eventId\":\"" + Guid.NewGuid() + "\",\"projectId\":\"b\",\"tenantId\":\"t\",\"sessionId\":\"s\",\"eventType\":\"e\",\"metadataJson\":\"{}\",\"timestamp\":\"2026-07-10T00:00:00Z\"}\n");
+
+        await using var wal = new WriteAheadLogger(_options);
+        var recovered = await wal.ReplayUncommittedAsync();
+
+        recovered.Should().HaveCount(2, "blank lines between records must be skipped, not treated as corrupt");
+    }
+
+    [Fact]
+    public async Task ConcurrentAppends_AllCounted_AndDurable_UnderContention()
+    {
+        {
+            await using var wal = new WriteAheadLogger(_options);
+
+            var tasks = new Task[200];
+            for (int i = 0; i < tasks.Length; i++)
+            {
+                tasks[i] = wal.AppendAsync(Event($"p{i}"), CancellationToken.None);
+            }
+            await Task.WhenAll(tasks);
+
+            wal.UncommittedRecordCount.Should().Be(200,
+                "every concurrent append must be counted exactly once");
+        }
+        // Dispose flushes the active log; a fresh instance replays it to prove durability.
+
+        await using var reopened = new WriteAheadLogger(_options);
+        var recovered = await reopened.ReplayUncommittedAsync();
+        recovered.Should().HaveCount(200, "every concurrent append must produce exactly one durable record");
     }
 
     [Fact]

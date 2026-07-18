@@ -30,7 +30,7 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Unit tests
-        run: dotnet test tests/Nealytics.Engine.Tests.Unit --no-build --verbosity normal
+        run: dotnet test tests/Nealytics.Engine.Tests.Unit --verbosity normal
 
   integration-tests:
     runs-on: ubuntu-latest
@@ -42,8 +42,7 @@ jobs:
           - 9000:9000
           - 8123:8123
         env:
-          CLICKHOUSE_USER: default
-          CLICKHOUSE_PASSWORD: ""
+          CLICKHOUSE_SKIP_USER_SETUP: 1
         options: >-
           --ulimit nofile=262144:262144
 
@@ -54,11 +53,20 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Wait for ClickHouse
+        run: |
+          for i in $(seq 1 60); do
+            if docker exec ${{ job.services.clickhouse.id }} clickhouse-client -q "SELECT 1" >/dev/null 2>&1; then
+              echo "ClickHouse ready after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "ClickHouse did not become ready"; exit 1
+
       - name: Init ClickHouse schema
         run: |
+          docker exec ${{ job.services.clickhouse.id }} clickhouse-client -q "CREATE DATABASE IF NOT EXISTS nealytics_core"
           docker exec ${{ job.services.clickhouse.id }} clickhouse-client -q "
-            CREATE USER IF NOT EXISTS default IDENTIFIED WITH no_password;
-            CREATE DATABASE IF NOT EXISTS nealytics_core;
             CREATE TABLE IF NOT EXISTS nealytics_core.global_events
             (
                 event_id UUID,
@@ -70,9 +78,10 @@ jobs:
                 metadata_json String CODEC(ZSTD(1)),
                 timestamp DateTime64(3, 'UTC')
             )
-            ENGINE = MergeTree()
-            ORDER BY (project_id, tenant_id, event_type, timestamp)
-            SETTINGS index_granularity = 8192;
+            ENGINE = ReplacingMergeTree()
+            ORDER BY (project_id, tenant_id, event_type, timestamp, event_id)
+            TTL toDateTime(timestamp) + INTERVAL 90 DAY DELETE
+            SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
           "
 
       - name: Integration tests
@@ -81,4 +90,4 @@ jobs:
           TelemetryEngine__JwtSymmetricKey: "integration-test-key-at-least-32-bytes-long!!"
           TelemetryEngine__AllowedProjectKeys: "test-key-1,test-key-2"
           TelemetryEngine__WriteAheadLogDirectory: "/tmp/nealytics-ci-wal/"
-        run: dotnet test tests/Nealytics.Engine.Tests.Integration --no-build --verbosity normal
+        run: dotnet test tests/Nealytics.Engine.Tests.Integration --verbosity normal

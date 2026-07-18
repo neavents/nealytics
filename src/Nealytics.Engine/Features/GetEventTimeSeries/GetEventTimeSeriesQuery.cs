@@ -1,4 +1,4 @@
-namespace Nealytics.Engine.Features.GetProjectTimeline;
+namespace Nealytics.Engine.Features.GetEventTimeSeries;
 
 using System;
 using System.Collections.Generic;
@@ -12,42 +12,43 @@ using Nealytics.Engine.Infrastructure.Diagnostics;
 using Nealytics.Engine.Infrastructure.Storage;
 using Octonica.ClickHouseClient;
 
-public sealed partial class GetProjectTimelineQuery
+public sealed partial class GetEventTimeSeriesQuery
 {
     private readonly ClickHouseConnectionFactory _connectionFactory;
-    private readonly ILogger<GetProjectTimelineQuery> _logger;
+    private readonly ILogger<GetEventTimeSeriesQuery> _logger;
 
-    public GetProjectTimelineQuery(
+    public GetEventTimeSeriesQuery(
         ClickHouseConnectionFactory connectionFactory,
-        ILogger<GetProjectTimelineQuery> logger)
+        ILogger<GetEventTimeSeriesQuery> logger)
     {
         _connectionFactory = connectionFactory;
         _logger = logger;
     }
 
-    [LoggerMessage(EventId = 2001, Level = LogLevel.Information,
-        Message = "Executing timeline query for Project: {ProjectId} / Tenant: {TenantId}.")]
-    private static partial void LogQueryStarted(ILogger logger, string projectId, string tenantId);
+    [LoggerMessage(EventId = 4001, Level = LogLevel.Information,
+        Message = "Executing time-series query for Project: {ProjectId} / Tenant: {TenantId} at {Interval} granularity.")]
+    private static partial void LogQueryStarted(ILogger logger, string projectId, string tenantId, string interval);
 
     internal static (string Sql, IReadOnlyList<KeyValuePair<string, object?>> Parameters) BuildQuery(
-        in TimelineQueryRequest request)
+        in EventTimeSeriesRequest request)
     {
-        List<KeyValuePair<string, object?>> parameters = new List<KeyValuePair<string, object?>>(7)
+        string bucketFunction = TimeSeriesIntervalParser.ToBucketFunction(request.Interval);
+
+        List<KeyValuePair<string, object?>> parameters = new List<KeyValuePair<string, object?>>(6)
         {
             new KeyValuePair<string, object?>("projectId", request.ProjectId),
-            new KeyValuePair<string, object?>("tenantId", request.TenantId)
+            new KeyValuePair<string, object?>("tenantId", request.TenantId),
+            new KeyValuePair<string, object?>("fromTimestamp", request.From),
+            new KeyValuePair<string, object?>("toTimestamp", request.To)
         };
 
-        StringBuilder sql = new StringBuilder(
-            "SELECT event_id, session_id, event_type, item_id, metadata_json, timestamp " +
-            "FROM nealytics_core.global_events " +
-            "WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String}");
-
-        if (request.Before.HasValue)
-        {
-            sql.Append(" AND timestamp < {cursor:DateTime64}");
-            parameters.Add(new KeyValuePair<string, object?>("cursor", request.Before.Value));
-        }
+        StringBuilder sql = new StringBuilder(256);
+        sql.Append("SELECT ");
+        sql.Append(bucketFunction);
+        sql.Append("(timestamp) AS bucket, count() AS event_count ");
+        sql.Append("FROM nealytics_core.global_events ");
+        sql.Append("WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String} ");
+        sql.Append("AND timestamp >= {fromTimestamp:DateTime64} AND timestamp <= {toTimestamp:DateTime64}");
 
         if (!string.IsNullOrEmpty(request.EventType))
         {
@@ -55,35 +56,24 @@ public sealed partial class GetProjectTimelineQuery
             parameters.Add(new KeyValuePair<string, object?>("eventType", request.EventType));
         }
 
-        if (!string.IsNullOrEmpty(request.SessionId))
-        {
-            sql.Append(" AND session_id = {sessionId:String}");
-            parameters.Add(new KeyValuePair<string, object?>("sessionId", request.SessionId));
-        }
-
-        if (!string.IsNullOrEmpty(request.ItemId))
-        {
-            sql.Append(" AND item_id = {itemId:String}");
-            parameters.Add(new KeyValuePair<string, object?>("itemId", request.ItemId));
-        }
-
-        sql.Append(" ORDER BY timestamp DESC LIMIT {limit:Int32}");
+        sql.Append(" GROUP BY bucket ORDER BY bucket ASC LIMIT {limit:Int32}");
         parameters.Add(new KeyValuePair<string, object?>("limit", request.Limit));
 
         return (sql.ToString(), parameters);
     }
 
-    public async Task<ProjectTimelineResponse> ExecuteAsync(
-        TimelineQueryRequest request,
+    public async Task<EventTimeSeriesResponse> ExecuteAsync(
+        EventTimeSeriesRequest request,
         CancellationToken cancellationToken)
     {
-        using Activity? activity = TelemetryDiagnostics.Source.StartActivity("GetProjectTimelineQuery.Execute");
+        using Activity? activity = TelemetryDiagnostics.Source.StartActivity("GetEventTimeSeriesQuery.Execute");
         activity?.SetTag("db.system", "clickhouse");
         activity?.SetTag("db.operation", "select");
         activity?.SetTag("neavents.project_id", request.ProjectId);
         activity?.SetTag("neavents.tenant_id", request.TenantId);
 
-        LogQueryStarted(_logger, request.ProjectId, request.TenantId);
+        string intervalWire = TimeSeriesIntervalParser.ToWireFormat(request.Interval);
+        LogQueryStarted(_logger, request.ProjectId, request.TenantId, intervalWire);
         long startTicks = Stopwatch.GetTimestamp();
 
         try
@@ -107,30 +97,33 @@ public sealed partial class GetProjectTimelineQuery
 
             await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
-            List<GlobalTimelineItem> events = new List<GlobalTimelineItem>(request.Limit);
+            List<EventTimeSeriesPoint> points = new List<EventTimeSeriesPoint>(request.Limit);
+            long totalCount = 0;
 
             while (await reader.ReadAsync(cancellationToken))
             {
-                GlobalTimelineItem item = new GlobalTimelineItem
+                long bucketCount = Convert.ToInt64(reader.GetValue(1));
+                EventTimeSeriesPoint point = new EventTimeSeriesPoint
                 {
-                    EventId = reader.GetGuid(0),
-                    SessionId = reader.GetString(1),
-                    EventType = reader.GetString(2),
-                    ItemId = reader.IsDBNull(3) ? null : reader.GetString(3),
-                    MetadataJson = reader.GetString(4),
-                    Timestamp = DateTime.SpecifyKind(reader.GetDateTime(5), DateTimeKind.Utc)
+                    Bucket = DateTime.SpecifyKind(reader.GetDateTime(0), DateTimeKind.Utc),
+                    Count = bucketCount
                 };
-                events.Add(item);
+                points.Add(point);
+                totalCount += bucketCount;
             }
 
-            activity?.SetTag("neavents.records_returned", events.Count);
+            activity?.SetTag("neavents.buckets_returned", points.Count);
             TelemetryDiagnostics.ReadQueriesExecuted.Add(1);
 
-            return new ProjectTimelineResponse
+            return new EventTimeSeriesResponse
             {
                 ProjectId = request.ProjectId,
                 TenantId = request.TenantId,
-                Events = events
+                Interval = intervalWire,
+                From = request.From,
+                To = request.To,
+                TotalCount = totalCount,
+                Points = points
             };
         }
         catch (Exception ex)
