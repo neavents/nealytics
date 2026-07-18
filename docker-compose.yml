@@ -5,6 +5,8 @@ services:
     ports:
       - "9000:9000"
       - "8123:8123"
+    environment:
+      - CLICKHOUSE_SKIP_USER_SETUP=1
     volumes:
       - ch_data:/var/lib/clickhouse
       - ./clickhouse-init.sql:/docker-entrypoint-initdb.d/init.sql

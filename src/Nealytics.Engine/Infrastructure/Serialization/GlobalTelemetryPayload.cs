@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using System.Collections.Generic;
 using Nealytics.Engine.Features.GetProjectTimeline;
 using Nealytics.Engine.Features.GetSessionAnalytics;
+using Nealytics.Engine.Features.GetEventTimeSeries;
 
 public sealed class GlobalTelemetryPayload
 {
@@ -30,6 +31,9 @@ public sealed class GlobalTelemetryPayload
 [JsonSerializable(typeof(SessionAnalyticsResponse))]
 [JsonSerializable(typeof(SessionSummaryItem))]
 [JsonSerializable(typeof(List<SessionSummaryItem>))]
+[JsonSerializable(typeof(EventTimeSeriesResponse))]
+[JsonSerializable(typeof(EventTimeSeriesPoint))]
+[JsonSerializable(typeof(List<EventTimeSeriesPoint>))]
 public partial class TelemetryAotContext : JsonSerializerContext
 {
 }

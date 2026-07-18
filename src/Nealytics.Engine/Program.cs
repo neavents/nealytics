@@ -11,6 +11,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using Nealytics.Engine.Features.BatchProcessor;
+using Nealytics.Engine.Features.GetEventTimeSeries;
 using Nealytics.Engine.Features.GetProjectTimeline;
 using Nealytics.Engine.Features.GetSessionAnalytics;
 using Nealytics.Engine.Features.IngestTelemetry;
@@ -104,10 +105,12 @@ builder.Services.AddSingleton<ClickHouseConnectionFactory>();
 builder.Services.AddSingleton<WriteAheadLogger>();
 builder.Services.AddSingleton<TelemetryChannelBroker>();
 builder.Services.AddSingleton<ApiKeyValidator>();
+builder.Services.AddSingleton<ITelemetryBatchWriter, ClickHouseBatchWriter>();
 builder.Services.AddHostedService<TelemetryBatchProcessor>();
 
 builder.Services.AddScoped<GetProjectTimelineQuery>();
 builder.Services.AddScoped<GetSessionAnalyticsQuery>();
+builder.Services.AddScoped<GetEventTimeSeriesQuery>();
 
 builder.Services.AddOpenTelemetry()
     .WithTracing(tracing => tracing
@@ -139,6 +142,7 @@ app.MapTelemetryIngestion();
 app.MapBeaconIngestion();
 app.MapGetProjectTimeline();
 app.MapGetSessionAnalytics();
+app.MapGetEventTimeSeries();
 app.MapGet("/health", async (ClickHouseConnectionFactory connectionFactory) =>
 {
     try

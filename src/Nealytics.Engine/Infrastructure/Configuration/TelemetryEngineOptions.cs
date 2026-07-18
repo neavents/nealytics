@@ -20,4 +20,5 @@ public sealed class TelemetryEngineOptions
     public int RetryBackoffCeilingMs { get; set; } = 30_000;
     public int DefaultSessionQueryRangeHours { get; set; } = 24;
     public int ConnectionPoolSize { get; set; } = 16;
+    public int WalReplayRetryDelayMs { get; set; } = 10_000;
 }
