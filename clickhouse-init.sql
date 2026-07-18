@@ -1,6 +1,3 @@
--- clickhouse 25 needs this
-CREATE USER IF NOT EXISTS default IDENTIFIED WITH no_password;
-
 CREATE DATABASE IF NOT EXISTS nealytics_core;
 CREATE TABLE IF NOT EXISTS nealytics_core.global_events
 (
@@ -13,6 +10,7 @@ CREATE TABLE IF NOT EXISTS nealytics_core.global_events
     metadata_json String CODEC(ZSTD(1)),
     timestamp DateTime64(3, 'UTC')
 )
-ENGINE = MergeTree()
-ORDER BY (project_id, tenant_id, event_type, timestamp)
-SETTINGS index_granularity = 8192;
+ENGINE = ReplacingMergeTree()
+ORDER BY (project_id, tenant_id, event_type, timestamp, event_id)
+TTL toDateTime(timestamp) + INTERVAL 90 DAY DELETE
+SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;

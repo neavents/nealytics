@@ -10,16 +10,7 @@ public class SeededE2ETests : IntegrationTestBase, IAsyncLifetime
 {
     public SeededE2ETests(TestWebApplicationFactory factory) : base(factory) { }
 
-    public async Task InitializeAsync()
-    {
-        var psi = new System.Diagnostics.ProcessStartInfo("docker", "exec nealytics-ch clickhouse-client -q \"TRUNCATE TABLE nealytics_core.global_events\"")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-        var proc = System.Diagnostics.Process.Start(psi)!;
-        await proc.WaitForExitAsync();
-    }
+    public Task InitializeAsync() => ClickHouseTestSupport.TruncateEventsAsync();
 
     public Task DisposeAsync() => Task.CompletedTask;
     [Fact]

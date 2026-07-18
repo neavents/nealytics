@@ -26,6 +26,13 @@ logs/
 appsettings.Development.json
 appsettings.Local.json
 
+# Test / coverage output
+[Tt]est[Rr]esults/
+coverage/
+*.cobertura.xml
+*.coverage
+coverage.json
+
 # OS
 .DS_Store
 Thumbs.db

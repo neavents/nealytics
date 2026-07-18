@@ -17,7 +17,7 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
             "this-is-a-test-jwt-key-at-least-32-bytes-long!!");
         Environment.SetEnvironmentVariable("TelemetryEngine__AllowedProjectKeys", "test-key-1,test-key-2");
         Environment.SetEnvironmentVariable("TelemetryEngine__ClickHouseConnectionString",
-            "Host=127.0.0.1;Port=9100;Database=nealytics_core;User=default;Password=;");
+            ClickHouseTestSupport.ConnectionString);
         Environment.SetEnvironmentVariable("TelemetryEngine__WriteAheadLogDirectory",
             Path.Combine(Path.GetTempPath(), $"nealytics_wal_int_{Guid.NewGuid():N}"));
     }

@@ -134,6 +134,45 @@ curl http://localhost:5000/api/v1/telemetry/timeline?limit=50 \
 
 Query params:
 - `limit` (default 100, max set by [`MaxQueryLimit`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs))
+- `before` (ISO 8601 timestamp) — cursor for backward pagination; returns events strictly older than this value
+- `eventType`, `sessionId`, `itemId` — optional exact-match filters (each ≤ 256 chars), applied on top of the tenant scope
+
+```bash
+curl "http://localhost:5000/api/v1/telemetry/timeline?limit=50&eventType=purchase&sessionId=abc-123" \
+  -H "Authorization: Bearer <your-jwt>"
+```
+
+### GET `/api/v1/analytics/timeseries`
+
+Bucketed event counts over time — the primitive behind most charts. Grouped with `toStartOf{Minute,Hour,Day}` inside your tenant scope.
+
+```bash
+curl "http://localhost:5000/api/v1/analytics/timeseries?from=2024-06-01T00:00:00Z&to=2024-06-08T00:00:00Z&interval=day" \
+  -H "Authorization: Bearer <your-jwt>"
+```
+
+Query params:
+- `interval` — `minute`, `hour` (default), or `day`. Any other value returns `400`.
+- `from` / `to` (ISO 8601, defaults to last 24 hours). `from` must be ≤ `to`.
+- `eventType` — optional exact-match filter
+- `limit` — max number of buckets returned (defaults to `MaxQueryLimit`)
+
+Response:
+
+```json
+{
+  "projectId": "my-app",
+  "tenantId": "tenant-1",
+  "interval": "day",
+  "from": "2024-06-01T00:00:00Z",
+  "to": "2024-06-08T00:00:00Z",
+  "totalCount": 4210,
+  "points": [
+    { "bucket": "2024-06-01T00:00:00Z", "count": 512 },
+    { "bucket": "2024-06-02T00:00:00Z", "count": 631 }
+  ]
+}
+```
 
 ### GET `/api/v1/analytics/sessions`
 
@@ -222,6 +261,7 @@ Full source: [`TelemetryEngineOptions.cs`](src/Nealytics.Engine/Infrastructure/C
 | `ForceFlushIntervalSeconds` | `3` | Max time to wait before flushing a partial batch |
 | `MaxInsertRetries` | `5` | Retry attempts on ClickHouse insert failure |
 | `RetryBackoffCeilingMs` | `30000` | Max delay between retries (exponential backoff caps here) |
+| `WalReplayRetryDelayMs` | `10000` | Delay before retrying a WAL-replay batch when ClickHouse is unavailable at startup |
 
 ### Ingestion
 
@@ -268,12 +308,10 @@ The buffer fill and file write both happen under a `SemaphoreSlim` lock. This pr
 
 ### Truncation safety
 
-There are two truncation methods:
+The WAL only deletes a record once its event is durably in ClickHouse. Two mechanisms guarantee that:
 
-- **`TruncateIfSafeAsync`** only truncates if new bytes were appended since the last truncation. This prevents accidental truncation during WAL replay (where events are read but not appended).
-- **`TruncateAsync`** unconditionally truncates. Used after WAL replay completes successfully.
-
-During normal operation, the batch processor calls `TruncateIfSafeAsync` after each successful ClickHouse insert. During WAL replay, truncation is deferred until all recovered events are committed, preventing data loss if ClickHouse is temporarily unavailable at startup.
+- **Uncommitted-record counter.** `AppendAsync` increments a counter under the WAL lock; `AcknowledgeCommitAsync(n)` decrements it by the size of a committed batch. The active log is truncated **only when the counter reaches zero** — i.e. when every record still on disk is known to be committed. This closes the race where an event that was appended (but not yet published to the channel) could be dropped by a truncation triggered by an unrelated batch.
+- **Startup segment rotation.** On construction, any pre-existing `telemetry_wal.log` is sealed to `telemetry_wal.replay` and a fresh active log is opened. Recovery replays the *sealed* segment while new ingestion writes to the *active* segment, so events arriving during recovery can never be destroyed by the recovery cleanup. The sealed segment is deleted only after every recovered event commits (retried every `WalReplayRetryDelayMs` if ClickHouse is down).
 
 ---
 
@@ -329,18 +367,20 @@ CREATE TABLE nealytics_core.global_events
     metadata_json String CODEC(ZSTD(1)),
     timestamp DateTime64(3, 'UTC')
 )
-ENGINE = MergeTree()
-ORDER BY (project_id, tenant_id, event_type, timestamp)
-SETTINGS index_granularity = 8192;
+ENGINE = ReplacingMergeTree()
+ORDER BY (project_id, tenant_id, event_type, timestamp, event_id)
+TTL toDateTime(timestamp) + INTERVAL 90 DAY DELETE
+SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
 ```
 
 Design decisions:
 
 - **`LowCardinality`** on `project_id` and `event_type` because these have few distinct values across millions of rows. ClickHouse stores them as dictionary encoded integers internally.
 - **`ZSTD(1)`** compression on `metadata_json` because JSON strings are highly compressible and this column can be large.
-- **ORDER BY** is `(project_id, tenant_id, event_type, timestamp)`. All queries filter by project and tenant first (from JWT claims), so these are the primary sort keys. Event type and timestamp come next for the most common aggregation patterns.
+- **ORDER BY** is `(project_id, tenant_id, event_type, timestamp, event_id)`. All queries filter by project and tenant first (from JWT claims), so these are the primary sort keys. Event type and timestamp come next for the most common aggregation patterns. `event_id` is the final key so that duplicate rows for the same event collapse under `ReplacingMergeTree`.
 - **`DateTime64(3, 'UTC')`** gives millisecond precision in UTC. Good enough for analytics, avoids timezone headaches.
-- **`MergeTree`** engine. No deduplication (that would be `ReplacingMergeTree`). If you need exactly once semantics, use `event_id` for dedup in your queries.
+- **`ReplacingMergeTree`** engine. Crash recovery replays the Write-Ahead Log at least once, so a batch that committed to ClickHouse but was not yet acknowledged in the WAL can be re-inserted after a restart. Because `event_id` is part of the sorting key, these duplicates collapse to a single row on merge, giving idempotent recovery. Deduplication is eventual (it happens on background merges); use `FINAL` in a query when you need exact-once results immediately.
+- **`TTL toDateTime(timestamp) + INTERVAL 90 DAY DELETE`** with `ttl_only_drop_parts = 1` evicts events older than 90 days by dropping whole parts, keeping the store bounded without expensive per-row deletes.
 
 ---
 
@@ -413,18 +453,33 @@ src/Nealytics.Engine/
       IngestTelemetryEndpoint.cs          # POST /api/v1/telemetry/track
       BeaconTelemetryEndpoint.cs          # POST /api/v1/telemetry/beacon
       TelemetryChannelBroker.cs           # Bounded channel with backpressure
+    IngestTelemetry/
+      IngestValidation.cs                 # Key resolution + payload validation (pure, testable)
     BatchProcessor/
-      TelemetryBatchProcessor.cs          # BackgroundService, WAL replay, batch insert
+      TelemetryBatchProcessor.cs          # BackgroundService: WAL replay, retry, backoff, drain
+      ITelemetryBatchWriter.cs            # Insert abstraction (fault-injectable in tests)
+      ClickHouseBatchWriter.cs            # Zero-alloc columnar insert
+      TelemetryColumnMapper.cs            # Payload -> column arrays
+      TelemetryInsertMath.cs              # Backoff + timestamp math (pure, testable)
     GetProjectTimeline/
       GetProjectTimelineEndpoint.cs       # GET /api/v1/telemetry/timeline
-      GetProjectTimelineQuery.cs          # ClickHouse query
+      GetProjectTimelineQuery.cs          # ClickHouse query + testable SQL builder
+      TimelineRequestFactory.cs           # Request parsing/validation (pure, testable)
       GlobalTimelineItem.cs               # Response model
       ProjectTimelineResponse.cs          # Response model
     GetSessionAnalytics/
       GetSessionAnalyticsEndpoint.cs      # GET /api/v1/analytics/sessions
       GetSessionAnalyticsQuery.cs         # ClickHouse query with GROUP BY
+      SessionAnalyticsRequestFactory.cs   # Request parsing/validation (pure, testable)
       SessionSummaryItem.cs               # Response model
       SessionAnalyticsResponse.cs         # Response model
+    GetEventTimeSeries/
+      GetEventTimeSeriesEndpoint.cs       # GET /api/v1/analytics/timeseries
+      GetEventTimeSeriesQuery.cs          # Bucketed count query + testable SQL builder
+      EventTimeSeriesRequestFactory.cs    # Request parsing/validation (pure, testable)
+      TimeSeriesInterval.cs               # Interval enum + parser
+      EventTimeSeriesPoint.cs             # Response model
+      EventTimeSeriesResponse.cs          # Response model
   Infrastructure/
     Configuration/
       TelemetryEngineOptions.cs           # All settings, env configurable
@@ -440,6 +495,17 @@ src/Nealytics.Engine/
 ```
 
 Vertical Slice Architecture. Each feature is self contained in its own folder. Infrastructure is shared across slices but has no business logic.
+
+---
+
+## Testing
+
+```bash
+dotnet test tests/Nealytics.Engine.Tests.Unit          # fast, no dependencies
+./scripts/run-integration-tests.sh                      # spins up ClickHouse, runs the integration suite
+```
+
+The unit suite covers all pure logic, the batch-processor orchestration (via a fake writer), and the endpoint validation paths (booted in-memory). The integration suite runs against a real ClickHouse and is fully decoupled from any container name or port — it reads `TelemetryEngine__ClickHouseConnectionString` (default `Host=127.0.0.1;Port=9000;...`). See [CONTRIBUTING.md](CONTRIBUTING.md) for details and code-style rules.
 
 ---
 

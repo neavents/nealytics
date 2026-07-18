@@ -8,21 +8,6 @@ public class BatchProcessorFlushTests : IntegrationTestBase
 {
     public BatchProcessorFlushTests(TestWebApplicationFactory factory) : base(factory) { }
 
-    private static async Task<int> QueryClickHouseCount(string projectId)
-    {
-        var psi = new System.Diagnostics.ProcessStartInfo("docker",
-            $"exec nealytics-ch clickhouse-client -q \"SELECT count() FROM nealytics_core.global_events WHERE project_id='{projectId}'\"")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-        var proc = System.Diagnostics.Process.Start(psi)!;
-        await proc.WaitForExitAsync();
-        var output = (await proc.StandardOutput.ReadToEndAsync()).Trim();
-        int.TryParse(output, out var count);
-        return count;
-    }
-
     [Theory]
     [InlineData(7)]
     [InlineData(3)]
@@ -45,7 +30,7 @@ public class BatchProcessorFlushTests : IntegrationTestBase
 
         await Task.Delay(4000);
 
-        var count = await QueryClickHouseCount(projectId);
+        long count = await ClickHouseTestSupport.CountAsync(projectId);
         count.Should().Be(eventCount, "all ingested events should be flushed to ClickHouse");
     }
 }
