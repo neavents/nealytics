@@ -20,7 +20,7 @@ public sealed partial class GetSessionAnalyticsQuery
         "SELECT session_id, min(timestamp) AS first_seen, max(timestamp) AS last_seen, count() AS event_count " +
         "FROM nealytics_core.global_events " +
         "WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String} " +
-        "AND timestamp >= {fromTimestamp:DateTime} AND timestamp <= {toTimestamp:DateTime} " +
+        "AND timestamp >= {fromTimestamp:DateTime64} AND timestamp <= {toTimestamp:DateTime64} " +
         "GROUP BY session_id " +
         "ORDER BY first_seen DESC " +
         "LIMIT {limit:Int32}";
@@ -37,42 +37,86 @@ public sealed partial class GetSessionAnalyticsQuery
         Message = "Executing session analytics query for Project: {ProjectId} / Tenant: {TenantId}.")]
     private static partial void LogQueryStarted(ILogger logger, string projectId, string tenantId);
 
-    public async Task<SessionAnalyticsResponse> ExecuteAsync(
+    internal static (string Sql, IReadOnlyList<KeyValuePair<string, object?>> Parameters) BuildQuery(
+        in SessionAnalyticsRequest request)
+    {
+        List<KeyValuePair<string, object?>> parameters = new List<KeyValuePair<string, object?>>(5)
+        {
+            new KeyValuePair<string, object?>("projectId", request.ProjectId),
+            new KeyValuePair<string, object?>("tenantId", request.TenantId),
+            new KeyValuePair<string, object?>("fromTimestamp", request.From),
+            new KeyValuePair<string, object?>("toTimestamp", request.To),
+            new KeyValuePair<string, object?>("limit", request.Limit)
+        };
+
+        return (SqlCommandText, parameters);
+    }
+
+    internal static SessionAnalyticsResponse Aggregate(
         string projectId,
         string tenantId,
-        DateTime fromUtc,
-        DateTime toUtc,
-        int limit,
+        IReadOnlyList<SessionSummaryItem> sessions)
+    {
+        long totalEventCount = 0;
+        double totalDurationSeconds = 0;
+
+        for (int i = 0; i < sessions.Count; i++)
+        {
+            totalEventCount += sessions[i].EventCount;
+            totalDurationSeconds += sessions[i].DurationSeconds;
+        }
+
+        int uniqueSessionCount = sessions.Count;
+        double avgDurationSeconds = uniqueSessionCount > 0
+            ? totalDurationSeconds / uniqueSessionCount
+            : 0;
+
+        return new SessionAnalyticsResponse
+        {
+            ProjectId = projectId,
+            TenantId = tenantId,
+            UniqueSessionCount = uniqueSessionCount,
+            TotalEventCount = totalEventCount,
+            AvgDurationSeconds = avgDurationSeconds,
+            Sessions = sessions
+        };
+    }
+
+    public async Task<SessionAnalyticsResponse> ExecuteAsync(
+        SessionAnalyticsRequest request,
         CancellationToken cancellationToken)
     {
         using Activity? activity = TelemetryDiagnostics.Source.StartActivity("GetSessionAnalyticsQuery.Execute");
         activity?.SetTag("db.system", "clickhouse");
         activity?.SetTag("db.operation", "select");
-        activity?.SetTag("neavents.project_id", projectId);
-        activity?.SetTag("neavents.tenant_id", tenantId);
+        activity?.SetTag("neavents.project_id", request.ProjectId);
+        activity?.SetTag("neavents.tenant_id", request.TenantId);
 
-        LogQueryStarted(_logger, projectId, tenantId);
+        LogQueryStarted(_logger, request.ProjectId, request.TenantId);
         long startTicks = Stopwatch.GetTimestamp();
 
         try
         {
+            (string sqlCommandText, IReadOnlyList<KeyValuePair<string, object?>> parameters) = BuildQuery(request);
+
             await using PooledClickHouseConnection lease =
                 await _connectionFactory.AcquireAsync(cancellationToken);
 
             await using ClickHouseCommand command = lease.Connection.CreateCommand();
-            command.CommandText = SqlCommandText;
+            command.CommandText = sqlCommandText;
 
-            command.Parameters.Add(new ClickHouseParameter { ParameterName = "projectId", Value = projectId });
-            command.Parameters.Add(new ClickHouseParameter { ParameterName = "tenantId", Value = tenantId });
-            command.Parameters.Add(new ClickHouseParameter { ParameterName = "fromTimestamp", Value = fromUtc });
-            command.Parameters.Add(new ClickHouseParameter { ParameterName = "toTimestamp", Value = toUtc });
-            command.Parameters.Add(new ClickHouseParameter { ParameterName = "limit", Value = limit });
+            foreach (KeyValuePair<string, object?> parameter in parameters)
+            {
+                command.Parameters.Add(new ClickHouseParameter
+                {
+                    ParameterName = parameter.Key,
+                    Value = parameter.Value
+                });
+            }
 
             await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
-            List<SessionSummaryItem> sessions = new List<SessionSummaryItem>(limit);
-            long totalEventCount = 0;
-            double totalDurationSeconds = 0;
+            List<SessionSummaryItem> sessions = new List<SessionSummaryItem>(request.Limit);
 
             while (await reader.ReadAsync(cancellationToken))
             {
@@ -91,27 +135,12 @@ public sealed partial class GetSessionAnalyticsQuery
                 };
 
                 sessions.Add(item);
-                totalEventCount += eventCount;
-                totalDurationSeconds += durationSeconds;
             }
 
-            int uniqueSessionCount = sessions.Count;
-            double avgDurationSeconds = uniqueSessionCount > 0
-                ? totalDurationSeconds / uniqueSessionCount
-                : 0;
-
-            activity?.SetTag("neavents.sessions_returned", uniqueSessionCount);
+            activity?.SetTag("neavents.sessions_returned", sessions.Count);
             TelemetryDiagnostics.ReadQueriesExecuted.Add(1);
 
-            return new SessionAnalyticsResponse
-            {
-                ProjectId = projectId,
-                TenantId = tenantId,
-                UniqueSessionCount = uniqueSessionCount,
-                TotalEventCount = totalEventCount,
-                AvgDurationSeconds = avgDurationSeconds,
-                Sessions = sessions
-            };
+            return Aggregate(request.ProjectId, request.TenantId, sessions);
         }
         catch (Exception ex)
         {

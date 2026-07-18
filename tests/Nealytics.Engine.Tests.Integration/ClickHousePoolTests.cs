@@ -14,7 +14,7 @@ public class ClickHousePoolTests
     {
         var opts = new TelemetryEngineOptions
         {
-            ClickHouseConnectionString = "Host=127.0.0.1;Port=9100;Database=nealytics_core;User=default;Password=;",
+            ClickHouseConnectionString = ClickHouseTestSupport.ConnectionString,
             ConnectionPoolSize = poolSize
         };
         var mock = Substitute.For<IOptions<TelemetryEngineOptions>>();

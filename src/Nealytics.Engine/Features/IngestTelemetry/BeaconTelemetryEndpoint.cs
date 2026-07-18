@@ -1,15 +1,12 @@
 namespace Nealytics.Engine.Features.IngestTelemetry;
 
-using System;
 using System.Diagnostics;
 using System.IO.Pipelines;
 using System.Text.Json;
-using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Primitives;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Diagnostics;
 using Nealytics.Engine.Infrastructure.Security;
@@ -29,8 +26,9 @@ public static class BeaconTelemetryEndpoint
         {
             using Activity? activity = TelemetryDiagnostics.Source.StartActivity("BeaconIngest");
 
-            StringValues queryKey = context.Request.Query["k"];
-            string clientProjectKey = queryKey.Count > 0 ? queryKey[0]! : string.Empty;
+            string clientProjectKey = IngestValidation.ResolveProjectKey(
+                null,
+                context.Request.Query["k"].ToString());
 
             if (clientProjectKey.Length == 0 || !keyValidator.IsValid(clientProjectKey))
             {
@@ -38,7 +36,7 @@ public static class BeaconTelemetryEndpoint
                 return;
             }
 
-            if (context.Request.ContentLength > options.Value.MaxRequestBodyBytes)
+            if (IngestValidation.ExceedsBodyLimit(context.Request.ContentLength, options.Value.MaxRequestBodyBytes))
             {
                 context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
                 return;
@@ -55,17 +53,13 @@ public static class BeaconTelemetryEndpoint
                         TelemetryAotContext.Default.GlobalTelemetryPayload,
                         context.RequestAborted))
                 {
-                    if (payload is null
-                        || string.IsNullOrEmpty(payload.ProjectId)
-                        || string.IsNullOrEmpty(payload.TenantId)
-                        || string.IsNullOrEmpty(payload.SessionId)
-                        || string.IsNullOrEmpty(payload.EventType))
+                    if (!IngestValidation.IsValidPayload(payload))
                     {
                         continue;
                     }
 
-                    await wal.AppendAsync(payload, context.RequestAborted);
-                    await broker.PublishAsync(payload, context.RequestAborted);
+                    await wal.AppendAsync(payload!, context.RequestAborted);
+                    await broker.PublishAsync(payload!, context.RequestAborted);
                     accepted++;
                 }
 
