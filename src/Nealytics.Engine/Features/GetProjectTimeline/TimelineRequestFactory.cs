@@ -37,6 +37,8 @@ public static class TimelineRequestFactory
         string? eventType,
         string? sessionId,
         string? itemId,
+        string? metaKey,
+        string? metaValue,
         int maxLimit)
     {
         if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(tenantId))
@@ -65,13 +67,19 @@ public static class TimelineRequestFactory
         string? normalizedEventType = Normalize(eventType);
         string? normalizedSessionId = Normalize(sessionId);
         string? normalizedItemId = Normalize(itemId);
+        string? normalizedMetaKey = Normalize(metaKey);
+        string? normalizedMetaValue = Normalize(metaValue);
 
         if (normalizedEventType?.Length > MaxFieldLength
             || normalizedSessionId?.Length > MaxFieldLength
-            || normalizedItemId?.Length > MaxFieldLength)
+            || normalizedItemId?.Length > MaxFieldLength
+            || normalizedMetaKey?.Length > MaxFieldLength
+            || normalizedMetaValue?.Length > MaxFieldLength)
         {
             return TimelineRequestResult.Fail(StatusBadRequest, "Filter values must not exceed 256 characters.");
         }
+
+        bool hasMetaFilter = normalizedMetaKey is not null && normalizedMetaValue is not null;
 
         return TimelineRequestResult.Ok(new TimelineQueryRequest
         {
@@ -81,7 +89,9 @@ public static class TimelineRequestFactory
             Before = cursor,
             EventType = normalizedEventType,
             SessionId = normalizedSessionId,
-            ItemId = normalizedItemId
+            ItemId = normalizedItemId,
+            MetaKey = hasMetaFilter ? normalizedMetaKey : null,
+            MetaValue = hasMetaFilter ? normalizedMetaValue : null
         });
     }
 

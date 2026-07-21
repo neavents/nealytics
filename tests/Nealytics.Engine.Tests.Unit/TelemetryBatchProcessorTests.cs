@@ -281,6 +281,70 @@ public class TelemetryBatchProcessorTests : IAsyncDisposable
         await stop.Should().NotThrowAsync("a cancellation during the shutdown drain is handled, not propagated");
     }
 
+    private sealed class GatedBatchWriter : ITelemetryBatchWriter
+    {
+        private readonly TaskCompletionSource _firstCallEntered =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly List<GlobalTelemetryPayload> _received = new();
+        private int _calls;
+
+        public Task FirstCallEntered => _firstCallEntered.Task;
+        public void Release() => _release.TrySetResult();
+
+        public async Task WriteAsync(IReadOnlyList<GlobalTelemetryPayload> batch, int count, CancellationToken cancellationToken)
+        {
+            int call = Interlocked.Increment(ref _calls);
+            if (call == 1)
+            {
+                _firstCallEntered.TrySetResult();
+                await _release.Task.WaitAsync(cancellationToken);
+            }
+
+            lock (_received)
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    _received.Add(batch[i]);
+                }
+            }
+        }
+
+        public int TotalReceived
+        {
+            get { lock (_received) { return _received.Count; } }
+        }
+    }
+
+    [Fact]
+    public async Task DoubleBuffering_KeepsDrainingChannel_WhileInsertIsInFlight()
+    {
+        // While the first batch is mid-insert (blocked), the reader must keep draining the
+        // channel into the second buffer instead of stalling. With the old single-buffer loop
+        // the channel would still hold the second batch; with double-buffering it drains to empty.
+        IOptions<TelemetryEngineOptions> options = Wrap(Options(batchSize: 3, flushSeconds: 60));
+        await using WriteAheadLogger wal = new WriteAheadLogger(options);
+        TelemetryChannelBroker broker = new TelemetryChannelBroker(options);
+        GatedBatchWriter writer = new GatedBatchWriter();
+        TelemetryBatchProcessor processor = Build(broker, wal, writer, options);
+
+        await AppendAndPublish(wal, broker, 6);
+        await processor.StartAsync(CancellationToken.None);
+
+        await writer.FirstCallEntered.WaitAsync(TimeSpan.FromSeconds(5));
+
+        bool drained = await WaitUntil(() => broker.Reader.Count == 0);
+        drained.Should().BeTrue(
+            "the reader must keep draining the channel into the second buffer while the first insert is in flight");
+
+        writer.Release();
+        (await WaitUntil(() => writer.TotalReceived == 6)).Should().BeTrue();
+
+        await processor.StopAsync(CancellationToken.None);
+        wal.UncommittedRecordCount.Should().Be(0);
+    }
+
     [Fact]
     public async Task Shutdown_DrainsRemainingChannelItems_EvenBelowBatchSize()
     {

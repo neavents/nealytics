@@ -11,9 +11,10 @@ public class EventTimeSeriesRequestFactoryTests
 
     private static EventTimeSeriesRequestResult Create(
         string? projectId = "proj", string? tenantId = "tenant", string? limit = null,
-        string? interval = null, string? from = null, string? to = null, string? eventType = null)
+        string? interval = null, string? from = null, string? to = null, string? eventType = null,
+        string? groupBy = null)
         => EventTimeSeriesRequestFactory.Create(
-            projectId, tenantId, limit, interval, from, to, eventType, MaxLimit, DefaultRangeHours, Now);
+            projectId, tenantId, limit, interval, from, to, eventType, groupBy, MaxLimit, DefaultRangeHours, Now);
 
     [Theory]
     [InlineData(null, "tenant")]
@@ -121,5 +122,36 @@ public class EventTimeSeriesRequestFactoryTests
     {
         EventTimeSeriesRequestResult result = Create(eventType: "signup");
         result.Request.EventType.Should().Be("signup");
+    }
+
+    [Fact]
+    public void Create_NoGroupBy_DefaultsToNone()
+    {
+        EventTimeSeriesRequestResult result = Create();
+        result.Success.Should().BeTrue();
+        result.Request.GroupBy.Should().Be(TimeSeriesGroupBy.None);
+    }
+
+    [Theory]
+    [InlineData("event_type", TimeSeriesGroupBy.EventType)]
+    [InlineData("item_id", TimeSeriesGroupBy.ItemId)]
+    [InlineData("session_id", TimeSeriesGroupBy.SessionId)]
+    public void Create_ValidGroupBy_IsParsed(string raw, TimeSeriesGroupBy expected)
+    {
+        EventTimeSeriesRequestResult result = Create(groupBy: raw);
+        result.Success.Should().BeTrue();
+        result.Request.GroupBy.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("user_id")]
+    [InlineData("EVENT_TYPE")]
+    [InlineData("timestamp")]
+    public void Create_InvalidGroupBy_Returns400(string raw)
+    {
+        EventTimeSeriesRequestResult result = Create(groupBy: raw);
+        result.Success.Should().BeFalse();
+        result.ErrorStatusCode.Should().Be(EventTimeSeriesRequestFactory.StatusBadRequest);
+        result.ErrorMessage.Should().Contain("groupBy");
     }
 }

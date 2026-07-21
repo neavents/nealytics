@@ -11,9 +11,11 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using Nealytics.Engine.Features.BatchProcessor;
+using Nealytics.Engine.Features.GetActiveUsers;
 using Nealytics.Engine.Features.GetEventTimeSeries;
 using Nealytics.Engine.Features.GetProjectTimeline;
 using Nealytics.Engine.Features.GetSessionAnalytics;
+using Nealytics.Engine.Features.GetTopEvents;
 using Nealytics.Engine.Features.IngestTelemetry;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Diagnostics;
@@ -40,6 +42,11 @@ if (string.IsNullOrWhiteSpace(engineOpts.JwtSymmetricKey) || Encoding.UTF8.GetBy
 builder.WebHost.ConfigureKestrel(serverOptions =>
 {
     serverOptions.Limits.MaxRequestBodySize = engineOpts.MaxRequestBodyBytes;
+    if (engineOpts.MaxConcurrentConnections > 0)
+    {
+        serverOptions.Limits.MaxConcurrentConnections = engineOpts.MaxConcurrentConnections;
+        serverOptions.Limits.MaxConcurrentUpgradedConnections = engineOpts.MaxConcurrentConnections;
+    }
 });
 
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -89,6 +96,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 builder.Services.AddAuthorization();
 
+if (engineOpts.EnableRequestDecompression)
+{
+    builder.Services.AddRequestDecompression();
+}
+
 builder.Services.AddRateLimiter(limiter =>
 {
     limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -111,16 +123,26 @@ builder.Services.AddHostedService<TelemetryBatchProcessor>();
 builder.Services.AddScoped<GetProjectTimelineQuery>();
 builder.Services.AddScoped<GetSessionAnalyticsQuery>();
 builder.Services.AddScoped<GetEventTimeSeriesQuery>();
+builder.Services.AddScoped<GetActiveUsersQuery>();
+builder.Services.AddScoped<GetTopEventsQuery>();
 
 builder.Services.AddOpenTelemetry()
     .WithTracing(tracing => tracing
         .AddSource(TelemetryDiagnostics.Source.Name)
         .AddAspNetCoreInstrumentation()
         .AddOtlpExporter())
-    .WithMetrics(metrics => metrics
-        .AddMeter(TelemetryDiagnostics.EngineMeter.Name)
-        .AddAspNetCoreInstrumentation()
-        .AddOtlpExporter());
+    .WithMetrics(metrics =>
+    {
+        metrics
+            .AddMeter(TelemetryDiagnostics.EngineMeter.Name)
+            .AddAspNetCoreInstrumentation()
+            .AddOtlpExporter();
+
+        if (engineOpts.EnablePrometheusScrape)
+        {
+            metrics.AddPrometheusExporter();
+        }
+    });
 
 WebApplication app = builder.Build();
 
@@ -133,6 +155,11 @@ app.Use(async (HttpContext context, RequestDelegate next) =>
     await next(context);
 });
 
+if (engineOpts.EnableRequestDecompression)
+{
+    app.UseRequestDecompression();
+}
+
 app.UseCors();
 app.UseRateLimiter();
 app.UseAuthentication();
@@ -143,7 +170,16 @@ app.MapBeaconIngestion();
 app.MapGetProjectTimeline();
 app.MapGetSessionAnalytics();
 app.MapGetEventTimeSeries();
-app.MapGet("/health", async (ClickHouseConnectionFactory connectionFactory) =>
+app.MapGetActiveUsers();
+app.MapGetTopEvents();
+if (engineOpts.EnablePrometheusScrape)
+{
+    app.MapPrometheusScrapingEndpoint();
+}
+
+app.MapGet("/health", () => Results.Ok());
+
+app.MapGet("/ready", async (ClickHouseConnectionFactory connectionFactory) =>
 {
     try
     {

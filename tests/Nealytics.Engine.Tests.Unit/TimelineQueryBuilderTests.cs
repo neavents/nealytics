@@ -97,6 +97,42 @@ public class TimelineQueryBuilderTests
     }
 
     [Fact]
+    public void BuildQuery_WithMetaFilter_AddsJsonExtractPredicateAndParameters()
+    {
+        TimelineQueryRequest request = new TimelineQueryRequest
+        {
+            ProjectId = "proj",
+            TenantId = "tenant",
+            Limit = 10,
+            MetaKey = "plan",
+            MetaValue = "pro"
+        };
+
+        (string sql, var parameters) = GetProjectTimelineQuery.BuildQuery(request);
+
+        sql.Should().Contain("AND JSONExtractString(metadata_json, {metaKey:String}) = {metaValue:String}");
+        parameters.Should().ContainSingle(p => p.Key == "metaKey" && (string)p.Value! == "plan");
+        parameters.Should().ContainSingle(p => p.Key == "metaValue" && (string)p.Value! == "pro");
+    }
+
+    [Fact]
+    public void BuildQuery_WithPartialMetaFilter_IsIgnored()
+    {
+        TimelineQueryRequest request = new TimelineQueryRequest
+        {
+            ProjectId = "proj",
+            TenantId = "tenant",
+            Limit = 10,
+            MetaKey = "plan"
+        };
+
+        (string sql, var parameters) = GetProjectTimelineQuery.BuildQuery(request);
+
+        sql.Should().NotContain("JSONExtractString");
+        parameters.Should().NotContain(p => p.Key == "metaKey");
+    }
+
+    [Fact]
     public void BuildQuery_ParameterOrder_MatchesClauseOrder()
     {
         TimelineQueryRequest request = new TimelineQueryRequest

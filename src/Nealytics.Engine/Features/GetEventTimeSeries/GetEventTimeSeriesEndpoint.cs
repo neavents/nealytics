@@ -30,6 +30,7 @@ public static class GetEventTimeSeriesEndpoint
                 context.Request.Query["from"].ToString(),
                 context.Request.Query["to"].ToString(),
                 context.Request.Query["eventType"].ToString(),
+                context.Request.Query["groupBy"].ToString(),
                 engineOptions.MaxQueryLimit,
                 engineOptions.DefaultSessionQueryRangeHours,
                 DateTime.UtcNow);

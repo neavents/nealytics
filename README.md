@@ -70,10 +70,13 @@ Configuration goes in [`appsettings.json`](src/Nealytics.Engine/appsettings.json
 ### Health check
 
 ```
-GET http://localhost:5000/health
+GET http://localhost:5000/health   # liveness  — process is up (no dependency check)
+GET http://localhost:5000/ready    # readiness — dependencies reachable (SELECT 1 on ClickHouse)
 ```
 
-Returns 200 if the service is up. No auth required.
+No auth required. `/health` always returns `200` while the process is running — use it for a liveness probe so an orchestrator does not restart a healthy pod during a ClickHouse blip. `/ready` returns `200` when ClickHouse is reachable and `503` when it is not — use it for a readiness/traffic gate.
+
+> **Note (v1.2.0):** `/health` was previously the dependency check. It is now liveness-only; the dependency check moved to `/ready`. Update any alerting that treated `/health` as "database up".
 
 ---
 
@@ -136,6 +139,7 @@ Query params:
 - `limit` (default 100, max set by [`MaxQueryLimit`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs))
 - `before` (ISO 8601 timestamp) — cursor for backward pagination; returns events strictly older than this value
 - `eventType`, `sessionId`, `itemId` — optional exact-match filters (each ≤ 256 chars), applied on top of the tenant scope
+- `metaKey` + `metaValue` — optional metadata filter (both required together, each ≤ 256 chars). Matches events where `JSONExtractString(metadata_json, metaKey) = metaValue`. Note: `metadata_json` is unindexed, so this is a full scan over the time range — prefer narrowing with `before`/filters. Both are passed as parameters (never interpolated).
 
 ```bash
 curl "http://localhost:5000/api/v1/telemetry/timeline?limit=50&eventType=purchase&sessionId=abc-123" \
@@ -155,9 +159,10 @@ Query params:
 - `interval` — `minute`, `hour` (default), or `day`. Any other value returns `400`.
 - `from` / `to` (ISO 8601, defaults to last 24 hours). `from` must be ≤ `to`.
 - `eventType` — optional exact-match filter
+- `groupBy` — optional split into per-series counts: `event_type`, `item_id`, or `session_id` (whitelisted; any other value returns `400`). When set, each point gains a `series` field and the query groups by `(bucket, series)`. `LIMIT` caps total `bucket×series` rows, so avoid very high-cardinality dimensions (`session_id`); prefer `event_type`/`item_id`.
 - `limit` — max number of buckets returned (defaults to `MaxQueryLimit`)
 
-Response:
+Response (ungrouped `series` is omitted):
 
 ```json
 {
@@ -168,8 +173,8 @@ Response:
   "to": "2024-06-08T00:00:00Z",
   "totalCount": 4210,
   "points": [
-    { "bucket": "2024-06-01T00:00:00Z", "count": 512 },
-    { "bucket": "2024-06-02T00:00:00Z", "count": 631 }
+    { "bucket": "2024-06-01T00:00:00Z", "series": "purchase", "count": 512 },
+    { "bucket": "2024-06-01T00:00:00Z", "series": "view", "count": 631 }
   ]
 }
 ```
@@ -205,6 +210,55 @@ Response:
       "eventCount": 28
     }
   ]
+}
+```
+
+### GET `/api/v1/analytics/active`
+
+Active Users — distinct-count series bucketed by day (DAU) or month (MAU), within your tenant scope.
+
+```bash
+curl "http://localhost:5000/api/v1/analytics/active?interval=day&by=user&mode=exact&from=2026-06-01T00:00:00Z&to=2026-06-08T00:00:00Z" \
+  -H "Authorization: Bearer <your-jwt>"
+```
+
+Query params (all whitelisted; any other value returns `400`):
+- `interval` — `day` (default, DAU) or `month` (MAU). Maps to `toStartOfDay`/`toStartOfMonth`.
+- `by` — `user` (default → `user_id`) or `session` (→ `session_id`).
+- `mode` — `exact` (default → `uniqExact`) or `approx` (→ `uniq`, HyperLogLog; cheaper/approximate for large ranges).
+- `from` / `to` (ISO 8601, defaults to last 24 hours). `from` must be ≤ `to`.
+- `limit` — max buckets returned (defaults to `MaxQueryLimit`).
+
+Because `user_id` is nullable, distinct counts **skip anonymous (`NULL`) events**, so they never inflate the count. Note: a true rolling 30-day MAU is a single `uniq(user_id)` over `now()-30d` — do **not** sum daily buckets (users overlap).
+
+```json
+{
+  "projectId": "my-app", "tenantId": "tenant-1",
+  "interval": "day", "by": "user", "mode": "exact",
+  "from": "2026-06-01T00:00:00Z", "to": "2026-06-08T00:00:00Z",
+  "points": [ { "bucket": "2026-06-01T00:00:00Z", "activeCount": 512 } ]
+}
+```
+
+### GET `/api/v1/analytics/top`
+
+Top-N events or items by count, descending, within your tenant scope.
+
+```bash
+curl "http://localhost:5000/api/v1/analytics/top?dimension=event_type&from=2026-06-01T00:00:00Z&to=2026-06-08T00:00:00Z&limit=20" \
+  -H "Authorization: Bearer <your-jwt>"
+```
+
+Query params:
+- `dimension` — `event_type` (default) or `item_id` (whitelisted; any other value returns `400`). `item_id` results **exclude `NULL` keys**.
+- `from` / `to` (ISO 8601, defaults to last 24 hours). `from` must be ≤ `to`.
+- `limit` — number of rows (default 20, clamped to `MaxQueryLimit`).
+
+```json
+{
+  "projectId": "my-app", "tenantId": "tenant-1", "dimension": "event_type",
+  "from": "2026-06-01T00:00:00Z", "to": "2026-06-08T00:00:00Z",
+  "items": [ { "key": "view", "count": 1240 }, { "key": "purchase", "count": 318 } ]
 }
 ```
 
@@ -250,7 +304,9 @@ Full source: [`TelemetryEngineOptions.cs`](src/Nealytics.Engine/Infrastructure/C
 |---|---|---|
 | `ClickHouseConnectionString` | `Host=127.0.0.1;Port=9000;Database=nealytics_core;` | ClickHouse native protocol connection string |
 | `WriteAheadLogDirectory` | `/var/log/nealytics_engine/` | Directory for the WAL file. Must be writable. |
-| `ConnectionPoolSize` | `16` | Max idle connections kept in the ClickHouse connection pool |
+| `WalFileBufferBytes` | `65536` | Size of the buffered WAL `FileStream`. Larger buffers let group-commit coalesce more appends per flush. |
+| `ConnectionPoolSize` | `16` | Max concurrent ClickHouse connections. Bounds acquisition (acquire-side semaphore) and idle retention. `0` = unbounded, retain nothing. |
+| `EnableWireCompression` | `true` | Enables LZ4 compression on the ClickHouse native protocol (inserts and query results). |
 
 ### Batch Processing
 
@@ -262,6 +318,7 @@ Full source: [`TelemetryEngineOptions.cs`](src/Nealytics.Engine/Infrastructure/C
 | `MaxInsertRetries` | `5` | Retry attempts on ClickHouse insert failure |
 | `RetryBackoffCeilingMs` | `30000` | Max delay between retries (exponential backoff caps here) |
 | `WalReplayRetryDelayMs` | `10000` | Delay before retrying a WAL-replay batch when ClickHouse is unavailable at startup |
+| `EnableAsyncInsert` | `true` | Appends `SETTINGS async_insert=1, wait_for_async_insert=1` to the batch INSERT. Server-side coalescing reduces part churn at pod scale; `wait_for_async_insert=1` keeps the WAL ack honest (durable before commit). |
 
 ### Ingestion
 
@@ -269,6 +326,8 @@ Full source: [`TelemetryEngineOptions.cs`](src/Nealytics.Engine/Infrastructure/C
 |---|---|---|
 | `AllowedProjectKeys` | _(empty)_ | Comma separated API keys. Empty = all requests rejected. |
 | `MaxRequestBodyBytes` | `1048576` | Max request body size (1 MB). Enforced at Kestrel level and per endpoint. |
+| `MaxConcurrentConnections` | `20000` | Kestrel concurrent-connection safety valve. `0` = unbounded. |
+| `EnableRequestDecompression` | `true` | Accept `Content-Encoding: gzip`/`deflate`/`br` on ingestion endpoints (`/track`, `/beacon`). |
 | `RateLimitPermitCount` | `1000` | Requests allowed per rate limit window |
 | `RateLimitWindowSeconds` | `10` | Rate limit window duration |
 | `RateLimitQueueSize` | `500` | Requests queued when rate limit is hit (before 429) |
@@ -286,7 +345,8 @@ Full source: [`TelemetryEngineOptions.cs`](src/Nealytics.Engine/Infrastructure/C
 | Variable | Default | What it does |
 |---|---|---|
 | `MaxQueryLimit` | `10000` | Max `limit` parameter value for read endpoints |
-| `DefaultSessionQueryRangeHours` | `24` | Default time range when `from`/`to` are not specified on sessions endpoint |
+| `DefaultSessionQueryRangeHours` | `24` | Default time range when `from`/`to` are not specified on sessions, active-users, top-N, and time-series endpoints |
+| `EnablePrometheusScrape` | `false` | Expose the engine metrics at `GET /metrics` for Prometheus scraping (unauthenticated — keep on an internal network). |
 
 ---
 
@@ -294,7 +354,7 @@ Full source: [`TelemetryEngineOptions.cs`](src/Nealytics.Engine/Infrastructure/C
 
 Source: [`WriteAheadLogger.cs`](src/Nealytics.Engine/Infrastructure/Storage/WriteAheadLogger.cs)
 
-Every event that hits an ingestion endpoint is serialized to the WAL file before being published to the in memory channel. The WAL is a simple newline delimited JSON file (`telemetry_wal.log`) written with `FileOptions.WriteThrough` for durability, meaning writes go directly to disk, they don't sit in an OS buffer.
+Every event that hits an ingestion endpoint is serialized to the WAL file before being published to the in memory channel. The WAL is a simple newline delimited JSON file (`telemetry_wal.log`). Durability uses **group commit**: appends stage their serialized bytes into an in-process channel, a single background writer coalesces all pending appends into one vectored write followed by one `Flush(flushToDisk: true)` (fsync), and each waiting request is acked only after its group's flush completes. This amortizes the per-event syscall + device round-trip over the whole group while keeping the durability barrier — the `202` still means "on disk". Under low load a lone append flushes immediately (a group of one); under load the group grows and self-tunes, so no timer is needed.
 
 ### Why we need this
 
@@ -304,13 +364,13 @@ The in memory channel is fast but volatile. If the process crashes, everything i
 
 Serialization uses a `[ThreadStatic]` `ArrayBufferWriter<byte>`. Each thread gets its own reusable buffer. The JSON is written directly to the buffer via `Utf8JsonWriter`, a newline is appended, and the raw bytes are written to the file. No string intermediaries, no `byte[]` allocations per event.
 
-The buffer fill and file write both happen under a `SemaphoreSlim` lock. This prevents a subtle race condition where async continuations could hop threads and two concurrent `AppendAsync` calls could end up sharing the same thread static buffer.
+Each append serializes into a `[ThreadStatic]` buffer and copies the framed bytes into a pooled (`ArrayPool<byte>`) segment that the background writer returns to the pool after its group flushes. Only the single background writer touches the `FileStream`, so file writes never contend across request threads; the per-file `SemaphoreSlim` now only serializes the writer's flush against truncation/acknowledge.
 
 ### Truncation safety
 
 The WAL only deletes a record once its event is durably in ClickHouse. Two mechanisms guarantee that:
 
-- **Uncommitted-record counter.** `AppendAsync` increments a counter under the WAL lock; `AcknowledgeCommitAsync(n)` decrements it by the size of a committed batch. The active log is truncated **only when the counter reaches zero** — i.e. when every record still on disk is known to be committed. This closes the race where an event that was appended (but not yet published to the channel) could be dropped by a truncation triggered by an unrelated batch.
+- **Uncommitted-record counter.** The background group-commit writer increments a counter by the group size once the group is durably flushed (before releasing its waiters, so a returned `AppendAsync` always sees itself counted); `AcknowledgeCommitAsync(n)` decrements it by the size of a committed batch. The active log is truncated **only when the counter reaches zero** — i.e. when every record still on disk is known to be committed. This closes the race where an event that was appended (but not yet published to the channel) could be dropped by a truncation triggered by an unrelated batch.
 - **Startup segment rotation.** On construction, any pre-existing `telemetry_wal.log` is sealed to `telemetry_wal.replay` and a fresh active log is opened. Recovery replays the *sealed* segment while new ingestion writes to the *active* segment, so events arriving during recovery can never be destroyed by the recovery cleanup. The sealed segment is deleted only after every recovered event commits (retried every `WalReplayRetryDelayMs` if ClickHouse is down).
 
 ---
@@ -362,6 +422,7 @@ CREATE TABLE nealytics_core.global_events
     project_id LowCardinality(String),
     tenant_id String,
     session_id String,
+    user_id Nullable(String),
     event_type LowCardinality(String),
     item_id Nullable(String),
     metadata_json String CODEC(ZSTD(1)),
@@ -378,9 +439,20 @@ Design decisions:
 - **`LowCardinality`** on `project_id` and `event_type` because these have few distinct values across millions of rows. ClickHouse stores them as dictionary encoded integers internally.
 - **`ZSTD(1)`** compression on `metadata_json` because JSON strings are highly compressible and this column can be large.
 - **ORDER BY** is `(project_id, tenant_id, event_type, timestamp, event_id)`. All queries filter by project and tenant first (from JWT claims), so these are the primary sort keys. Event type and timestamp come next for the most common aggregation patterns. `event_id` is the final key so that duplicate rows for the same event collapse under `ReplacingMergeTree`.
+- **`user_id Nullable(String)`** is an optional cross-session identifier that powers Active Users / DAU / MAU (`/api/v1/analytics/active`). It is deliberately kept **out of the `ORDER BY` sort key** — it is high-cardinality and would bloat the primary index. Anonymous events store `NULL`; the distinct-count aggregates (`uniqExact`/`uniq`) skip `NULL`, so anonymous traffic never inflates the counts.
 - **`DateTime64(3, 'UTC')`** gives millisecond precision in UTC. Good enough for analytics, avoids timezone headaches.
 - **`ReplacingMergeTree`** engine. Crash recovery replays the Write-Ahead Log at least once, so a batch that committed to ClickHouse but was not yet acknowledged in the WAL can be re-inserted after a restart. Because `event_id` is part of the sorting key, these duplicates collapse to a single row on merge, giving idempotent recovery. Deduplication is eventual (it happens on background merges); use `FINAL` in a query when you need exact-once results immediately.
 - **`TTL toDateTime(timestamp) + INTERVAL 90 DAY DELETE`** with `ttl_only_drop_parts = 1` evicts events older than 90 days by dropping whole parts, keeping the store bounded without expensive per-row deletes.
+
+### Migration (existing deployments)
+
+`user_id` was added in v1.2.0. Fresh installs get it from `clickhouse-init.sql`; existing clusters must apply it manually (the init script only runs on an empty data volume):
+
+```sql
+ALTER TABLE nealytics_core.global_events ADD COLUMN IF NOT EXISTS user_id Nullable(String) AFTER session_id;
+```
+
+The column is additive and nullable, so old rows and old clients keep working unchanged.
 
 ---
 
@@ -398,6 +470,8 @@ Source: [`TelemetryDiagnostics.cs`](src/Nealytics.Engine/Infrastructure/Diagnost
 | `nealytics_storage_write_duration_seconds` | Histogram | Time spent per batch insert (including retries) |
 | `nealytics_query_read_duration_seconds` | Histogram | Time spent per read query |
 | `nealytics_queue_depth_current` | Gauge | Current number of events in the in memory channel |
+
+These export over OTLP by default. Set `EnablePrometheusScrape=true` to additionally expose them at `GET /metrics` in Prometheus text format. That endpoint is **unauthenticated** by convention — keep it on an internal network / behind your ingress.
 
 ### Tracing
 
@@ -478,8 +552,25 @@ src/Nealytics.Engine/
       GetEventTimeSeriesQuery.cs          # Bucketed count query + testable SQL builder
       EventTimeSeriesRequestFactory.cs    # Request parsing/validation (pure, testable)
       TimeSeriesInterval.cs               # Interval enum + parser
+      TimeSeriesGroupBy.cs                # groupBy whitelist enum + parser
       EventTimeSeriesPoint.cs             # Response model
       EventTimeSeriesResponse.cs          # Response model
+    GetActiveUsers/
+      GetActiveUsersEndpoint.cs           # GET /api/v1/analytics/active (DAU/MAU)
+      GetActiveUsersQuery.cs              # Distinct-count query + testable SQL builder
+      ActiveUsersRequestFactory.cs        # Request parsing/validation (pure, testable)
+      ActiveUsersInterval.cs              # day/month enum + parser
+      ActiveDimension.cs                  # user/session whitelist enum + parser
+      ActiveCountMode.cs                  # exact/approx whitelist enum + parser
+      ActiveUsersPoint.cs                 # Response model
+      ActiveUsersResponse.cs              # Response model
+    GetTopEvents/
+      GetTopEventsEndpoint.cs             # GET /api/v1/analytics/top
+      GetTopEventsQuery.cs                # Top-N count query + testable SQL builder
+      TopEventsRequestFactory.cs          # Request parsing/validation (pure, testable)
+      TopDimension.cs                     # event_type/item_id whitelist enum + parser
+      TopEventItem.cs                     # Response model
+      TopEventsResponse.cs                # Response model
   Infrastructure/
     Configuration/
       TelemetryEngineOptions.cs           # All settings, env configurable
