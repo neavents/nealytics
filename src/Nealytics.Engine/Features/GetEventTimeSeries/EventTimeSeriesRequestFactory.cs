@@ -38,6 +38,7 @@ public static class EventTimeSeriesRequestFactory
         string? fromRaw,
         string? toRaw,
         string? eventType,
+        string? groupByRaw,
         int maxLimit,
         int defaultRangeHours,
         DateTime nowUtc)
@@ -68,13 +69,13 @@ public static class EventTimeSeriesRequestFactory
         DateTime toUtc = nowUtc;
 
         if (!string.IsNullOrEmpty(fromRaw)
-            && DateTime.TryParse(fromRaw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTime parsedFrom))
+            && DateTime.TryParse(fromRaw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTime parsedFrom))
         {
             fromUtc = parsedFrom;
         }
 
         if (!string.IsNullOrEmpty(toRaw)
-            && DateTime.TryParse(toRaw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTime parsedTo))
+            && DateTime.TryParse(toRaw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTime parsedTo))
         {
             toUtc = parsedTo;
         }
@@ -90,6 +91,12 @@ public static class EventTimeSeriesRequestFactory
             return EventTimeSeriesRequestResult.Fail(StatusBadRequest, "Filter values must not exceed 256 characters.");
         }
 
+        TimeSeriesGroupBy groupBy = TimeSeriesGroupBy.None;
+        if (!string.IsNullOrEmpty(groupByRaw) && !TimeSeriesGroupByParser.TryParse(groupByRaw, out groupBy))
+        {
+            return EventTimeSeriesRequestResult.Fail(StatusBadRequest, "'groupBy' must be one of: event_type, item_id, session_id.");
+        }
+
         return EventTimeSeriesRequestResult.Ok(new EventTimeSeriesRequest
         {
             ProjectId = projectId,
@@ -98,6 +105,7 @@ public static class EventTimeSeriesRequestFactory
             To = toUtc,
             Interval = interval,
             EventType = normalizedEventType,
+            GroupBy = groupBy,
             Limit = limit
         });
     }

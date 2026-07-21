@@ -58,9 +58,16 @@ public class EndpointBootTests : IClassFixture<NoDatabaseWebFactory>
     }
 
     [Fact]
-    public async Task Health_WhenClickHouseUnreachable_Returns503()
+    public async Task Health_IsLiveness_Returns200_EvenWhenClickHouseUnreachable()
     {
         HttpResponseMessage response = await _client.GetAsync("/health");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Ready_WhenClickHouseUnreachable_Returns503()
+    {
+        HttpResponseMessage response = await _client.GetAsync("/ready");
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
     }
 

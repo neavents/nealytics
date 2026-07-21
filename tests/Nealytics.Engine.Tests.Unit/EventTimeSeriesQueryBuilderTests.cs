@@ -66,6 +66,98 @@ public class EventTimeSeriesQueryBuilderTests
         sql.Should().NotContain("event_type =");
         parameters.Should().NotContain(p => p.Key == "eventType");
     }
+
+    private static EventTimeSeriesRequest GroupedRequest(TimeSeriesGroupBy groupBy, string? eventType = null) =>
+        new EventTimeSeriesRequest
+        {
+            ProjectId = "proj",
+            TenantId = "tenant",
+            From = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            To = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc),
+            Interval = TimeSeriesInterval.Hour,
+            EventType = eventType,
+            GroupBy = groupBy,
+            Limit = 500
+        };
+
+    [Fact]
+    public void BuildQuery_WithoutGroupBy_HasNoSeriesColumn()
+    {
+        (string sql, _) = GetEventTimeSeriesQuery.BuildQuery(BaseRequest());
+        sql.Should().NotContain("series");
+        sql.Should().Contain("GROUP BY bucket ORDER BY bucket ASC");
+    }
+
+    [Theory]
+    [InlineData(TimeSeriesGroupBy.EventType, "event_type")]
+    [InlineData(TimeSeriesGroupBy.ItemId, "item_id")]
+    [InlineData(TimeSeriesGroupBy.SessionId, "session_id")]
+    public void BuildQuery_WithGroupBy_SelectsWhitelistedSeriesColumn(TimeSeriesGroupBy groupBy, string column)
+    {
+        (string sql, _) = GetEventTimeSeriesQuery.BuildQuery(GroupedRequest(groupBy));
+
+        sql.Should().Contain($"{column} AS series");
+        sql.Should().Contain("GROUP BY bucket, series ORDER BY bucket ASC, series ASC LIMIT {limit:Int32}");
+    }
+
+    [Fact]
+    public void BuildQuery_GroupedWithEventTypeFilter_KeepsBothPredicateAndSeries()
+    {
+        (string sql, var parameters) = GetEventTimeSeriesQuery.BuildQuery(
+            GroupedRequest(TimeSeriesGroupBy.ItemId, eventType: "purchase"));
+
+        sql.Should().Contain("item_id AS series");
+        sql.Should().Contain("AND event_type = {eventType:String}");
+        parameters.Should().ContainSingle(p => p.Key == "eventType" && (string)p.Value! == "purchase");
+    }
+
+    [Fact]
+    public void BuildQuery_Grouped_NeverInterpolatesGroupColumnFromUserInput()
+    {
+        (string sql, _) = GetEventTimeSeriesQuery.BuildQuery(GroupedRequest(TimeSeriesGroupBy.SessionId));
+        sql.Should().Contain("session_id AS series");
+        sql.Should().NotContain("{groupBy");
+    }
+}
+
+public class TimeSeriesGroupByParserTests
+{
+    [Theory]
+    [InlineData("event_type", TimeSeriesGroupBy.EventType)]
+    [InlineData("item_id", TimeSeriesGroupBy.ItemId)]
+    [InlineData("session_id", TimeSeriesGroupBy.SessionId)]
+    public void TryParse_ValidValues_ReturnsTrue(string raw, TimeSeriesGroupBy expected)
+    {
+        TimeSeriesGroupByParser.TryParse(raw, out var groupBy).Should().BeTrue();
+        groupBy.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(null)]
+    [InlineData("user_id")]
+    [InlineData("EventType")]
+    public void TryParse_InvalidValues_ReturnsFalseAndNone(string? raw)
+    {
+        TimeSeriesGroupByParser.TryParse(raw, out var groupBy).Should().BeFalse();
+        groupBy.Should().Be(TimeSeriesGroupBy.None);
+    }
+
+    [Theory]
+    [InlineData(TimeSeriesGroupBy.EventType, "event_type")]
+    [InlineData(TimeSeriesGroupBy.ItemId, "item_id")]
+    [InlineData(TimeSeriesGroupBy.SessionId, "session_id")]
+    public void ToColumn_MapsWhitelistedColumn(TimeSeriesGroupBy groupBy, string expected)
+    {
+        TimeSeriesGroupByParser.ToColumn(groupBy).Should().Be(expected);
+    }
+
+    [Fact]
+    public void ToColumn_None_Throws()
+    {
+        Action act = () => TimeSeriesGroupByParser.ToColumn(TimeSeriesGroupBy.None);
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
 }
 
 public class TimeSeriesIntervalParserTests

@@ -21,4 +21,10 @@ public sealed class TelemetryEngineOptions
     public int DefaultSessionQueryRangeHours { get; set; } = 24;
     public int ConnectionPoolSize { get; set; } = 16;
     public int WalReplayRetryDelayMs { get; set; } = 10_000;
+    public int WalFileBufferBytes { get; set; } = 65_536;
+    public bool EnableWireCompression { get; set; } = true;
+    public bool EnableAsyncInsert { get; set; } = true;
+    public int MaxConcurrentConnections { get; set; } = 20_000;
+    public bool EnableRequestDecompression { get; set; } = true;
+    public bool EnablePrometheusScrape { get; set; } = false;
 }

@@ -10,5 +10,6 @@ public readonly struct EventTimeSeriesRequest
     public DateTime To { get; init; }
     public TimeSeriesInterval Interval { get; init; }
     public string? EventType { get; init; }
+    public TimeSeriesGroupBy GroupBy { get; init; }
     public int Limit { get; init; }
 }

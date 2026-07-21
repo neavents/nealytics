@@ -331,6 +331,46 @@ public class WriteAheadLoggerTests : UnitTestBase, IAsyncDisposable
     }
 
     [Fact]
+    public async Task GroupCommit_CoalescesConcurrentAppends_AllDurableAndCorrectlyFramed()
+    {
+        // Group-commit coalesces many concurrent durable appends into shared flushes.
+        // Every byte must still land exactly once and each record stays newline-framed
+        // (no interleaving/torn writes), so the reopened log parses back to N valid records.
+        const int total = 500;
+        {
+            await using var wal = new WriteAheadLogger(_options);
+
+            var tasks = new Task[total];
+            for (int i = 0; i < total; i++)
+            {
+                tasks[i] = wal.AppendAsync(Event($"p{i}"), CancellationToken.None);
+            }
+            await Task.WhenAll(tasks);
+            wal.UncommittedRecordCount.Should().Be(total);
+        }
+
+        var lines = await File.ReadAllLinesAsync(WalPath);
+        lines.Should().HaveCount(total, "each append must produce exactly one newline-framed record");
+
+        await using var reopened = new WriteAheadLogger(_options);
+        var recovered = await reopened.ReplayUncommittedAsync();
+        recovered.Should().HaveCount(total, "every coalesced append must be a durable, parseable record");
+        recovered.Select(r => r.ProjectId).Distinct().Should().HaveCount(total);
+    }
+
+    [Fact]
+    public async Task GroupCommit_PreservesFifoOrder_ForSequentialAppends()
+    {
+        await WriteAndCloseAsync(Event("first"), Event("second"), Event("third"));
+
+        var lines = await File.ReadAllLinesAsync(WalPath);
+        lines.Should().HaveCount(3);
+        lines[0].Should().Contain("\"first\"");
+        lines[1].Should().Contain("\"second\"");
+        lines[2].Should().Contain("\"third\"");
+    }
+
+    [Fact]
     public async Task DisposeAsync_FlushesAndClosesFileStream()
     {
         await WriteAndCloseAsync(

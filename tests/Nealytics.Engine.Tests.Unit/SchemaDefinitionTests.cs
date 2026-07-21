@@ -36,6 +36,16 @@ public class SchemaDefinitionTests
     }
 
     [Fact]
+    public void Schema_IncludesOptionalUserIdColumn_OutsideSortKey()
+    {
+        string sql = ReadInitSql();
+        sql.Should().Contain("user_id Nullable(String)",
+            "DAU/MAU needs an optional cross-session user identifier");
+        sql.Should().NotMatchRegex(@"ORDER BY \([^)]*\buser_id\b[^)]*\)",
+            "user_id is high-cardinality and must stay out of the primary sort key");
+    }
+
+    [Fact]
     public void Schema_DeclaresRetentionTtl()
     {
         string sql = ReadInitSql();
