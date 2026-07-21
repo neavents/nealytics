@@ -39,7 +39,7 @@ public sealed partial class GetProjectTimelineQuery
         };
 
         StringBuilder sql = new StringBuilder(
-            "SELECT event_id, session_id, event_type, item_id, metadata_json, timestamp " +
+            "SELECT event_id, session_id, user_id, event_type, item_id, metadata_json, timestamp " +
             "FROM nealytics_core.global_events " +
             "WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String}");
 
@@ -65,6 +65,13 @@ public sealed partial class GetProjectTimelineQuery
         {
             sql.Append(" AND item_id = {itemId:String}");
             parameters.Add(new KeyValuePair<string, object?>("itemId", request.ItemId));
+        }
+
+        if (!string.IsNullOrEmpty(request.MetaKey) && !string.IsNullOrEmpty(request.MetaValue))
+        {
+            sql.Append(" AND JSONExtractString(metadata_json, {metaKey:String}) = {metaValue:String}");
+            parameters.Add(new KeyValuePair<string, object?>("metaKey", request.MetaKey));
+            parameters.Add(new KeyValuePair<string, object?>("metaValue", request.MetaValue));
         }
 
         sql.Append(" ORDER BY timestamp DESC LIMIT {limit:Int32}");
@@ -115,10 +122,11 @@ public sealed partial class GetProjectTimelineQuery
                 {
                     EventId = reader.GetGuid(0),
                     SessionId = reader.GetString(1),
-                    EventType = reader.GetString(2),
-                    ItemId = reader.IsDBNull(3) ? null : reader.GetString(3),
-                    MetadataJson = reader.GetString(4),
-                    Timestamp = DateTime.SpecifyKind(reader.GetDateTime(5), DateTimeKind.Utc)
+                    UserId = reader.IsDBNull(2) ? null : reader.GetString(2),
+                    EventType = reader.GetString(3),
+                    ItemId = reader.IsDBNull(4) ? null : reader.GetString(4),
+                    MetadataJson = reader.GetString(5),
+                    Timestamp = DateTime.SpecifyKind(reader.GetDateTime(6), DateTimeKind.Utc)
                 };
                 events.Add(item);
             }

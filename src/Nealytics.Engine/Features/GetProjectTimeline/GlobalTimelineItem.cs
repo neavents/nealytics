@@ -6,6 +6,7 @@ public sealed class GlobalTimelineItem
 {
     public Guid EventId { get; set; }
     public string SessionId { get; set; } = string.Empty;
+    public string? UserId { get; set; }
     public string EventType { get; set; } = string.Empty;
     public string? ItemId { get; set; }
     public string MetadataJson { get; set; } = "{}";

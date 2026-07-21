@@ -9,8 +9,9 @@ public class TimelineRequestFactoryTests
 
     private static TimelineRequestResult Create(
         string? projectId = "proj", string? tenantId = "tenant", string? limit = null,
-        string? before = null, string? eventType = null, string? sessionId = null, string? itemId = null)
-        => TimelineRequestFactory.Create(projectId, tenantId, limit, before, eventType, sessionId, itemId, MaxLimit);
+        string? before = null, string? eventType = null, string? sessionId = null, string? itemId = null,
+        string? metaKey = null, string? metaValue = null)
+        => TimelineRequestFactory.Create(projectId, tenantId, limit, before, eventType, sessionId, itemId, metaKey, metaValue, MaxLimit);
 
     [Theory]
     [InlineData(null, "tenant")]
@@ -124,5 +125,30 @@ public class TimelineRequestFactoryTests
         TimelineRequestResult result = Create(eventType: new string('a', 256));
 
         result.Success.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Create_MetaFilter_RequiresBothKeyAndValue()
+    {
+        Create(metaKey: "plan").Request.MetaKey.Should().BeNull("a key without a value is not a usable filter");
+        Create(metaValue: "pro").Request.MetaValue.Should().BeNull("a value without a key is not a usable filter");
+
+        TimelineRequestResult both = Create(metaKey: "plan", metaValue: "pro");
+        both.Request.MetaKey.Should().Be("plan");
+        both.Request.MetaValue.Should().Be("pro");
+    }
+
+    [Theory]
+    [InlineData("metaKey")]
+    [InlineData("metaValue")]
+    public void Create_MetaFilterTooLong_Returns400(string which)
+    {
+        string big = new string('m', 257);
+        TimelineRequestResult result = Create(
+            metaKey: which == "metaKey" ? big : "k",
+            metaValue: which == "metaValue" ? big : "v");
+
+        result.Success.Should().BeFalse();
+        result.ErrorStatusCode.Should().Be(TimelineRequestFactory.StatusBadRequest);
     }
 }

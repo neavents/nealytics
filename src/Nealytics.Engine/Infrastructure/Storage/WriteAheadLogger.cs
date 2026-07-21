@@ -3,9 +3,11 @@ namespace Nealytics.Engine.Infrastructure.Storage;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Infrastructure.Configuration;
@@ -16,15 +18,21 @@ public sealed class WriteAheadLogger : IAsyncDisposable
     private readonly string _logFilePath;
     private readonly string _sealedFilePath;
     private readonly FileStream _fileStream;
-    private readonly SemaphoreSlim _lock;
+    private readonly SemaphoreSlim _fileLock;
+    private readonly Channel<PendingAppend> _pending;
+    private readonly Task _flushLoop;
     private long _uncommittedRecords;
+    private long _flushGroupCount;
+    private long _flushedRecordCount;
+    private long _flushDurationTicks;
 
     [ThreadStatic]
     private static ArrayBufferWriter<byte>? _threadBuffer;
 
     public WriteAheadLogger(IOptions<TelemetryEngineOptions> options)
     {
-        string directory = options.Value.WriteAheadLogDirectory;
+        TelemetryEngineOptions engineOptions = options.Value;
+        string directory = engineOptions.WriteAheadLogDirectory;
         if (!Directory.Exists(directory))
         {
             Directory.CreateDirectory(directory);
@@ -35,19 +43,50 @@ public sealed class WriteAheadLogger : IAsyncDisposable
 
         SealExistingLogForRecovery();
 
+        int bufferSize = engineOptions.WalFileBufferBytes > 0 ? engineOptions.WalFileBufferBytes : 65_536;
+
         _fileStream = new FileStream(
             _logFilePath,
             FileMode.Append,
             FileAccess.Write,
             FileShare.Read,
-            bufferSize: 4096,
-            FileOptions.WriteThrough | FileOptions.Asynchronous);
+            bufferSize,
+            FileOptions.Asynchronous);
 
-        _lock = new SemaphoreSlim(1, 1);
+        _fileLock = new SemaphoreSlim(1, 1);
         _uncommittedRecords = 0;
+
+        _pending = Channel.CreateUnbounded<PendingAppend>(
+            new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+
+        _flushLoop = Task.Run(RunFlushLoopAsync);
     }
 
     public long UncommittedRecordCount => Interlocked.Read(ref _uncommittedRecords);
+
+    internal long FlushGroupCount => Interlocked.Read(ref _flushGroupCount);
+    internal long FlushedRecordCount => Interlocked.Read(ref _flushedRecordCount);
+    internal double AverageGroupSize
+    {
+        get
+        {
+            long groups = Interlocked.Read(ref _flushGroupCount);
+            return groups == 0 ? 0 : (double)Interlocked.Read(ref _flushedRecordCount) / groups;
+        }
+    }
+    internal double AverageFlushMilliseconds
+    {
+        get
+        {
+            long groups = Interlocked.Read(ref _flushGroupCount);
+            if (groups == 0)
+            {
+                return 0;
+            }
+            double seconds = (double)Interlocked.Read(ref _flushDurationTicks) / Stopwatch.Frequency;
+            return seconds / groups * 1000.0;
+        }
+    }
 
     private void SealExistingLogForRecovery()
     {
@@ -71,26 +110,89 @@ public sealed class WriteAheadLogger : IAsyncDisposable
 
     public async Task AppendAsync(GlobalTelemetryPayload payload, CancellationToken cancellationToken)
     {
-        await _lock.WaitAsync(cancellationToken);
-        try
-        {
-            ArrayBufferWriter<byte> buffer = _threadBuffer ??= new ArrayBufferWriter<byte>(512);
-            buffer.ResetWrittenCount();
+        cancellationToken.ThrowIfCancellationRequested();
 
-            using (Utf8JsonWriter jsonWriter = new Utf8JsonWriter(buffer, new JsonWriterOptions { SkipValidation = true }))
+        ArrayBufferWriter<byte> buffer = _threadBuffer ??= new ArrayBufferWriter<byte>(512);
+        buffer.ResetWrittenCount();
+
+        using (Utf8JsonWriter jsonWriter = new Utf8JsonWriter(buffer, new JsonWriterOptions { SkipValidation = true }))
+        {
+            JsonSerializer.Serialize(jsonWriter, payload, TelemetryAotContext.Default.GlobalTelemetryPayload);
+        }
+
+        ReadOnlySpan<byte> written = buffer.WrittenSpan;
+        int length = written.Length + 1;
+        byte[] rented = ArrayPool<byte>.Shared.Rent(length);
+        written.CopyTo(rented);
+        rented[written.Length] = (byte)'\n';
+
+        PendingAppend pending = new PendingAppend(rented, length);
+        await _pending.Writer.WriteAsync(pending, cancellationToken);
+        await pending.Completion.Task.WaitAsync(cancellationToken);
+    }
+
+    private async Task RunFlushLoopAsync()
+    {
+        ChannelReader<PendingAppend> reader = _pending.Reader;
+        List<PendingAppend> group = new List<PendingAppend>(256);
+
+        while (await reader.WaitToReadAsync())
+        {
+            group.Clear();
+            while (reader.TryRead(out PendingAppend? item))
             {
-                JsonSerializer.Serialize(jsonWriter, payload, TelemetryAotContext.Default.GlobalTelemetryPayload);
+                group.Add(item);
             }
 
-            buffer.GetSpan(1)[0] = (byte)'\n';
-            buffer.Advance(1);
+            await FlushGroupAsync(group);
+        }
+    }
 
-            await _fileStream.WriteAsync(buffer.WrittenMemory, cancellationToken);
-            _uncommittedRecords++;
+    private async Task FlushGroupAsync(List<PendingAppend> group)
+    {
+        if (group.Count == 0)
+        {
+            return;
+        }
+
+        long flushStartTicks = Stopwatch.GetTimestamp();
+        await _fileLock.WaitAsync();
+        try
+        {
+            for (int i = 0; i < group.Count; i++)
+            {
+                PendingAppend entry = group[i];
+                await _fileStream.WriteAsync(entry.Buffer.AsMemory(0, entry.Length));
+            }
+
+            await _fileStream.FlushAsync();
+            _fileStream.Flush(true);
+
+            Interlocked.Add(ref _uncommittedRecords, group.Count);
+            Interlocked.Increment(ref _flushGroupCount);
+            Interlocked.Add(ref _flushedRecordCount, group.Count);
+            Interlocked.Add(ref _flushDurationTicks, Stopwatch.GetTimestamp() - flushStartTicks);
+        }
+        catch (Exception ex)
+        {
+            for (int i = 0; i < group.Count; i++)
+            {
+                PendingAppend entry = group[i];
+                ArrayPool<byte>.Shared.Return(entry.Buffer);
+                entry.Completion.TrySetException(ex);
+            }
+            return;
         }
         finally
         {
-            _lock.Release();
+            _fileLock.Release();
+        }
+
+        for (int i = 0; i < group.Count; i++)
+        {
+            PendingAppend entry = group[i];
+            ArrayPool<byte>.Shared.Return(entry.Buffer);
+            entry.Completion.TrySetResult();
         }
     }
 
@@ -101,35 +203,35 @@ public sealed class WriteAheadLogger : IAsyncDisposable
             return;
         }
 
-        await _lock.WaitAsync();
+        await _fileLock.WaitAsync();
         try
         {
-            _uncommittedRecords -= committedCount;
-            if (_uncommittedRecords <= 0)
+            long remaining = Interlocked.Add(ref _uncommittedRecords, -committedCount);
+            if (remaining <= 0)
             {
-                _uncommittedRecords = 0;
+                Interlocked.Exchange(ref _uncommittedRecords, 0);
                 _fileStream.SetLength(0);
                 await _fileStream.FlushAsync();
             }
         }
         finally
         {
-            _lock.Release();
+            _fileLock.Release();
         }
     }
 
     public async Task TruncateAsync()
     {
-        await _lock.WaitAsync();
+        await _fileLock.WaitAsync();
         try
         {
             _fileStream.SetLength(0);
             await _fileStream.FlushAsync();
-            _uncommittedRecords = 0;
+            Interlocked.Exchange(ref _uncommittedRecords, 0);
         }
         finally
         {
-            _lock.Release();
+            _fileLock.Release();
         }
     }
 
@@ -187,15 +289,31 @@ public sealed class WriteAheadLogger : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await _lock.WaitAsync();
+        _pending.Writer.TryComplete();
+
         try
         {
-            await _fileStream.DisposeAsync();
+            await _flushLoop;
         }
-        finally
+        catch
         {
-            _lock.Release();
-            _lock.Dispose();
         }
+
+        await _fileStream.DisposeAsync();
+        _fileLock.Dispose();
+    }
+
+    private sealed class PendingAppend
+    {
+        public PendingAppend(byte[] buffer, int length)
+        {
+            Buffer = buffer;
+            Length = length;
+            Completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        public byte[] Buffer { get; }
+        public int Length { get; }
+        public TaskCompletionSource Completion { get; }
     }
 }

@@ -33,6 +33,7 @@ public sealed partial class GetEventTimeSeriesQuery
         in EventTimeSeriesRequest request)
     {
         string bucketFunction = TimeSeriesIntervalParser.ToBucketFunction(request.Interval);
+        bool grouped = request.GroupBy != TimeSeriesGroupBy.None;
 
         List<KeyValuePair<string, object?>> parameters = new List<KeyValuePair<string, object?>>(6)
         {
@@ -45,7 +46,15 @@ public sealed partial class GetEventTimeSeriesQuery
         StringBuilder sql = new StringBuilder(256);
         sql.Append("SELECT ");
         sql.Append(bucketFunction);
-        sql.Append("(timestamp) AS bucket, count() AS event_count ");
+        sql.Append("(timestamp) AS bucket, ");
+
+        if (grouped)
+        {
+            sql.Append(TimeSeriesGroupByParser.ToColumn(request.GroupBy));
+            sql.Append(" AS series, ");
+        }
+
+        sql.Append("count() AS event_count ");
         sql.Append("FROM nealytics_core.global_events ");
         sql.Append("WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String} ");
         sql.Append("AND timestamp >= {fromTimestamp:DateTime64} AND timestamp <= {toTimestamp:DateTime64}");
@@ -56,7 +65,15 @@ public sealed partial class GetEventTimeSeriesQuery
             parameters.Add(new KeyValuePair<string, object?>("eventType", request.EventType));
         }
 
-        sql.Append(" GROUP BY bucket ORDER BY bucket ASC LIMIT {limit:Int32}");
+        if (grouped)
+        {
+            sql.Append(" GROUP BY bucket, series ORDER BY bucket ASC, series ASC LIMIT {limit:Int32}");
+        }
+        else
+        {
+            sql.Append(" GROUP BY bucket ORDER BY bucket ASC LIMIT {limit:Int32}");
+        }
+
         parameters.Add(new KeyValuePair<string, object?>("limit", request.Limit));
 
         return (sql.ToString(), parameters);
@@ -97,15 +114,29 @@ public sealed partial class GetEventTimeSeriesQuery
 
             await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
+            bool grouped = request.GroupBy != TimeSeriesGroupBy.None;
             List<EventTimeSeriesPoint> points = new List<EventTimeSeriesPoint>(request.Limit);
             long totalCount = 0;
 
             while (await reader.ReadAsync(cancellationToken))
             {
-                long bucketCount = Convert.ToInt64(reader.GetValue(1));
+                string? series = null;
+                long bucketCount;
+
+                if (grouped)
+                {
+                    series = reader.IsDBNull(1) ? null : reader.GetString(1);
+                    bucketCount = Convert.ToInt64(reader.GetValue(2));
+                }
+                else
+                {
+                    bucketCount = Convert.ToInt64(reader.GetValue(1));
+                }
+
                 EventTimeSeriesPoint point = new EventTimeSeriesPoint
                 {
                     Bucket = DateTime.SpecifyKind(reader.GetDateTime(0), DateTimeKind.Utc),
+                    Series = series,
                     Count = bucketCount
                 };
                 points.Add(point);

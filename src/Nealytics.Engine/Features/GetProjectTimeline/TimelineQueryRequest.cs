@@ -11,4 +11,6 @@ public readonly struct TimelineQueryRequest
     public string? EventType { get; init; }
     public string? SessionId { get; init; }
     public string? ItemId { get; init; }
+    public string? MetaKey { get; init; }
+    public string? MetaValue { get; init; }
 }
