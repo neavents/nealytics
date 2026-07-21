@@ -12,6 +12,8 @@ using Octonica.ClickHouseClient;
 public sealed class ClickHouseConnectionFactory : IAsyncDisposable
 {
     private readonly TelemetryEngineOptions _options;
+    private readonly string _connectionString;
+    private readonly SemaphoreSlim? _acquireGate;
     private readonly ConcurrentQueue<ClickHouseConnection> _idleConnections;
     private int _totalCreated;
     private volatile bool _disposed;
@@ -19,39 +21,92 @@ public sealed class ClickHouseConnectionFactory : IAsyncDisposable
     public ClickHouseConnectionFactory(IOptions<TelemetryEngineOptions> options)
     {
         _options = options.Value;
+        _connectionString = BuildConnectionString(_options);
+        _acquireGate = _options.ConnectionPoolSize > 0
+            ? new SemaphoreSlim(_options.ConnectionPoolSize, _options.ConnectionPoolSize)
+            : null;
         _idleConnections = new ConcurrentQueue<ClickHouseConnection>();
+    }
+
+    private static string BuildConnectionString(TelemetryEngineOptions options)
+    {
+        ClickHouseConnectionStringBuilder builder =
+            new ClickHouseConnectionStringBuilder(options.ClickHouseConnectionString)
+            {
+                Compress = options.EnableWireCompression
+            };
+        return builder.ToString();
     }
 
     public async Task<PooledClickHouseConnection> AcquireAsync(CancellationToken cancellationToken)
     {
-        while (_idleConnections.TryDequeue(out ClickHouseConnection? pooled))
+        if (_acquireGate is not null)
         {
-            if (pooled.State == ConnectionState.Open)
-            {
-                return new PooledClickHouseConnection(pooled, this);
-            }
-
-            Interlocked.Decrement(ref _totalCreated);
-            pooled.Dispose();
+            await _acquireGate.WaitAsync(cancellationToken);
         }
 
-        ClickHouseConnection connection = new ClickHouseConnection(_options.ClickHouseConnectionString);
-        await connection.OpenAsync(cancellationToken);
-        Interlocked.Increment(ref _totalCreated);
-        return new PooledClickHouseConnection(connection, this);
+        try
+        {
+            while (_idleConnections.TryDequeue(out ClickHouseConnection? pooled))
+            {
+                if (pooled.State == ConnectionState.Open)
+                {
+                    return new PooledClickHouseConnection(pooled, this);
+                }
+
+                Interlocked.Decrement(ref _totalCreated);
+                pooled.Dispose();
+            }
+
+            ClickHouseConnection connection = new ClickHouseConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            Interlocked.Increment(ref _totalCreated);
+            return new PooledClickHouseConnection(connection, this);
+        }
+        catch
+        {
+            ReleaseGate();
+            throw;
+        }
     }
 
     internal void Return(ClickHouseConnection connection)
     {
-        if (_disposed || connection.State != ConnectionState.Open
-            || Volatile.Read(ref _totalCreated) > _options.ConnectionPoolSize)
+        try
         {
-            Interlocked.Decrement(ref _totalCreated);
-            connection.Dispose();
+            if (_disposed || connection.State != ConnectionState.Open
+                || Volatile.Read(ref _totalCreated) > _options.ConnectionPoolSize)
+            {
+                Interlocked.Decrement(ref _totalCreated);
+                connection.Dispose();
+                return;
+            }
+
+            _idleConnections.Enqueue(connection);
+        }
+        finally
+        {
+            ReleaseGate();
+        }
+    }
+
+    private void ReleaseGate()
+    {
+        if (_acquireGate is null)
+        {
             return;
         }
 
-        _idleConnections.Enqueue(connection);
+        try
+        {
+            _acquireGate.Release();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (SemaphoreFullException)
+        {
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -61,6 +116,8 @@ public sealed class ClickHouseConnectionFactory : IAsyncDisposable
         {
             await connection.DisposeAsync();
         }
+
+        _acquireGate?.Dispose();
     }
 }
 

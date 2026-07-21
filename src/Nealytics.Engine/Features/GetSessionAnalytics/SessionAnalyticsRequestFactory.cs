@@ -61,13 +61,13 @@ public static class SessionAnalyticsRequestFactory
         DateTime toUtc = nowUtc;
 
         if (!string.IsNullOrEmpty(fromRaw)
-            && DateTime.TryParse(fromRaw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTime parsedFrom))
+            && DateTime.TryParse(fromRaw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTime parsedFrom))
         {
             fromUtc = parsedFrom;
         }
 
         if (!string.IsNullOrEmpty(toRaw)
-            && DateTime.TryParse(toRaw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTime parsedTo))
+            && DateTime.TryParse(toRaw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTime parsedTo))
         {
             toUtc = parsedTo;
         }

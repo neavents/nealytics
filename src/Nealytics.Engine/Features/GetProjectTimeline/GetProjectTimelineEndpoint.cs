@@ -28,6 +28,8 @@ public static class GetProjectTimelineEndpoint
                 context.Request.Query["eventType"].ToString(),
                 context.Request.Query["sessionId"].ToString(),
                 context.Request.Query["itemId"].ToString(),
+                context.Request.Query["metaKey"].ToString(),
+                context.Request.Query["metaValue"].ToString(),
                 options.Value.MaxQueryLimit);
 
             if (!parsed.Success)

@@ -19,6 +19,13 @@ public class ApiEndpointTests : IntegrationTestBase
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
+    [Fact]
+    public async Task GET_Ready_WhenClickHouseReachable_Returns200()
+    {
+        var response = await Client.GetAsync("/ready");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
     // ──────── INGEST TRACK ────────
 
     [Fact]

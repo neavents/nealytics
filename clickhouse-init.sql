@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS nealytics_core.global_events
     project_id LowCardinality(String),
     tenant_id String,
     session_id String,
+    user_id Nullable(String),
     event_type LowCardinality(String),
     item_id Nullable(String),
     metadata_json String CODEC(ZSTD(1)),
