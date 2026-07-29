@@ -117,6 +117,10 @@ builder.Services.AddSingleton<ClickHouseConnectionFactory>();
 builder.Services.AddSingleton<WriteAheadLogger>();
 builder.Services.AddSingleton<TelemetryChannelBroker>();
 builder.Services.AddSingleton<ApiKeyValidator>();
+// Widens global_events before the batch processor takes traffic. clickhouse-init.sql only runs
+// on an empty volume, so an existing deployment would otherwise reject every batch naming a
+// column added since it was first created.
+builder.Services.AddHostedService<ClickHouseSchemaMigrator>();
 builder.Services.AddSingleton<ITelemetryBatchWriter, ClickHouseBatchWriter>();
 builder.Services.AddHostedService<TelemetryBatchProcessor>();
 
