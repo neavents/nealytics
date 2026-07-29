@@ -13,8 +13,10 @@ using Octonica.ClickHouseClient;
 
 public sealed class ClickHouseBatchWriter : ITelemetryBatchWriter
 {
-    private const string InsertColumns =
-        "INSERT INTO nealytics_core.global_events (event_id, project_id, tenant_id, session_id, user_id, event_type, item_id, metadata_json, timestamp)";
+    internal const string InsertColumns =
+        "INSERT INTO nealytics_core.global_events (event_id, project_id, tenant_id, session_id, "
+        + "user_id, event_type, item_id, menu_id, section_id, table_id, device_class, os, browser, "
+        + "country, metadata_json, timestamp)";
 
     private readonly ClickHouseConnectionFactory _connectionFactory;
     private readonly string _insertCommand;
@@ -38,46 +40,32 @@ public sealed class ClickHouseBatchWriter : ITelemetryBatchWriter
     public async Task WriteAsync(
         IReadOnlyList<GlobalTelemetryPayload> batch, int count, CancellationToken cancellationToken)
     {
-        Guid[] eventIds = ArrayPool<Guid>.Shared.Rent(count);
-        string[] projectIds = ArrayPool<string>.Shared.Rent(count);
-        string[] tenantIds = ArrayPool<string>.Shared.Rent(count);
-        string[] sessionIds = ArrayPool<string>.Shared.Rent(count);
-        string?[] userIds = ArrayPool<string?>.Shared.Rent(count);
-        string[] eventTypes = ArrayPool<string>.Shared.Rent(count);
-        string?[] itemIds = ArrayPool<string?>.Shared.Rent(count);
-        string[] metadataJsons = ArrayPool<string>.Shared.Rent(count);
-        DateTimeOffset[] timestamps = ArrayPool<DateTimeOffset>.Shared.Rent(count);
+        // Buffers own their own rent/return; see TelemetryColumnBuffers for why.
+        using TelemetryColumnBuffers buffers = new(count);
+
+        buffers.Fill(batch);
+        Dictionary<string, object?> columns = buffers.BuildColumns();
+
+        await using PooledClickHouseConnection lease =
+            await _connectionFactory.AcquireAsync(cancellationToken);
 
         try
         {
-            TelemetryColumnMapper.Fill(
-                batch, count, eventIds, projectIds, tenantIds, sessionIds,
-                userIds, eventTypes, itemIds, metadataJsons, timestamps);
-
-            Dictionary<string, object?> columns = TelemetryColumnMapper.BuildColumns(
-                count, eventIds, projectIds, tenantIds, sessionIds,
-                userIds, eventTypes, itemIds, metadataJsons, timestamps);
-
-            await using PooledClickHouseConnection lease =
-                await _connectionFactory.AcquireAsync(cancellationToken);
-
             await using ClickHouseColumnWriter writer =
                 await lease.Connection.CreateColumnWriterAsync(_insertCommand, cancellationToken);
 
             await writer.WriteTableAsync(columns, count, cancellationToken);
             await writer.EndWriteAsync(cancellationToken);
         }
-        finally
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            ArrayPool<Guid>.Shared.Return(eventIds);
-            ArrayPool<string>.Shared.Return(projectIds, true);
-            ArrayPool<string>.Shared.Return(tenantIds, true);
-            ArrayPool<string>.Shared.Return(sessionIds, true);
-            ArrayPool<string?>.Shared.Return(userIds, true);
-            ArrayPool<string>.Shared.Return(eventTypes, true);
-            ArrayPool<string?>.Shared.Return(itemIds, true);
-            ArrayPool<string>.Shared.Return(metadataJsons, true);
-            ArrayPool<DateTimeOffset>.Shared.Return(timestamps);
+            // Do not put this connection back. A ClickHouse restart leaves connections reporting
+            // Open while being unusable, so a pooled corpse is handed straight back to the next
+            // retry — which is how a database blip that resolved itself in seconds turned into a
+            // service that needed restarting. Throwing away a healthy connection costs one
+            // reconnect; keeping a dead one costs every batch after it.
+            lease.Discard();
+            throw;
         }
     }
 }

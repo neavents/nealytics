@@ -18,6 +18,26 @@ public sealed class GlobalTelemetryPayload
     public string? UserId { get; init; }
     public string EventType { get; init; } = string.Empty;
     public string? ItemId { get; init; }
+
+    // Dimensions that used to be buried in MetadataJson. Aggregates cannot group on a JSON
+    // string without parsing every row, which is why per-menu and per-section analytics
+    // reported themselves unmeasured while the data was arriving all along.
+    public string? MenuId { get; init; }
+    public string? SectionId { get; init; }
+
+    /// <summary>
+    /// The table a diner scanned, resolved at the edge from the QR code's tracking token.
+    /// Null for menu-scoped codes and for direct visits.
+    /// </summary>
+    public string? TableId { get; init; }
+
+    // Derived at the edge from the User-Agent and Cloudflare request metadata, never sent by
+    // the client — so a caller cannot forge them, and they cost the menu document nothing.
+    public string DeviceClass { get; init; } = string.Empty;
+    public string Os { get; init; } = string.Empty;
+    public string Browser { get; init; } = string.Empty;
+    public string Country { get; init; } = string.Empty;
+
     public string MetadataJson { get; set; } = "{}";
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 }
