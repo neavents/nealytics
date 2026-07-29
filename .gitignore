@@ -36,3 +36,6 @@ coverage.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Next.js trace output, from a tool run in the wrong directory. This is a .NET repo.
+.next/
