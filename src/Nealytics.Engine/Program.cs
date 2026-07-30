@@ -1,3 +1,6 @@
+using System.Collections.Generic;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Exporter;
 using System;
 using System.Text;
 using System.Threading;
@@ -130,17 +133,56 @@ builder.Services.AddScoped<GetEventTimeSeriesQuery>();
 builder.Services.AddScoped<GetActiveUsersQuery>();
 builder.Services.AddScoped<GetTopEventsQuery>();
 
+// Where telemetry actually goes, and it went nowhere before this.
+//
+// AddOtlpExporter() with no configuration uses the SDK defaults: http://localhost:4317 over gRPC.
+// Inside a container localhost is the container itself, so every span and metric was posted to a port
+// nothing was listening on — silently, because the exporter retries in the background and logs at
+// debug. nealytics had no OTEL variables in docker-compose either, so nothing overrode it.
+//
+// The endpoint is read from OTEL_EXPORTER_OTLP_ENDPOINT, which is what the rest of the estate is given
+// and what compose now supplies. The protocol is resolved rather than defaulted: the collector is
+// addressed on :4318 everywhere here, and gRPC to an HTTP/protobuf port delivers nothing. That exact
+// mismatch shipped in identity, messaging, subscription and neaslator — the endpoint and the protocol
+// are set in different places, and neither looks wrong on its own.
+static void ConfigureOtlp(OtlpExporterOptions options)
+{
+    var endpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
+    if (!string.IsNullOrWhiteSpace(endpoint))
+    {
+        options.Endpoint = new Uri(endpoint);
+    }
+
+    options.Protocol =
+        Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_PROTOCOL")?.Trim().ToLowerInvariant() == "grpc"
+            ? OtlpExportProtocol.Grpc
+            : OtlpExportProtocol.HttpProtobuf;
+}
+
 builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource => resource
+        // Without these a span arrives and cannot be attributed to anything. service.name in
+        // particular is what SigNoz groups by, so its absence makes traces effectively invisible even
+        // when they are delivered.
+        .AddService(
+            serviceName: "Nealytics.Engine",
+            serviceVersion: "1.0",
+            serviceInstanceId: Environment.MachineName)
+        .AddAttributes([
+            new KeyValuePair<string, object>(
+                "deployment.environment",
+                builder.Environment.EnvironmentName),
+        ]))
     .WithTracing(tracing => tracing
         .AddSource(TelemetryDiagnostics.Source.Name)
         .AddAspNetCoreInstrumentation()
-        .AddOtlpExporter())
+        .AddOtlpExporter(ConfigureOtlp))
     .WithMetrics(metrics =>
     {
         metrics
             .AddMeter(TelemetryDiagnostics.EngineMeter.Name)
             .AddAspNetCoreInstrumentation()
-            .AddOtlpExporter();
+            .AddOtlpExporter(ConfigureOtlp);
 
         if (engineOpts.EnablePrometheusScrape)
         {
