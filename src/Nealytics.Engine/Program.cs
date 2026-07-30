@@ -30,6 +30,7 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using Serilog;
 using Serilog.Formatting.Json;
+using Serilog.Sinks.OpenTelemetry;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -57,11 +58,62 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, TelemetryAotContext.Default);
 });
 
-Log.Logger = new LoggerConfiguration()
+// The log pipeline had no exporter at all.
+//
+// Traces and metrics reach the collector through AddOpenTelemetry further down; logs went to the
+// console and nowhere else. Nothing about that is visible: a service that exports no logs looks
+// exactly like a service with nothing to report, and this one is the analytics ingest path, so
+// the records that never left cover every beacon this estate receives.
+//
+// Confirmed live on 2026-07-31 — 8,670 spans from Nealytics.Engine in two hours and not one log
+// line in the store. It was the last of the ten services still in that state.
+var nealyticsOtlpEndpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
+
+var nealyticsLogConfig = new LoggerConfiguration()
     .MinimumLevel.Information()
-    .WriteTo.Console(new JsonFormatter())
-    .CreateLogger();
-builder.Host.UseSerilog();
+    .Enrich.FromLogContext()
+    .WriteTo.Console(new JsonFormatter());
+
+if (!string.IsNullOrWhiteSpace(nealyticsOtlpEndpoint))
+{
+    nealyticsLogConfig = nealyticsLogConfig.WriteTo.OpenTelemetry(otlp =>
+    {
+        otlp.Endpoint = nealyticsOtlpEndpoint;
+
+        // Explicit rather than inherited. Serilog's sink does read OTEL_EXPORTER_OTLP_PROTOCOL, but
+        // only after this action runs and without saying so anywhere, so a deployment that sets the
+        // endpoint under a different key — which most of this estate does — silently falls back to
+        // gRPC against an HTTP/protobuf port and delivers nothing. The port is the one fact that
+        // cannot disagree with the endpoint: 4317 IS gRPC, 4318 IS http/protobuf.
+        otlp.Protocol =
+            Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_PROTOCOL")?.Trim().ToLowerInvariant() switch
+            {
+                "grpc" => OtlpProtocol.Grpc,
+                "http/protobuf" => OtlpProtocol.HttpProtobuf,
+                _ => nealyticsOtlpEndpoint.Contains(":4317", StringComparison.Ordinal)
+                    ? OtlpProtocol.Grpc
+                    : OtlpProtocol.HttpProtobuf,
+            };
+
+        // Must match the serviceName the tracer registers below, exactly. The two pipelines build
+        // separate resources and share nothing, so a name set in one place and not the other files
+        // the logs under unknown_service:dotnet — delivered, stored, and attributed to nothing.
+        otlp.ResourceAttributes = new Dictionary<string, object>
+        {
+            ["service.name"] = "Nealytics.Engine",
+            ["deployment.environment"] = builder.Environment.EnvironmentName,
+        };
+    });
+}
+
+Log.Logger = nealyticsLogConfig.CreateLogger();
+
+// Serilog owns the log pipeline outright here and exports OTLP itself through the sink above, so
+// there is no second ILoggerProvider to forward to and no writeToProviders question to get wrong.
+// That question is real — its default of false is exactly what left the sibling dracula service
+// exporting nothing, under a comment claiming the bridge was connected — but the way to not get it
+// wrong is to not depend on it.
+builder.Host.UseSerilog(Log.Logger, dispose: true);
 
 builder.Services.AddCors(cors =>
 {
