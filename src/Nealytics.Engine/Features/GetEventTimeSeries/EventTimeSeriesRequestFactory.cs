@@ -94,7 +94,7 @@ public static class EventTimeSeriesRequestFactory
         TimeSeriesGroupBy groupBy = TimeSeriesGroupBy.None;
         if (!string.IsNullOrEmpty(groupByRaw) && !TimeSeriesGroupByParser.TryParse(groupByRaw, out groupBy))
         {
-            return EventTimeSeriesRequestResult.Fail(StatusBadRequest, "'groupBy' must be one of: event_type, item_id, session_id.");
+            return EventTimeSeriesRequestResult.Fail(StatusBadRequest, "'groupBy' must be one of: event_type, object_id, session_id.");
         }
 
         return EventTimeSeriesRequestResult.Ok(new EventTimeSeriesRequest

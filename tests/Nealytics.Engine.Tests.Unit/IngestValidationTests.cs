@@ -74,7 +74,7 @@ public class IngestValidationTests
             TenantId = "t",
             SessionId = "s",
             EventType = "e",
-            ItemId = null
+            ObjectId = null
         };
 
         IngestValidation.IsValidPayload(payload).Should().BeTrue();

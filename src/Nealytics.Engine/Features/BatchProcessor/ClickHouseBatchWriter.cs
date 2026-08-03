@@ -1,49 +1,87 @@
 namespace Nealytics.Engine.Features.BatchProcessor;
 
 using System;
-using System.Buffers;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Diagnostics;
 using Nealytics.Engine.Infrastructure.Serialization;
 using Nealytics.Engine.Infrastructure.Storage;
 using Octonica.ClickHouseClient;
 
-public sealed class ClickHouseBatchWriter : ITelemetryBatchWriter
+public sealed partial class ClickHouseBatchWriter : ITelemetryBatchWriter
 {
-    internal const string InsertColumns =
-        "INSERT INTO nealytics_core.global_events (event_id, project_id, tenant_id, session_id, "
-        + "user_id, event_type, item_id, menu_id, section_id, table_id, device_class, os, browser, "
-        + "country, metadata_json, timestamp)";
-
     private readonly ClickHouseConnectionFactory _connectionFactory;
+    private readonly TelemetryColumnLayout _layout;
+    private readonly ILogger<ClickHouseBatchWriter> _logger;
     private readonly string _insertCommand;
 
-    public ClickHouseBatchWriter(ClickHouseConnectionFactory connectionFactory, IOptions<TelemetryEngineOptions> options)
+    public ClickHouseBatchWriter(
+        ClickHouseConnectionFactory connectionFactory,
+        DimensionRegistry registry,
+        IOptions<TelemetryEngineOptions> options,
+        ILogger<ClickHouseBatchWriter> logger)
     {
         _connectionFactory = connectionFactory;
-        _insertCommand = BuildInsertCommand(options.Value.EnableAsyncInsert);
+        _logger = logger;
+        _layout = new TelemetryColumnLayout(registry);
+        _insertCommand = BuildInsertCommand(_layout, options.Value.EnableAsyncInsert);
     }
 
-    internal static string BuildInsertCommand(bool asyncInsert)
+    [LoggerMessage(EventId = 9101, Level = LogLevel.Warning,
+        Message = "Dimension '{Dimension}' rejected {RejectedCount} value(s) in a batch of {BatchCount}: "
+            + "they did not parse as the declared type {DeclaredType}. Those cells were written NULL.")]
+    private static partial void LogDimensionValuesRejected(
+        ILogger logger, string dimension, int rejectedCount, int batchCount, string declaredType);
+
+    /// <summary>
+    /// The INSERT's column list, built from <paramref name="layout"/> rather than written out —
+    /// the engine does not know the deployment's dimension names, and the value-array dictionary
+    /// is built from the same list so the two cannot disagree.
+    /// </summary>
+    internal static string BuildInsertColumns(TelemetryColumnLayout layout)
     {
-        if (asyncInsert)
+        StringBuilder builder = new(256);
+        builder.Append("INSERT INTO nealytics_core.global_events (");
+
+        for (int i = 0; i < layout.ColumnNames.Count; i++)
         {
-            return InsertColumns + " SETTINGS async_insert=1, wait_for_async_insert=1 VALUES";
+            if (i > 0)
+            {
+                builder.Append(", ");
+            }
+
+            builder.Append(layout.ColumnNames[i]);
         }
 
-        return InsertColumns + " VALUES";
+        builder.Append(')');
+        return builder.ToString();
+    }
+
+    internal static string BuildInsertCommand(TelemetryColumnLayout layout, bool asyncInsert)
+    {
+        string columns = BuildInsertColumns(layout);
+
+        if (asyncInsert)
+        {
+            return columns + " SETTINGS async_insert=1, wait_for_async_insert=1 VALUES";
+        }
+
+        return columns + " VALUES";
     }
 
     public async Task WriteAsync(
         IReadOnlyList<GlobalTelemetryPayload> batch, int count, CancellationToken cancellationToken)
     {
         // Buffers own their own rent/return; see TelemetryColumnBuffers for why.
-        using TelemetryColumnBuffers buffers = new(count);
+        using TelemetryColumnBuffers buffers = new(count, _layout);
 
         buffers.Fill(batch);
+        ReportRejectedDimensionValues(buffers, count);
         Dictionary<string, object?> columns = buffers.BuildColumns();
 
         await using PooledClickHouseConnection lease =
@@ -66,6 +104,36 @@ public sealed class ClickHouseBatchWriter : ITelemetryBatchWriter
             // reconnect; keeping a dead one costs every batch after it.
             lease.Discard();
             throw;
+        }
+    }
+
+    /// <summary>
+    /// A value that arrived and did not survive is a data loss event, so it is counted and named.
+    /// The batch still goes in — one unparseable cell must not cost the other events in it, and
+    /// beacons cannot retry.
+    /// </summary>
+    private void ReportRejectedDimensionValues(TelemetryColumnBuffers buffers, int count)
+    {
+        IReadOnlyList<DimensionColumnBuffer> dimensionBuffers = buffers.DimensionBuffers;
+
+        for (int i = 0; i < dimensionBuffers.Count; i++)
+        {
+            DimensionColumnBuffer buffer = dimensionBuffers[i];
+            if (buffer.RejectedValueCount == 0)
+            {
+                continue;
+            }
+
+            LogDimensionValuesRejected(
+                _logger,
+                buffer.Dimension.Name,
+                buffer.RejectedValueCount,
+                count,
+                buffer.Dimension.ConfiguredType);
+
+            TelemetryDiagnostics.DimensionValuesRejected.Add(
+                buffer.RejectedValueCount,
+                new KeyValuePair<string, object?>("dimension", buffer.Dimension.Name));
         }
     }
 }

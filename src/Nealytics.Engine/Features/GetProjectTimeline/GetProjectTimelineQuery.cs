@@ -39,7 +39,7 @@ public sealed partial class GetProjectTimelineQuery
         };
 
         StringBuilder sql = new StringBuilder(
-            "SELECT event_id, session_id, user_id, event_type, item_id, metadata_json, timestamp " +
+            "SELECT event_id, session_id, user_id, event_type, object_id, metadata_json, timestamp " +
             "FROM nealytics_core.global_events " +
             "WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String}");
 
@@ -61,10 +61,10 @@ public sealed partial class GetProjectTimelineQuery
             parameters.Add(new KeyValuePair<string, object?>("sessionId", request.SessionId));
         }
 
-        if (!string.IsNullOrEmpty(request.ItemId))
+        if (!string.IsNullOrEmpty(request.ObjectId))
         {
-            sql.Append(" AND item_id = {itemId:String}");
-            parameters.Add(new KeyValuePair<string, object?>("itemId", request.ItemId));
+            sql.Append(" AND object_id = {objectId:String}");
+            parameters.Add(new KeyValuePair<string, object?>("objectId", request.ObjectId));
         }
 
         if (!string.IsNullOrEmpty(request.MetaKey) && !string.IsNullOrEmpty(request.MetaValue))
@@ -124,7 +124,7 @@ public sealed partial class GetProjectTimelineQuery
                     SessionId = reader.GetString(1),
                     UserId = reader.IsDBNull(2) ? null : reader.GetString(2),
                     EventType = reader.GetString(3),
-                    ItemId = reader.IsDBNull(4) ? null : reader.GetString(4),
+                    ObjectId = reader.IsDBNull(4) ? null : reader.GetString(4),
                     MetadataJson = reader.GetString(5),
                     Timestamp = DateTime.SpecifyKind(reader.GetDateTime(6), DateTimeKind.Utc)
                 };

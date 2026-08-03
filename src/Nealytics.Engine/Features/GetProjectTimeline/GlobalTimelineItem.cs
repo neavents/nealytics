@@ -8,7 +8,7 @@ public sealed class GlobalTimelineItem
     public string SessionId { get; set; } = string.Empty;
     public string? UserId { get; set; }
     public string EventType { get; set; } = string.Empty;
-    public string? ItemId { get; set; }
+    public string? ObjectId { get; set; }
     public string MetadataJson { get; set; } = "{}";
     public DateTime Timestamp { get; set; }
 }

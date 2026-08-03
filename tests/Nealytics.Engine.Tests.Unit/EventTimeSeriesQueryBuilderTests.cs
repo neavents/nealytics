@@ -90,7 +90,7 @@ public class EventTimeSeriesQueryBuilderTests
 
     [Theory]
     [InlineData(TimeSeriesGroupBy.EventType, "event_type")]
-    [InlineData(TimeSeriesGroupBy.ItemId, "item_id")]
+    [InlineData(TimeSeriesGroupBy.ObjectId, "object_id")]
     [InlineData(TimeSeriesGroupBy.SessionId, "session_id")]
     public void BuildQuery_WithGroupBy_SelectsWhitelistedSeriesColumn(TimeSeriesGroupBy groupBy, string column)
     {
@@ -104,9 +104,9 @@ public class EventTimeSeriesQueryBuilderTests
     public void BuildQuery_GroupedWithEventTypeFilter_KeepsBothPredicateAndSeries()
     {
         (string sql, var parameters) = GetEventTimeSeriesQuery.BuildQuery(
-            GroupedRequest(TimeSeriesGroupBy.ItemId, eventType: "purchase"));
+            GroupedRequest(TimeSeriesGroupBy.ObjectId, eventType: "purchase"));
 
-        sql.Should().Contain("item_id AS series");
+        sql.Should().Contain("object_id AS series");
         sql.Should().Contain("AND event_type = {eventType:String}");
         parameters.Should().ContainSingle(p => p.Key == "eventType" && (string)p.Value! == "purchase");
     }
@@ -124,7 +124,7 @@ public class TimeSeriesGroupByParserTests
 {
     [Theory]
     [InlineData("event_type", TimeSeriesGroupBy.EventType)]
-    [InlineData("item_id", TimeSeriesGroupBy.ItemId)]
+    [InlineData("object_id", TimeSeriesGroupBy.ObjectId)]
     [InlineData("session_id", TimeSeriesGroupBy.SessionId)]
     public void TryParse_ValidValues_ReturnsTrue(string raw, TimeSeriesGroupBy expected)
     {
@@ -145,7 +145,7 @@ public class TimeSeriesGroupByParserTests
 
     [Theory]
     [InlineData(TimeSeriesGroupBy.EventType, "event_type")]
-    [InlineData(TimeSeriesGroupBy.ItemId, "item_id")]
+    [InlineData(TimeSeriesGroupBy.ObjectId, "object_id")]
     [InlineData(TimeSeriesGroupBy.SessionId, "session_id")]
     public void ToColumn_MapsWhitelistedColumn(TimeSeriesGroupBy groupBy, string expected)
     {

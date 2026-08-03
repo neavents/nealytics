@@ -6,7 +6,7 @@ public enum TimeSeriesGroupBy
 {
     None,
     EventType,
-    ItemId,
+    ObjectId,
     SessionId
 }
 
@@ -19,8 +19,8 @@ public static class TimeSeriesGroupByParser
             case "event_type":
                 groupBy = TimeSeriesGroupBy.EventType;
                 return true;
-            case "item_id":
-                groupBy = TimeSeriesGroupBy.ItemId;
+            case "object_id":
+                groupBy = TimeSeriesGroupBy.ObjectId;
                 return true;
             case "session_id":
                 groupBy = TimeSeriesGroupBy.SessionId;
@@ -37,8 +37,8 @@ public static class TimeSeriesGroupByParser
         {
             case TimeSeriesGroupBy.EventType:
                 return "event_type";
-            case TimeSeriesGroupBy.ItemId:
-                return "item_id";
+            case TimeSeriesGroupBy.ObjectId:
+                return "object_id";
             case TimeSeriesGroupBy.SessionId:
                 return "session_id";
             default:

@@ -22,6 +22,7 @@ public static class BeaconTelemetryEndpoint
             TelemetryChannelBroker broker,
             WriteAheadLogger wal,
             ApiKeyValidator keyValidator,
+            DimensionSanitizer dimensionSanitizer,
             IOptions<TelemetryEngineOptions> options) =>
         {
             using Activity? activity = TelemetryDiagnostics.Source.StartActivity("BeaconIngest");
@@ -57,6 +58,9 @@ public static class BeaconTelemetryEndpoint
                     {
                         continue;
                     }
+
+                    // Before the WAL, so a replay cannot reintroduce a key the registry rejected.
+                    dimensionSanitizer.Sanitize(payload!);
 
                     await wal.AppendAsync(payload!, context.RequestAborted);
                     await broker.PublishAsync(payload!, context.RequestAborted);

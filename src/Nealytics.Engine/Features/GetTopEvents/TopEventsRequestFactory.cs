@@ -55,7 +55,7 @@ public static class TopEventsRequestFactory
         TopDimension dimension = TopDimension.EventType;
         if (!string.IsNullOrEmpty(dimensionRaw) && !TopDimensionParser.TryParse(dimensionRaw, out dimension))
         {
-            return TopEventsRequestResult.Fail(StatusBadRequest, "'dimension' must be one of: event_type, item_id.");
+            return TopEventsRequestResult.Fail(StatusBadRequest, "'dimension' must be one of: event_type, object_id.");
         }
 
         int limit = Math.Clamp(DefaultLimit, 1, maxLimit);
