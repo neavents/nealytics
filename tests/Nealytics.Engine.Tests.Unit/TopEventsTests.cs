@@ -7,7 +7,7 @@ public class TopDimensionParserTests
 {
     [Theory]
     [InlineData("event_type", TopDimension.EventType)]
-    [InlineData("item_id", TopDimension.ItemId)]
+    [InlineData("object_id", TopDimension.ObjectId)]
     public void TryParse_ValidValues_ReturnsTrue(string raw, TopDimension expected)
     {
         TopDimensionParser.TryParse(raw, out var dimension).Should().BeTrue();
@@ -27,7 +27,7 @@ public class TopDimensionParserTests
 
     [Theory]
     [InlineData(TopDimension.EventType, "event_type")]
-    [InlineData(TopDimension.ItemId, "item_id")]
+    [InlineData(TopDimension.ObjectId, "object_id")]
     public void ToColumn_MapsWhitelistedColumn(TopDimension dimension, string expected)
     {
         TopDimensionParser.ToColumn(dimension).Should().Be(expected);
@@ -36,7 +36,7 @@ public class TopDimensionParserTests
     [Fact]
     public void ExcludesNull_OnlyForItemId()
     {
-        TopDimensionParser.ExcludesNull(TopDimension.ItemId).Should().BeTrue();
+        TopDimensionParser.ExcludesNull(TopDimension.ObjectId).Should().BeTrue();
         TopDimensionParser.ExcludesNull(TopDimension.EventType).Should().BeFalse();
     }
 
@@ -96,7 +96,7 @@ public class TopEventsRequestFactoryTests
     [Fact]
     public void ValidDimension_IsParsed()
     {
-        Create(dimension: "item_id").Request.Dimension.Should().Be(TopDimension.ItemId);
+        Create(dimension: "object_id").Request.Dimension.Should().Be(TopDimension.ObjectId);
     }
 
     [Fact]
@@ -165,10 +165,10 @@ public class TopEventsQueryBuilderTests
     [Fact]
     public void BuildQuery_ItemId_ExcludesNullKeys()
     {
-        var (sql, _) = GetTopEventsQuery.BuildQuery(Request(TopDimension.ItemId));
+        var (sql, _) = GetTopEventsQuery.BuildQuery(Request(TopDimension.ObjectId));
 
-        sql.Should().Contain("SELECT item_id AS key");
-        sql.Should().Contain("AND item_id IS NOT NULL");
+        sql.Should().Contain("SELECT object_id AS key");
+        sql.Should().Contain("AND object_id IS NOT NULL");
     }
 
     [Fact]

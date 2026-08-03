@@ -18,7 +18,7 @@ public class MoreFeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
         DateTime.UtcNow.AddMinutes(-minutesAgo).ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
 
     private async Task Ingest(string projectId, string tenantId, string sessionId, string eventType,
-        string? itemId = null, string? timestamp = null)
+        string? objectId = null, string? timestamp = null)
     {
         var payload = new
         {
@@ -26,7 +26,7 @@ public class MoreFeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
             tenantId,
             sessionId,
             eventType,
-            itemId,
+            objectId,
             timestamp = timestamp ?? RecentTimestamp(1),
             metadataJson = "{}"
         };
@@ -88,14 +88,14 @@ public class MoreFeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
     public async Task Timeline_ItemIdFilter_ReturnsOnlyMatching()
     {
         string tenantId = $"t-item-{Guid.NewGuid():N}";
-        await Ingest("p-item", tenantId, "s", "click", itemId: "/pricing");
-        await Ingest("p-item", tenantId, "s", "click", itemId: "/home");
+        await Ingest("p-item", tenantId, "s", "click", objectId: "/pricing");
+        await Ingest("p-item", tenantId, "s", "click", objectId: "/home");
         await Task.Delay(4000);
 
-        JsonElement body = await GetJson("/api/v1/telemetry/timeline?limit=50&itemId=/pricing", "p-item", tenantId);
+        JsonElement body = await GetJson("/api/v1/telemetry/timeline?limit=50&objectId=/pricing", "p-item", tenantId);
         JsonElement events = body.GetProperty("events");
         events.GetArrayLength().Should().Be(1);
-        events[0].GetProperty("itemId").GetString().Should().Be("/pricing");
+        events[0].GetProperty("objectId").GetString().Should().Be("/pricing");
     }
 
     [Fact]

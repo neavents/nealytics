@@ -15,6 +15,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using Nealytics.Engine.Features.BatchProcessor;
 using Nealytics.Engine.Features.GetActiveUsers;
+using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Features.GetEventTimeSeries;
 using Nealytics.Engine.Features.GetProjectTimeline;
 using Nealytics.Engine.Features.GetSessionAnalytics;
@@ -42,6 +43,15 @@ if (string.IsNullOrWhiteSpace(engineOpts.JwtSymmetricKey) || Encoding.UTF8.GetBy
 {
     throw new InvalidOperationException("TelemetryEngine:JwtSymmetricKey must be at least 32 bytes.");
 }
+
+// Built eagerly, before anything can take traffic, because an invalid declaration throws here and
+// a refused boot is the only safe answer. The alternative — resolving it lazily on first ingest —
+// would let the service report healthy and then fail one request at a time.
+//
+// The engine ships with this list empty. What is in it comes from the deployment's configuration,
+// which is what makes this repo free of any one customer's vocabulary.
+DimensionRegistry dimensionRegistry = new(engineOpts);
+builder.Services.AddSingleton(dimensionRegistry);
 
 builder.WebHost.ConfigureKestrel(serverOptions =>
 {
@@ -172,6 +182,7 @@ builder.Services.AddSingleton<ClickHouseConnectionFactory>();
 builder.Services.AddSingleton<WriteAheadLogger>();
 builder.Services.AddSingleton<TelemetryChannelBroker>();
 builder.Services.AddSingleton<ApiKeyValidator>();
+builder.Services.AddSingleton<DimensionSanitizer>();
 // Widens global_events before the batch processor takes traffic. clickhouse-init.sql only runs
 // on an empty volume, so an existing deployment would otherwise reject every batch naming a
 // column added since it was first created.
@@ -184,6 +195,10 @@ builder.Services.AddScoped<GetSessionAnalyticsQuery>();
 builder.Services.AddScoped<GetEventTimeSeriesQuery>();
 builder.Services.AddScoped<GetActiveUsersQuery>();
 builder.Services.AddScoped<GetTopEventsQuery>();
+builder.Services.AddScoped<GetBreakdownQuery>();
+// The query allowlist. A singleton built from the registry, so groupBy/filter validation and the
+// schema reconciler can never disagree about which dimensions exist.
+builder.Services.AddSingleton(new BreakdownColumns(dimensionRegistry));
 
 // Where telemetry actually goes, and it went nowhere before this.
 //
@@ -270,6 +285,7 @@ app.MapGetSessionAnalytics();
 app.MapGetEventTimeSeries();
 app.MapGetActiveUsers();
 app.MapGetTopEvents();
+app.MapGetBreakdown();
 if (engineOpts.EnablePrometheusScrape)
 {
     app.MapPrometheusScrapingEndpoint();

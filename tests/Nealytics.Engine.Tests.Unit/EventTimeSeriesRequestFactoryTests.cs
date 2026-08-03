@@ -134,7 +134,7 @@ public class EventTimeSeriesRequestFactoryTests
 
     [Theory]
     [InlineData("event_type", TimeSeriesGroupBy.EventType)]
-    [InlineData("item_id", TimeSeriesGroupBy.ItemId)]
+    [InlineData("object_id", TimeSeriesGroupBy.ObjectId)]
     [InlineData("session_id", TimeSeriesGroupBy.SessionId)]
     public void Create_ValidGroupBy_IsParsed(string raw, TimeSeriesGroupBy expected)
     {

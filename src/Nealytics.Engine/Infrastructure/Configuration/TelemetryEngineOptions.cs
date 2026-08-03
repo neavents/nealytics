@@ -1,7 +1,47 @@
 namespace Nealytics.Engine.Infrastructure.Configuration;
 
+using System.Collections.Generic;
+
+/// <summary>
+/// One analytics dimension, declared by the deployment rather than by the engine.
+///
+/// The engine ships this list empty. A deployment names its own dimensions in configuration —
+/// <c>TelemetryEngine__Dimensions__0__Name</c> and friends — which is the whole reason the engine
+/// no longer contains any customer's vocabulary.
+/// </summary>
+public sealed class DimensionOptions
+{
+    /// <summary>snake_case column name, <c>[a-z][a-z0-9_]{0,62}</c>.</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>One of String | LowCardinality | UInt64 | Int64 | DateTime.</summary>
+    public string Type { get; set; } = "String";
+
+    /// <summary>
+    /// Retires the dimension without destroying it: the column and every row stay, ingestion
+    /// refuses the name, and the query API stops offering it.
+    ///
+    /// Retirement has to be an explicit act because *absence is what a mistake looks like* — one
+    /// deleted config line would otherwise start a silent hole in the data at the same instant it
+    /// blanked the widget that would have shown you.
+    /// </summary>
+    public bool Retired { get; set; }
+}
+
 public sealed class TelemetryEngineOptions
 {
+    /// <summary>
+    /// Dimensions this deployment declares. Empty in the shipped <c>appsettings.json</c> on
+    /// purpose — see <see cref="DimensionOptions"/>.
+    /// </summary>
+    public List<DimensionOptions> Dimensions { get; set; } = [];
+
+    /// <summary>
+    /// Ceiling on declared dimensions. The registry issues DDL from this list, so a config bug
+    /// must not be able to add columns without limit.
+    /// </summary>
+    public int MaxDimensions { get; set; } = 64;
+
     public string ClickHouseConnectionString { get; set; } = "Host=127.0.0.1;Port=9000;Database=nealytics_core;";
     public string WriteAheadLogDirectory { get; set; } = "/var/log/nealytics_engine/";
     public int MemoryChannelCapacity { get; set; } = 100_000;

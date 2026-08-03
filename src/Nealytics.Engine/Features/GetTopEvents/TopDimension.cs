@@ -5,7 +5,7 @@ using System;
 public enum TopDimension
 {
     EventType,
-    ItemId
+    ObjectId
 }
 
 public static class TopDimensionParser
@@ -17,8 +17,8 @@ public static class TopDimensionParser
             case "event_type":
                 dimension = TopDimension.EventType;
                 return true;
-            case "item_id":
-                dimension = TopDimension.ItemId;
+            case "object_id":
+                dimension = TopDimension.ObjectId;
                 return true;
             default:
                 dimension = TopDimension.EventType;
@@ -32,8 +32,8 @@ public static class TopDimensionParser
         {
             case TopDimension.EventType:
                 return "event_type";
-            case TopDimension.ItemId:
-                return "item_id";
+            case TopDimension.ObjectId:
+                return "object_id";
             default:
                 throw new ArgumentOutOfRangeException(nameof(dimension));
         }
@@ -45,12 +45,12 @@ public static class TopDimensionParser
         {
             case TopDimension.EventType:
                 return "event_type";
-            case TopDimension.ItemId:
-                return "item_id";
+            case TopDimension.ObjectId:
+                return "object_id";
             default:
                 throw new ArgumentOutOfRangeException(nameof(dimension));
         }
     }
 
-    public static bool ExcludesNull(TopDimension dimension) => dimension == TopDimension.ItemId;
+    public static bool ExcludesNull(TopDimension dimension) => dimension == TopDimension.ObjectId;
 }

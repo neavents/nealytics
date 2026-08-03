@@ -18,7 +18,7 @@ public class V12FeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
 
     private async Task Ingest(
         string projectId, string tenantId, string sessionId, string eventType,
-        string? userId = null, string? itemId = null, string? metadataJson = null, DateTime? timestamp = null)
+        string? userId = null, string? objectId = null, string? metadataJson = null, DateTime? timestamp = null)
     {
         var payload = new
         {
@@ -27,7 +27,7 @@ public class V12FeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
             sessionId,
             userId,
             eventType,
-            itemId,
+            objectId,
             timestamp = (timestamp ?? DateTime.UtcNow).ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
             metadataJson = metadataJson ?? "{}"
         };
@@ -250,17 +250,17 @@ public class V12FeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
         string tenantId = $"t-topitem-{Guid.NewGuid():N}";
         string projectId = "p-top";
 
-        await Ingest(projectId, tenantId, "s1", "view", itemId: "/home");
-        await Ingest(projectId, tenantId, "s1", "view", itemId: "/home");
-        await Ingest(projectId, tenantId, "s1", "view", itemId: null);
+        await Ingest(projectId, tenantId, "s1", "view", objectId: "/home");
+        await Ingest(projectId, tenantId, "s1", "view", objectId: "/home");
+        await Ingest(projectId, tenantId, "s1", "view", objectId: null);
 
         await Task.Delay(4000);
 
         JsonElement body = await Get(projectId, tenantId,
-            "/api/v1/analytics/top?dimension=item_id&from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z");
+            "/api/v1/analytics/top?dimension=object_id&from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z");
 
         JsonElement items = body.GetProperty("items");
-        items.GetArrayLength().Should().Be(1, "the NULL item_id row must be excluded");
+        items.GetArrayLength().Should().Be(1, "the NULL object_id row must be excluded");
         items[0].GetProperty("key").GetString().Should().Be("/home");
         items[0].GetProperty("count").GetInt64().Should().Be(2);
     }

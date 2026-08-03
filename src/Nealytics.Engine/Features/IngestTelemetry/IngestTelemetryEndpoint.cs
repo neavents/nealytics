@@ -23,6 +23,7 @@ public static class IngestTelemetryEndpoint
             TelemetryChannelBroker broker,
             WriteAheadLogger wal,
             ApiKeyValidator keyValidator,
+            DimensionSanitizer dimensionSanitizer,
             IOptions<TelemetryEngineOptions> options) =>
         {
             using Activity? activity = TelemetryDiagnostics.Source.StartActivity("IngestHttpRequest");
@@ -69,6 +70,9 @@ public static class IngestTelemetryEndpoint
                 {
                     return Results.BadRequest();
                 }
+
+                // Before the WAL, so a replay cannot reintroduce a key the registry rejected.
+                dimensionSanitizer.Sanitize(payload!);
 
                 await wal.AppendAsync(payload!, context.RequestAborted);
                 await broker.PublishAsync(payload!, context.RequestAborted);

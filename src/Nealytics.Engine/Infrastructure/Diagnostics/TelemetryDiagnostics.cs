@@ -18,6 +18,25 @@ public static class TelemetryDiagnostics
     public static readonly Counter<long> ReadQueriesExecuted =
         EngineMeter.CreateCounter<long>("nealytics_read_queries_total");
 
+    /// <summary>
+    /// Fields dropped at ingest because their key is not a declared dimension, tagged with the
+    /// key and the project that sent it.
+    ///
+    /// An unregistered dimension vanishing without a trace is precisely the failure the declared
+    /// dimension design exists to end: in this same estate a Cloudflare Worker returned 204 for
+    /// three months while discarding every analytics beacon, and the only evidence was a table
+    /// that stopped growing.
+    /// </summary>
+    public static readonly Counter<long> UnknownDimensionsDropped =
+        EngineMeter.CreateCounter<long>("nealytics_unknown_dimensions_dropped_total");
+
+    /// <summary>
+    /// Values for a declared dimension that did not parse as its declared type, tagged with the
+    /// dimension. The cell is written NULL; the batch still commits.
+    /// </summary>
+    public static readonly Counter<long> DimensionValuesRejected =
+        EngineMeter.CreateCounter<long>("nealytics_dimension_values_rejected_total");
+
     public static readonly Histogram<double> StorageWriteDuration =
         EngineMeter.CreateHistogram<double>("nealytics_storage_write_duration_seconds");
 
