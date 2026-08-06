@@ -30,13 +30,63 @@ public class SchemaReconcilerGuardTests
             ConnectionPoolSize = 2,
         });
 
+    /// <summary>
+    /// The dimensions the environment declares, read from the same variables production reads.
+    ///
+    /// <remarks>
+    /// <para>Without this, every test here declared <i>only</i> its own probe column — so the
+    /// reconciler saw the deployment's real dimensions as undeclared. While those columns were
+    /// empty that was invisible. The moment one held a single row, three of these tests failed with
+    /// "Undeclared column(s) ... menu_id (1 row(s))" and the two refusal tests started passing for a
+    /// reason that had nothing to do with their probe. Both directions are wrong, and the second is
+    /// worse: a guard test that would pass with the guard broken.</para>
+    ///
+    /// <para>The table is shared with whatever deployment owns this ClickHouse, so isolating the
+    /// probe means declaring everything else that legitimately exists. Reading it from the
+    /// environment rather than naming columns here keeps the engine's own suite free of any
+    /// deployment's vocabulary — which is the property the whole change was for.</para>
+    /// </remarks>
+    /// </summary>
+    private static List<DimensionOptions> AmbientDimensions()
+    {
+        List<DimensionOptions> ambient = [];
+
+        for (int i = 0; ; i++)
+        {
+            string? name = Environment.GetEnvironmentVariable($"TelemetryEngine__Dimensions__{i}__Name");
+            if (string.IsNullOrWhiteSpace(name)) break;
+
+            ambient.Add(new DimensionOptions
+            {
+                Name = name,
+                Type = Environment.GetEnvironmentVariable($"TelemetryEngine__Dimensions__{i}__Type") ?? "String",
+                Retired = string.Equals(
+                    Environment.GetEnvironmentVariable($"TelemetryEngine__Dimensions__{i}__Retired"),
+                    "true",
+                    StringComparison.OrdinalIgnoreCase),
+            });
+        }
+
+        return ambient;
+    }
+
     private static async Task<ClickHouseSchemaMigrator> MigratorAsync(params DimensionOptions[] declared)
     {
+        List<DimensionOptions> dimensions = AmbientDimensions();
+
+        // The probe wins if it collides with an ambient name — a test that names its own probe is
+        // being explicit, and two entries with one name refuses the boot for an unrelated reason.
+        foreach (DimensionOptions declaration in declared)
+        {
+            dimensions.RemoveAll(d => string.Equals(d.Name, declaration.Name, StringComparison.Ordinal));
+            dimensions.Add(declaration);
+        }
+
         TelemetryEngineOptions options = new()
         {
             ClickHouseConnectionString = ClickHouseTestSupport.ConnectionString,
             ConnectionPoolSize = 2,
-            Dimensions = [.. declared],
+            Dimensions = dimensions,
         };
 
         ClickHouseConnectionFactory factory = new(
@@ -135,16 +185,29 @@ public class SchemaReconcilerGuardTests
                 + $"{probe}, metadata_json, timestamp) VALUES (generateUUIDv4(), '{projectId}', "
                 + $"'t', 's', 'e', 'a-value', '{{}}', now64(3))");
 
-            // Nothing declared at all — this is one deleted config line, the mistake the guard exists for.
+            // The probe is not declared — this is one deleted config line, the mistake the guard
+            // exists for. Everything the environment declares still is, so the probe is the only
+            // undeclared column and the refusal can only be about it.
             ClickHouseSchemaMigrator migrator = await MigratorAsync();
 
             Func<Task> start = () => migrator.StartAsync(CancellationToken.None);
 
-            (await start.Should().ThrowAsync<ClickHouseSchemaMigrator.SchemaReconciliationException>())
-                .Which.Message.Should()
-                    .Contain(probe).And
-                    .Contain("1 row(s)",
-                        "the refusal must say how much data is at stake, not just that something is wrong");
+            string message =
+                (await start.Should().ThrowAsync<ClickHouseSchemaMigrator.SchemaReconciliationException>())
+                    .Which.Message;
+
+            message.Should()
+                .Contain(probe).And
+                .Contain("1 row(s)",
+                    "the refusal must say how much data is at stake, not just that something is wrong");
+
+            // Without this the test passes whenever ANY dimension column holds data, probe or not —
+            // which is how it survived before AmbientDimensions() existed.
+            foreach (DimensionOptions ambient in AmbientDimensions())
+            {
+                message.Should().NotContain(ambient.Name!,
+                    "a declared dimension must never appear in an undeclared-column refusal");
+            }
         }
         finally
         {

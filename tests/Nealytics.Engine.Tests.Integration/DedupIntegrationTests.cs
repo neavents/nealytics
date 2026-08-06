@@ -16,7 +16,8 @@ public class DedupIntegrationTests : IntegrationTestBase, IAsyncLifetime
     [Fact]
     public async Task WalReplayDuplicates_CollapseToSingleRow_AfterMerge()
     {
-        string projectId = $"p-dedup-{Guid.NewGuid():N}";
+        await using TestProject project = TestProject.New("p-dedup");
+        string projectId = project.Id;
         string fixedTimestamp = DateTime.UtcNow.AddHours(-1).ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
         Guid[] eventIds =
         {
