@@ -14,6 +14,15 @@ public class BatchProcessorFlushTests : IntegrationTestBase
     public async Task IngestEvents_NormalFlush_CommitsToClickHouse(int eventCount)
     {
         var projectId = $"p-flush-{eventCount}";
+
+        // This class asserts an exact count under a project id that is the same on every run, so it
+        // has to start from a known state. It never cleaned up: it was relying on another class's
+        // `TRUNCATE TABLE global_events` running first and emptying the whole table — which also
+        // destroyed the estate's real analytics. With the truncate gone this failed honestly on the
+        // second run ("expected 3, found 6"), which is what a test with no cleanup should always
+        // have done.
+        await ClickHouseTestSupport.DeleteProjectsAsync(projectId);
+
         Client.DefaultRequestHeaders.Add("X-Project-Key", "test-key-1");
         for (int i = 0; i < eventCount; i++)
         {

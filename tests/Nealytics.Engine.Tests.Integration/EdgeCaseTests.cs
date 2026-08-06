@@ -9,7 +9,18 @@ public class EdgeCaseTests : IntegrationTestBase, IAsyncLifetime
 {
     public EdgeCaseTests(TestWebApplicationFactory factory) : base(factory) { }
 
-    public Task InitializeAsync() => ClickHouseTestSupport.TruncateEventsAsync();
+    /// <summary>
+    /// Every project id this class writes under. Listed rather than wiping the table, because the
+    /// table is shared with whatever else is running on this ClickHouse — see
+    /// <see cref="ClickHouseTestSupport.DeleteProjectsAsync"/>.
+    /// </summary>
+    /// <summary>The 200-character id <see cref="POST_Track_WithMaxLengthFields_Returns202"/> writes under.</summary>
+    private static readonly string MaxLengthProject = new('a', 200);
+
+    private static readonly string[] OwnedProjects =
+        ["p-conc", "p-mix", "p-noitem", "p-special", "p-uni", MaxLengthProject];
+
+    public Task InitializeAsync() => ClickHouseTestSupport.DeleteProjectsAsync(OwnedProjects);
 
     public Task DisposeAsync() => Task.CompletedTask;
 

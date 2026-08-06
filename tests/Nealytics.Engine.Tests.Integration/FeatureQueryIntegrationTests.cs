@@ -12,7 +12,13 @@ public class FeatureQueryIntegrationTests : IntegrationTestBase, IAsyncLifetime
 
     public Task InitializeAsync() => Task.CompletedTask;
 
-    public Task DisposeAsync() => Task.CompletedTask;
+    /// <summary>
+    /// The fixed project ids this class writes under. The suite shares
+    /// nealytics_core.global_events with the running estate, so each class removes its own
+    /// rows — nothing else will. This used to be done, accidentally, by another class's
+    /// TRUNCATE of the whole table.
+    /// </summary>
+    public Task DisposeAsync() => ClickHouseTestSupport.DeleteProjectsAsync("p-ts", "p-filter");
 
     private async Task Ingest(string projectId, string tenantId, string sessionId, string eventType)
     {

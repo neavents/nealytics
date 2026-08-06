@@ -22,7 +22,13 @@ public class BreakdownIntegrationTests : IntegrationTestBase, IAsyncLifetime
 
     public Task InitializeAsync() => Task.CompletedTask;
 
-    public Task DisposeAsync() => Task.CompletedTask;
+    /// <summary>
+    /// Every test in this class writes under the fixed project <c>p-bd</c>, isolating itself with a
+    /// per-test tenant instead. That keeps the assertions independent but leaves the rows behind,
+    /// and the table is shared with the running estate — so the class removes its own project when
+    /// it is done. Measured before this: 104 rows, growing by a full set every run.
+    /// </summary>
+    public Task DisposeAsync() => ClickHouseTestSupport.DeleteProjectsAsync("p-bd");
 
     private async Task Ingest(
         string projectId, string tenantId, string sessionId, string eventType,

@@ -57,7 +57,8 @@ public class LoadTests : IClassFixture<LoadTestWebApplicationFactory>
     public async Task ZeroLoss_UnderConcurrentBurst_EveryAcceptedEventIsPersisted()
     {
         int total = EventCount;
-        string projectId = $"p-load-{Guid.NewGuid():N}";
+        await using TestProject project = TestProject.New("p-load");
+        string projectId = project.Id;
         string tenantId = "t-load";
 
         ConcurrentBag<HttpStatusCode> statuses = new ConcurrentBag<HttpStatusCode>();
