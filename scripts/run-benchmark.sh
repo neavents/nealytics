@@ -43,7 +43,7 @@ REQUESTS="${BENCH_REQUESTS:-40000}"
 WARMUP="${BENCH_WARMUP:-3000}"
 WAL_DIR="${BENCH_WAL_DIR:-$(mktemp -d)/wal}"
 # Overridable so a benchmark can run on its own ClickHouse rather than fighting the integration
-# suite or scripts/aot-smoke.sh for the default ports — both of those tear their container down
+# suite or scripts/smoke-test.sh for the default ports — both of those tear their container down
 # with `down -v`, which is a bad way to find out something else was using it.
 #   BENCH_ISOLATED=1  ->  docker-compose.bench.yml on 9100/8223
 COMPOSE_FILE="${BENCH_COMPOSE_FILE:-docker-compose.test.yml}"

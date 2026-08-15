@@ -4,21 +4,20 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CH_HTTP="${CLICKHOUSE_HTTP:-http://127.0.0.1:8123}"
-PORT="${AOT_SMOKE_PORT:-5095}"
-OUT="${AOT_SMOKE_OUT:-$(mktemp -d)/aot}"
-KEY="aot-smoke-symmetric-key-at-least-32-bytes!!"
+PORT="${SMOKE_PORT:-5095}"
+OUT="${SMOKE_OUT:-$(mktemp -d)/publish}"
+KEY="smoke-test-symmetric-key-at-least-32-bytes!!"
 PROJECT_KEY="probe:key123"
-PROJECT="aotsmoke"
+PROJECT="smoketest"
 TENANT="t1"
 
 ch() { curl -sS --data-binary "$1" "$CH_HTTP/" ; }
 
-echo "Publishing Native AOT..."
-# Not silenced on failure. ILC runs for a long time and anything that interrupts it -- an OOM kill,
-# a stray pkill matching the csproj path, a cancelled CI job -- leaves `dotnet publish` returning
-# without a binary. The script then ran the missing file and reported "engine exited during
+echo "Publishing the release binary (${SMOKE_RID:-linux-x64})..."
+# Not silenced on failure. Anything that interrupts the publish leaves `dotnet publish` returning
+# without a binary, and the script then ran the missing file and reported "engine exited during
 # startup", which sends you looking at the engine instead of at the build that never finished.
-if ! dotnet publish src/Nealytics.Engine/Nealytics.Engine.csproj -c Release -r linux-x64 -o "$OUT" >"$OUT.publish.log" 2>&1; then
+if ! dotnet publish src/Nealytics.Engine/Nealytics.Engine.csproj -c Release -r "${SMOKE_RID:-linux-x64}" -o "$OUT" >"$OUT.publish.log" 2>&1; then
   echo "FAIL: dotnet publish did not succeed. Last 30 lines:"
   tail -30 "$OUT.publish.log"
   exit 1
@@ -26,7 +25,7 @@ fi
 
 if [ ! -x "$OUT/Nealytics.Engine" ]; then
   echo "FAIL: publish reported success but produced no binary at $OUT/Nealytics.Engine."
-  echo "That usually means ILC was killed rather than that it failed. Last 30 lines:"
+  echo "Last 30 lines:"
   tail -30 "$OUT.publish.log"
   exit 1
 fi
@@ -143,7 +142,7 @@ for i in $(seq 1 30); do
 done
 
 if [ "${rows:-0}" != "1" ]; then
-  echo "FAIL: the AOT binary accepted the event and never committed it (rows=${rows:-0})."
+  echo "FAIL: the binary accepted the event and never committed it (rows=${rows:-0})."
   echo "A missing generic instantiation looks exactly like this: 202 on ingest, nothing in storage."
   exit 1
 fi
@@ -192,10 +191,10 @@ TO="$(date -u -d '1 hour' +%Y-%m-%dT%H:%M:%SZ)"
 check() {
   local name="$1" path="$2"
   local code
-  code="$(curl -s -o /tmp/aot-read.out -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT$path")"
+  code="$(curl -s -o /tmp/smoke-read.out -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT$path")"
   if [ "$code" != "200" ]; then
     echo "FAIL: $name returned $code"
-    cat /tmp/aot-read.out
+    cat /tmp/smoke-read.out
     exit 1
   fi
   echo "PASS: $name"
@@ -218,4 +217,4 @@ check "breakdown/p95-measure"  "/api/v1/analytics/breakdown?from=$FROM&to=$TO&gr
 check "breakdown/sum-decimal"  "/api/v1/analytics/breakdown?from=$FROM&to=$TO&groupBy=event_type&metric=sum(m_decimal)"
 
 echo
-echo "AOT smoke passed: every column type the engine can declare survives a real Native AOT build."
+echo "Smoke test passed: every column type the engine can declare survives a real publish."

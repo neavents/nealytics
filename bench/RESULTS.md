@@ -89,7 +89,7 @@ Serilog spells Trace `Verbose` and Critical `Fatal`, and an unmapped name falls 
 ## Read path — was the rollup worth building
 
 Run with `./scripts/run-benchmark.sh read` (2026-08-14, Linux, 12 cores, ~1 core occupied by an
-unrelated AOT compile — so treat the absolute numbers as a floor and the **ratios** as the finding).
+unrelated compile, so treat the absolute numbers as a floor and the **ratios** as the finding).
 
 Each mode preflights the response's `source` field and aborts if it is not the path it claims to
 measure, so these are not two labels on the same query:

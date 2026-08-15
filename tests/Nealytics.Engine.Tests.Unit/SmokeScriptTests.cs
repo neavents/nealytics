@@ -4,23 +4,23 @@ using FluentAssertions;
 namespace Nealytics.Engine.Tests.Unit;
 
 /// <summary>
-/// The AOT smoke script asks only for things it declares.
+/// The smoke script asks only for things it declares.
 ///
 /// <b>What this cost to learn.</b> The script declared <c>m_float64</c> with no
 /// <c>Aggregations</c> — so it defaulted to <c>sum,avg,min,max,count</c> — and then asked for
 /// <c>metric=p95(m_float64)</c>. The engine correctly answered <c>400</c>: refusing an aggregation
 /// nobody declared is a feature, not a bug. But the check sits near the end of a run whose earlier
 /// stages had always failed first, so it had <b>never once executed</b>, and finding it took a
-/// three-hour ILC publish.
+/// full publish and a run against a real database.
 ///
 /// Both halves are in the same file, twenty lines apart. That makes this a static consistency
 /// question, answerable in milliseconds, and there is no reason to spend a compile on it.
 ///
-/// This does not replace the smoke run. Nothing here proves the AOT binary works — only running it
+/// This does not replace the smoke run. Nothing here proves the published binary works, only running it
 /// does. What it does is guarantee that when the binary <i>is</i> built, every assertion in the
 /// script is one the engine could satisfy, so a failure means what it says.
 /// </summary>
-public class AotSmokeScriptTests
+public class SmokeScriptTests
 {
     private static string Script()
     {
@@ -28,15 +28,14 @@ public class AotSmokeScriptTests
 
         while (directory is not null)
         {
-            string candidate = Path.Combine(directory.FullName, "scripts", "aot-smoke.sh");
+            string candidate = Path.Combine(directory.FullName, "scripts", "smoke-test.sh");
             if (File.Exists(candidate)) return File.ReadAllText(candidate);
             directory = directory.Parent;
         }
 
         throw new FileNotFoundException(
-            "scripts/aot-smoke.sh not found. It is the only thing that catches a missing rd.xml "
-            + "runtime directive, because dotnet test runs on the JIT where MakeGenericType always "
-            + "works.");
+            "scripts/smoke-test.sh not found. It is the only thing that runs the real published "
+            + "binary and checks that a row was committed.");
     }
 
     /// <summary>Indexed env declarations, e.g. <c>Measures__8__Aggregations</c>, by name.</summary>
@@ -110,7 +109,7 @@ public class AotSmokeScriptTests
                     $"the script asks for {aggregation}({measure}), and an aggregation the "
                     + "declaration does not offer is a 400 by design. Add it to "
                     + $"TelemetryEngine__Measures__N__Aggregations rather than dropping the check -- "
-                    + "the point of it is to exercise that code path in a real AOT binary.");
+                    + "the point of it is to exercise that code path in a real published binary.");
         }
     }
 
@@ -137,7 +136,7 @@ public class AotSmokeScriptTests
             groupable.Should().Contain(
                 match.Groups["column"].Value,
                 "a groupBy the deployment does not declare is a 400, and the smoke run would "
-                + "report it as an AOT failure");
+                + "report it as a binary failure");
         }
     }
 
@@ -145,8 +144,8 @@ public class AotSmokeScriptTests
     public void EveryRollupNamesOnlyDeclaredColumns()
     {
         // A rollup over a column the registry does not offer refuses the boot outright -- which in
-        // a smoke run reads as "the AOT binary will not start", sending you to rd.xml for a
-        // configuration mistake.
+        // a smoke run reads as "the binary will not start", which sends you looking at the build
+        // for what is a configuration mistake.
         Dictionary<string, Dictionary<string, string>> rollups = Declared("Rollups");
         HashSet<string> dimensions = [.. Declared("Dimensions").Keys];
         HashSet<string> measures = [.. Declared("Measures").Keys];
@@ -177,7 +176,7 @@ public class AotSmokeScriptTests
         // or not a single row was committed.
         script.Should().Contain(
             "write path committed the row",
-            "the one failure mode rd.xml exists to prevent is silent -- accepted, healthy, stored "
+            "the failure this guards is silent: accepted, healthy, stored "
             + "nowhere");
     }
 }

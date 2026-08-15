@@ -22,6 +22,27 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
+    # Bounded so a hung job fails loudly rather than spending the six hour default. The publish
+    # itself is seconds.
+    timeout-minutes: 30
+
+    # The release binary is verified before it is packaged, against a real ClickHouse.
+    #
+    # v1.0.2, v1.1.0 and v1.2.0 all shipped a binary that accepted events and stored none of them.
+    # Ingest returned 202, /health and /ready passed, and every row was lost. Nothing in this
+    # workflow could have noticed, because it published whatever compiled. The unit tests cannot
+    # catch it either. Only running the real binary proves it, which is what smoke-test.sh does.
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:latest
+        ports:
+          - 9000:9000
+          - 8123:8123
+        env:
+          CLICKHOUSE_SKIP_USER_SETUP: 1
+        options: >-
+          --ulimit nofile=262144:262144
+
     steps:
       - uses: actions/checkout@v4
 
@@ -30,12 +51,29 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Publish Native AOT
-        run: >
-          dotnet publish src/Nealytics.Engine/Nealytics.Engine.csproj
-          -c Release
-          -r ${{ matrix.rid }}
-          -o publish/
+      - name: Wait for ClickHouse
+        run: |
+          for i in $(seq 1 60); do
+            if docker exec ${{ job.services.clickhouse.id }} clickhouse-client -q "SELECT 1" >/dev/null 2>&1; then
+              echo "ClickHouse ready after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "ClickHouse did not become ready"; exit 1
+
+      - name: Init ClickHouse schema
+        run: |
+          docker cp clickhouse-init.sql ${{ job.services.clickhouse.id }}:/tmp/clickhouse-init.sql
+          docker exec ${{ job.services.clickhouse.id }} clickhouse-client --queries-file /tmp/clickhouse-init.sql
+
+      # Publishes into publish/ AND proves the result commits a row carrying every declared column
+      # type, then answers every read endpoint. The tarball below is that exact binary -- not a
+      # second build that merely used the same inputs.
+      - name: Publish and verify the binary stores rows
+        env:
+          SMOKE_OUT: publish
+          SMOKE_RID: ${{ matrix.rid }}
+        run: ./scripts/smoke-test.sh
 
       - name: Package
         run: |

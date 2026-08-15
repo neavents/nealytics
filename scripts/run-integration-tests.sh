@@ -3,8 +3,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# Isolatable for the same reason the benchmark is: scripts/aot-smoke.sh uses the default ports and
-# the cleanup below is `down -v`, so running this while an AOT publish is in flight destroys it.
+# Isolatable for the same reason the benchmark is: scripts/smoke-test.sh uses the default ports and
+# the cleanup below is `down -v`, so running this while a publish is in flight destroys it.
 #   INTEGRATION_ISOLATED=1  ->  docker-compose.bench.yml on 9100/8223
 COMPOSE_FILE="docker-compose.test.yml"
 CH_CONTAINER="nealytics-clickhouse-test"

@@ -13,7 +13,7 @@ Thanks for your interest in improving Nealytics. This guide covers how to build,
 dotnet build
 ```
 
-The engine (`src/Nealytics.Engine`) compiles with **Native AOT** enabled and full trimming. Keep that in mind: no runtime reflection, no dynamic IL, and no reflection-based serialization. JSON goes through the source-generated `TelemetryAotContext`.
+The engine (`src/Nealytics.Engine`) ships as one self contained binary. JSON goes through the source generated `TelemetryAotContext` rather than reflection, which keeps the trimmed size down and the hot path allocation free. Keep it that way.
 
 ## Running tests
 

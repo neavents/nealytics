@@ -20,7 +20,7 @@ using Octonica.ClickHouseClient;
 //   breakdown|breakdown-rollup       the same grouping answered from raw and from a rollup
 //   breakdown-measure|breakdown-measure-rollup   the same, for sum(amount)
 //
-// This tool is intentionally exempt from the engine's no-var / no-comment / AOT rules.
+// This tool is intentionally exempt from the engine's no-var and no-comment rules.
 
 BenchOptions options = BenchOptions.Parse(args);
 Console.WriteLine(options.Describe());

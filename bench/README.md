@@ -11,7 +11,7 @@ Two pieces:
 - **`tests/…/LayeredBenchmarks.cs`** — in-process micro-benchmarks that call the WAL and channel
   **directly** (no HTTP), and expose the WAL's internal group-commit stats.
 
-Both are developer tools, exempt from the engine's no-`var` / no-comment / AOT rules.
+Both are developer tools, exempt from the engine's no-`var` and no-comment rules.
 
 ## The layers (why several)
 
@@ -56,8 +56,8 @@ BENCH_ISOLATED=1 ./scripts/run-benchmark.sh all
 container.
 
 This is not tidiness. Both the benchmark and the integration suite finish with `docker compose
-down -v`, and `scripts/aot-smoke.sh` uses the same default ports — so running a benchmark during an
-AOT publish destroys it, and an AOT publish takes long enough that you will not be watching.
+down -v`, and `scripts/smoke-test.sh` uses the same default ports, so running a benchmark while a
+publish is in flight destroys it.
 
 ## The read run, and why the pair of breakdown modes exists
 
@@ -86,7 +86,7 @@ which is the worst kind. The preflight also aborts on an empty result set, becau
 zero rows measures the absence of work.
 
 A read run resets the ClickHouse volume first. The reconciler refuses to boot when the table holds
-a column that no declaration mentions and that column has rows, and `aot-smoke.sh` uses the same
+a column that no declaration mentions and that column has rows, and `smoke-test.sh` uses the same
 container — without the reset the benchmark dies at startup complaining about another script's
 columns.
 
