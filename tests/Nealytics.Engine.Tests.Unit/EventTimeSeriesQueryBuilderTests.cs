@@ -67,7 +67,7 @@ public class EventTimeSeriesQueryBuilderTests
         parameters.Should().NotContain(p => p.Key == "eventType");
     }
 
-    private static EventTimeSeriesRequest GroupedRequest(TimeSeriesGroupBy groupBy, string? eventType = null) =>
+    private static EventTimeSeriesRequest GroupedRequest(string groupByColumn, string? eventType = null) =>
         new EventTimeSeriesRequest
         {
             ProjectId = "proj",
@@ -76,7 +76,7 @@ public class EventTimeSeriesQueryBuilderTests
             To = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc),
             Interval = TimeSeriesInterval.Hour,
             EventType = eventType,
-            GroupBy = groupBy,
+            GroupByColumn = groupByColumn,
             Limit = 500
         };
 
@@ -89,12 +89,13 @@ public class EventTimeSeriesQueryBuilderTests
     }
 
     [Theory]
-    [InlineData(TimeSeriesGroupBy.EventType, "event_type")]
-    [InlineData(TimeSeriesGroupBy.ObjectId, "object_id")]
-    [InlineData(TimeSeriesGroupBy.SessionId, "session_id")]
-    public void BuildQuery_WithGroupBy_SelectsWhitelistedSeriesColumn(TimeSeriesGroupBy groupBy, string column)
+    [InlineData("event_type")]
+    [InlineData("object_id")]
+    [InlineData("session_id")]
+    [InlineData("widget_id")]
+    public void BuildQuery_WithGroupBy_SelectsWhitelistedSeriesColumn(string column)
     {
-        (string sql, _) = GetEventTimeSeriesQuery.BuildQuery(GroupedRequest(groupBy));
+        (string sql, _) = GetEventTimeSeriesQuery.BuildQuery(GroupedRequest(column));
 
         sql.Should().Contain($"{column} AS series");
         sql.Should().Contain("GROUP BY bucket, series ORDER BY bucket ASC, series ASC LIMIT {limit:Int32}");
@@ -104,7 +105,7 @@ public class EventTimeSeriesQueryBuilderTests
     public void BuildQuery_GroupedWithEventTypeFilter_KeepsBothPredicateAndSeries()
     {
         (string sql, var parameters) = GetEventTimeSeriesQuery.BuildQuery(
-            GroupedRequest(TimeSeriesGroupBy.ObjectId, eventType: "purchase"));
+            GroupedRequest("object_id", eventType: "purchase"));
 
         sql.Should().Contain("object_id AS series");
         sql.Should().Contain("AND event_type = {eventType:String}");
@@ -114,49 +115,9 @@ public class EventTimeSeriesQueryBuilderTests
     [Fact]
     public void BuildQuery_Grouped_NeverInterpolatesGroupColumnFromUserInput()
     {
-        (string sql, _) = GetEventTimeSeriesQuery.BuildQuery(GroupedRequest(TimeSeriesGroupBy.SessionId));
+        (string sql, _) = GetEventTimeSeriesQuery.BuildQuery(GroupedRequest("session_id"));
         sql.Should().Contain("session_id AS series");
         sql.Should().NotContain("{groupBy");
-    }
-}
-
-public class TimeSeriesGroupByParserTests
-{
-    [Theory]
-    [InlineData("event_type", TimeSeriesGroupBy.EventType)]
-    [InlineData("object_id", TimeSeriesGroupBy.ObjectId)]
-    [InlineData("session_id", TimeSeriesGroupBy.SessionId)]
-    public void TryParse_ValidValues_ReturnsTrue(string raw, TimeSeriesGroupBy expected)
-    {
-        TimeSeriesGroupByParser.TryParse(raw, out var groupBy).Should().BeTrue();
-        groupBy.Should().Be(expected);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData(null)]
-    [InlineData("user_id")]
-    [InlineData("EventType")]
-    public void TryParse_InvalidValues_ReturnsFalseAndNone(string? raw)
-    {
-        TimeSeriesGroupByParser.TryParse(raw, out var groupBy).Should().BeFalse();
-        groupBy.Should().Be(TimeSeriesGroupBy.None);
-    }
-
-    [Theory]
-    [InlineData(TimeSeriesGroupBy.EventType, "event_type")]
-    [InlineData(TimeSeriesGroupBy.ObjectId, "object_id")]
-    [InlineData(TimeSeriesGroupBy.SessionId, "session_id")]
-    public void ToColumn_MapsWhitelistedColumn(TimeSeriesGroupBy groupBy, string expected)
-    {
-        TimeSeriesGroupByParser.ToColumn(groupBy).Should().Be(expected);
-    }
-
-    [Fact]
-    public void ToColumn_None_Throws()
-    {
-        Action act = () => TimeSeriesGroupByParser.ToColumn(TimeSeriesGroupBy.None);
-        act.Should().Throw<ArgumentOutOfRangeException>();
     }
 }
 

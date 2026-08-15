@@ -1,7 +1,10 @@
 namespace Nealytics.Engine.Features.GetEventTimeSeries;
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
+using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Infrastructure.Configuration;
 
 public readonly struct EventTimeSeriesRequestResult
 {
@@ -39,6 +42,11 @@ public static class EventTimeSeriesRequestFactory
         string? toRaw,
         string? eventType,
         string? groupByRaw,
+        string? tzRaw,
+        string? trafficRaw,
+        IReadOnlyList<string> filtersRaw,
+        BreakdownColumns columns,
+        MeasureRegistry measures,
         int maxLimit,
         int defaultRangeHours,
         DateTime nowUtc)
@@ -91,21 +99,73 @@ public static class EventTimeSeriesRequestFactory
             return EventTimeSeriesRequestResult.Fail(StatusBadRequest, "Filter values must not exceed 256 characters.");
         }
 
-        TimeSeriesGroupBy groupBy = TimeSeriesGroupBy.None;
-        if (!string.IsNullOrEmpty(groupByRaw) && !TimeSeriesGroupByParser.TryParse(groupByRaw, out groupBy))
+        string? groupByColumn = null;
+        if (!string.IsNullOrEmpty(groupByRaw))
         {
-            return EventTimeSeriesRequestResult.Fail(StatusBadRequest, "'groupBy' must be one of: event_type, object_id, session_id.");
+            if (measures.IsActive(groupByRaw))
+            {
+                return EventTimeSeriesRequestResult.Fail(
+                    StatusBadRequest,
+                    $"'{groupByRaw}' is a declared measure, not a dimension. A measure is a quantity "
+                    + "to aggregate, not a series to split by.");
+            }
+
+            if (!columns.TryResolve(groupByRaw, out string resolved))
+            {
+                return EventTimeSeriesRequestResult.Fail(
+                    StatusBadRequest, columns.RejectionMessage("groupBy", groupByRaw));
+            }
+
+            groupByColumn = resolved;
+        }
+
+        string? timeZone = null;
+        if (!string.IsNullOrEmpty(tzRaw))
+        {
+            if (!TimeBucket.IsWellFormed(tzRaw))
+            {
+                return EventTimeSeriesRequestResult.Fail(
+                    StatusBadRequest,
+                    "'tz' must be an IANA time zone name such as Europe/Istanbul.");
+            }
+
+            timeZone = tzRaw;
+        }
+
+        if (!TrafficFilter.TryParse(trafficRaw, out string? trafficClass))
+        {
+            return EventTimeSeriesRequestResult.Fail(StatusBadRequest, TrafficFilter.Rejection(trafficRaw));
+        }
+
+        // The same parser /breakdown uses, so a filter means one thing across the engine.
+        FilterParser.Result parsedFilters = FilterParser.Parse(filtersRaw ?? [], columns, MaxFieldLength);
+
+        switch (parsedFilters.Outcome)
+        {
+            case FilterParser.Outcome.Malformed:
+                return EventTimeSeriesRequestResult.Fail(
+                    StatusBadRequest, $"'filter' must be written name:value. Got '{parsedFilters.Offender}'.");
+            case FilterParser.Outcome.UnknownColumn:
+                return EventTimeSeriesRequestResult.Fail(
+                    StatusBadRequest, columns.RejectionMessage("filter", parsedFilters.Column));
+            case FilterParser.Outcome.ValueTooLong:
+                return EventTimeSeriesRequestResult.Fail(
+                    StatusBadRequest,
+                    $"'filter' value for '{parsedFilters.Column}' must not exceed {MaxFieldLength} characters.");
         }
 
         return EventTimeSeriesRequestResult.Ok(new EventTimeSeriesRequest
         {
+            Filters = parsedFilters.Filters,
             ProjectId = projectId,
             TenantId = tenantId,
             From = fromUtc,
             To = toUtc,
+            TrafficClass = trafficClass,
             Interval = interval,
             EventType = normalizedEventType,
-            GroupBy = groupBy,
+            GroupByColumn = groupByColumn,
+            TimeZone = timeZone,
             Limit = limit
         });
     }

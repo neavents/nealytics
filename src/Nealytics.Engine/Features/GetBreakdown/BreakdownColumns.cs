@@ -30,6 +30,9 @@ public sealed class BreakdownColumns
     [
         "event_type",
         "object_id",
+        "traffic_class",
+        "page_path",
+        "referrer",
         "session_id",
         "user_id",
         "tenant_id",

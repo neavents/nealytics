@@ -1,0 +1,33 @@
+{
+  "//": [
+    "The declaration the read benchmark runs against.",
+    "",
+    "Deliberately a different vertical to the QR-menu example: the point of the benchmark is that",
+    "the engine does not know any of these names, and a reader comparing this file against",
+    "neavents-schema.example.json can see the same machinery answer to two vocabularies.",
+    "",
+    "daily_by_product covers product_id, category_id and campaign_id, so the SAME breakdown query",
+    "can be answered from either the rollup or raw depending only on whether its range lands on a",
+    "day boundary. That is what makes the two numbers in RESULTS.md comparable: one grouping, one",
+    "dataset, two code paths."
+  ],
+
+  "TelemetryEngine": {
+    "Dimensions": [
+      { "Name": "product_id", "Type": "String" },
+      { "Name": "category_id", "Type": "LowCardinality" },
+      { "Name": "campaign_id", "Type": "LowCardinality" }
+    ],
+
+    "Measures": [
+      { "Name": "amount", "Type": "UInt32", "Aggregations": "sum,avg,max,p95", "Minimum": 0 }
+    ],
+
+    "Rollups": [
+      { "Name": "daily_by_product", "Grain": "day",
+        "EventTypes": "bench",
+        "Dimensions": "product_id,category_id,campaign_id",
+        "Measures": "amount:sum,amount:avg" }
+    ]
+  }
+}

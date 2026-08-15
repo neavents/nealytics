@@ -31,6 +31,11 @@ internal sealed class TelemetryColumnLayout
         "user_id",
         "event_type",
         "object_id",
+        "seq",
+        "traffic_class",
+        "page_path",
+        "referrer",
+        "ingested_at",
         "device_class",
         "os",
         "browser",
@@ -39,14 +44,22 @@ internal sealed class TelemetryColumnLayout
         "timestamp",
     ];
 
-    internal TelemetryColumnLayout(DimensionRegistry registry)
+    internal TelemetryColumnLayout(DimensionRegistry registry, MeasureRegistry measures)
     {
         Dimensions = registry.Active;
-        ColumnNames = [.. CoreColumns, .. Dimensions.Select(dimension => dimension.Name)];
+        Measures = measures.Active;
+        ColumnNames =
+        [
+            .. CoreColumns,
+            .. Dimensions.Select(dimension => dimension.Name),
+            .. Measures.Select(measure => measure.Name),
+        ];
     }
 
     /// <summary>Active dimensions, in registry order — the order they appear after the core columns.</summary>
     internal IReadOnlyList<Dimension> Dimensions { get; }
+
+    internal IReadOnlyList<Measure> Measures { get; }
 
     /// <summary>Core columns followed by dimension columns. The one list.</summary>
     internal IReadOnlyList<string> ColumnNames { get; }

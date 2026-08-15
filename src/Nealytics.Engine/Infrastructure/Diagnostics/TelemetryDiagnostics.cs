@@ -37,6 +37,26 @@ public static class TelemetryDiagnostics
     public static readonly Counter<long> DimensionValuesRejected =
         EngineMeter.CreateCounter<long>("nealytics_dimension_values_rejected_total");
 
+    public static readonly Counter<long> UnknownMeasuresDropped =
+        EngineMeter.CreateCounter<long>("nealytics_unknown_measures_dropped_total");
+
+    public static readonly Counter<long> MeasureValuesRejected =
+        EngineMeter.CreateCounter<long>("nealytics_measure_values_rejected_total");
+
+    /// <summary>
+    /// Whole events refused at ingest, tagged with the reason and the transport.
+    ///
+    /// The beacon endpoint used to step past an invalid element with a bare <c>continue</c>: no
+    /// counter, no log, and a 204 for the batch. A client shipping a malformed field would lose
+    /// every event carrying it while every signal available said the pipeline was healthy, which
+    /// is the same shape as the outage the dimension counters above exist to prevent.
+    ///
+    /// The reason tag comes from a closed enum rather than from anything the caller sent, so this
+    /// cannot become an unbounded cardinality dimension in the metrics backend.
+    /// </summary>
+    public static readonly Counter<long> EventsRejected =
+        EngineMeter.CreateCounter<long>("nealytics_events_rejected_total");
+
     public static readonly Histogram<double> StorageWriteDuration =
         EngineMeter.CreateHistogram<double>("nealytics_storage_write_duration_seconds");
 

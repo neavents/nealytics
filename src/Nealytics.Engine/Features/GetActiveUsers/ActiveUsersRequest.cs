@@ -11,5 +11,7 @@ public readonly struct ActiveUsersRequest
     public ActiveUsersInterval Interval { get; init; }
     public ActiveDimension Dimension { get; init; }
     public ActiveCountMode Mode { get; init; }
+    public string? TimeZone { get; init; }
+    public string? TrafficClass { get; init; }
     public int Limit { get; init; }
 }

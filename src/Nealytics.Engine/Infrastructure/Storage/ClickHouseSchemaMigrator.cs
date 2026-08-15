@@ -3,6 +3,9 @@ namespace Nealytics.Engine.Infrastructure.Storage;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
+using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -55,25 +58,78 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
     /// Core columns, kept in step with <c>clickhouse-init.sql</c> by hand — the two describe the
     /// same table. Nothing deployment-specific belongs here; that is what the registry is for.
     /// </summary>
-    private static readonly IReadOnlyList<string> CoreStatements =
+    internal static readonly IReadOnlyList<string> CoreStatements =
     [
+        $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS user_id Nullable(String)",
+        $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS object_id Nullable(String)",
         $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS device_class LowCardinality(String) DEFAULT ''",
         $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS os LowCardinality(String) DEFAULT ''",
         $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS browser LowCardinality(String) DEFAULT ''",
         $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS country LowCardinality(String) DEFAULT ''",
+        $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS seq UInt32 DEFAULT 0",
+        $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS traffic_class LowCardinality(String) DEFAULT 'normal'",
+        $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS page_path String DEFAULT ''",
+        $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS referrer LowCardinality(String) DEFAULT ''",
+        $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS ingested_at DateTime64(3, 'UTC') DEFAULT now64(3)",
+
+        // Metadata-only and idempotent, verified on 26.7.1 including on a Nullable(String). Existing
+        // parts stay unindexed until their next merge, so this speeds up new data first -- which is
+        // the right way round, since the drilldown it serves is mostly asked about recent events.
+        $"ALTER TABLE {Database}.{Table} ADD INDEX IF NOT EXISTS idx_object_id object_id TYPE bloom_filter(0.01) GRANULARITY 4",
     ];
+
+    private static readonly Regex RetentionPattern = new(
+        @"TTL\s+toDateTime\(timestamp\)\s*\+\s*(?:toInterval[Dd]ay\((\d+)\)|INTERVAL\s+(\d+)\s+DAY)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// One clause of a compound TTL, written against the form ClickHouse actually stores.
+    ///
+    /// Read off 26.7.1 rather than assumed: <c>INTERVAL 30 DAY</c> comes back as
+    /// <c>toIntervalDay(30)</c>, the <c>DELETE</c> keyword is dropped because it is the default,
+    /// and the condition survives verbatim. Both spellings are accepted so a table created by an
+    /// older init script still parses.
+    /// </summary>
+    private static readonly Regex RetentionRulePattern = new(
+        @"toDateTime\(timestamp\)\s*\+\s*(?:toInterval[Dd]ay\((?<d1>\d+)\)|INTERVAL\s+(?<d2>\d+)\s+DAY)"
+        + @"(?:\s+DELETE)?(?:\s+WHERE\s+event_type\s*=\s*'(?<event>[^']*)')?",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// What an event type may be called for the purposes of a TTL condition.
+    ///
+    /// Event types are never declared -- ingestion accepts whatever it is sent -- so there is no
+    /// registry to check a name against, and this string is interpolated into DDL. The shape is
+    /// therefore the whole defence: no quote, no backslash, no whitespace, no semicolon can appear
+    /// in a name that matches. Deliberately more permissive than the dimension pattern, because a
+    /// deployment's event vocabulary is its own and may well be camelCase or dotted.
+    /// </summary>
+    private static readonly Regex EventTypeNamePattern =
+        new(@"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly ClickHouseConnectionFactory _connectionFactory;
     private readonly DimensionRegistry _registry;
+    private readonly MeasureRegistry _measures;
+    private readonly RollupRegistry _rollups;
+    private readonly int _retentionDays;
+    private readonly List<EventTypeRetentionOptions> _eventTypeRetention;
     private readonly ILogger<ClickHouseSchemaMigrator> _logger;
 
     public ClickHouseSchemaMigrator(
         ClickHouseConnectionFactory connectionFactory,
         DimensionRegistry registry,
+        MeasureRegistry measures,
+        RollupRegistry rollups,
+        Microsoft.Extensions.Options.IOptions<TelemetryEngineOptions> options,
         ILogger<ClickHouseSchemaMigrator> logger)
     {
         _connectionFactory = connectionFactory;
         _registry = registry;
+        _measures = measures;
+        _rollups = rollups;
+        _retentionDays = options.Value.RetentionDays;
+        _eventTypeRetention = options.Value.EventTypeRetention ?? [];
+        ValidateEventTypeRetention(_retentionDays, _eventTypeRetention);
         _logger = logger;
     }
 
@@ -124,6 +180,54 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
             + "created; ingest will reject batches naming one until this succeeds. Query endpoints "
             + "stay up deliberately: a database blip must not take analytics reads down with it.")]
     private static partial void LogReconciliationUnreachable(ILogger logger, Exception exception);
+
+    [LoggerMessage(EventId = 8101, Level = LogLevel.Information,
+        Message = "Measure '{Measure}' is declared but missing from {Database}.{Table}. "
+            + "Adding it as {ClickHouseType}.")]
+    private static partial void LogAddingMeasure(
+        ILogger logger, string measure, string database, string table, string clickHouseType);
+
+    [LoggerMessage(EventId = 8103, Level = LogLevel.Critical,
+        Message = "SCHEMA REFUSED: measure '{Measure}' is declared as {DeclaredType} but the column "
+            + "in {Database}.{Table} is {ActualType}. Refusing to start rather than coerce it — "
+            + "narrowing a numeric column truncates every value that no longer fits and widening it "
+            + "changes what the old rows meant. Fix the declared type or rename the measure.")]
+    private static partial void LogMeasureTypeMismatch(
+        ILogger logger, string measure, string declaredType, string database, string table, string actualType);
+
+    [LoggerMessage(EventId = 8105, Level = LogLevel.Information,
+        Message = "Measure '{Measure}' is retired: its column and {RowCount} row(s) are kept, "
+            + "ingestion refuses the name, and the query API does not offer it.")]
+    private static partial void LogRetiredMeasure(ILogger logger, string measure, ulong rowCount);
+
+    [LoggerMessage(EventId = 8110, Level = LogLevel.Information,
+        Message = "Retention on {Database}.{Table} is [{Actual}] but configuration declares "
+            + "[{Declared}]. Applying the declared value. Existing parts keep their old TTL until "
+            + "their next merge, so eviction of already-written data is not immediate.")]
+    private static partial void LogRetentionDrift(
+        ILogger logger, string database, string table, string actual, string declared);
+
+    [LoggerMessage(EventId = 8111, Level = LogLevel.Warning,
+        Message = "Could not read the retention TTL on {Database}.{Table}; leaving it untouched. "
+            + "The table keeps whatever TTL it was created with, which may differ from "
+            + "TelemetryEngine:RetentionDays.")]
+    private static partial void LogRetentionUnreadable(ILogger logger, string database, string table);
+
+    [LoggerMessage(EventId = 8120, Level = LogLevel.Information,
+        Message = "Rollup '{Rollup}' created: {Database}.{Table} and its materialized view. It "
+            + "aggregates from this point forward only — rows already in the source table are not "
+            + "backfilled, so a chart answered from it will read low until the range it covers is "
+            + "entirely after this moment, or until you backfill with INSERT INTO ... SELECT.")]
+    private static partial void LogRollupCreated(
+        ILogger logger, string rollup, string database, string table);
+
+    [LoggerMessage(EventId = 8121, Level = LogLevel.Warning,
+        Message = "Rollup '{Rollup}' already exists and its stored definition differs from the "
+            + "declared one. Leaving it alone — recreating the view would silently start aggregating "
+            + "a different shape while every existing row kept the old one. Drop "
+            + "{Database}.{View} and {Database}.{Table} deliberately if you meant to change it.")]
+    private static partial void LogRollupDrift(
+        ILogger logger, string rollup, string database, string view, string table);
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -199,9 +303,57 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
             }
         }
 
+        foreach (Measure measure in _measures.Declared)
+        {
+            if (!live.TryGetValue(measure.Name, out string? actualType))
+            {
+                if (measure.Retired)
+                {
+                    LogRetiredMeasure(_logger, measure.Name, 0);
+                    continue;
+                }
+
+                LogAddingMeasure(_logger, measure.Name, Database, Table, measure.ClickHouseType);
+
+                await ExecuteAsync(
+                    pooled,
+                    $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS "
+                    + $"{measure.Name} {measure.ClickHouseType}",
+                    cancellationToken).ConfigureAwait(false);
+
+                added++;
+                continue;
+            }
+
+            if (!TypesMatch(measure.ClickHouseType, actualType))
+            {
+                LogMeasureTypeMismatch(
+                    _logger, measure.Name, measure.ClickHouseType, Database, Table, actualType);
+
+                throw new SchemaReconciliationException(
+                    $"Measure '{measure.Name}' is declared as {measure.ClickHouseType} but the "
+                    + $"column in {Database}.{Table} is {actualType}.");
+            }
+
+            if (measure.Retired)
+            {
+                ulong retiredRows =
+                    await CountNonNullAsync(pooled, measure.Name, cancellationToken).ConfigureAwait(false);
+                LogRetiredMeasure(_logger, measure.Name, retiredRows);
+            }
+        }
+
+        await ReconcileRetentionAsync(pooled, cancellationToken).ConfigureAwait(false);
+
+        await ReconcileRollupsAsync(pooled, cancellationToken).ConfigureAwait(false);
+
         await RefuseUndeclaredColumnsWithDataAsync(pooled, live, cancellationToken).ConfigureAwait(false);
 
-        LogReconciled(_logger, CoreStatements.Count, _registry.Declared.Count, added);
+        LogReconciled(
+            _logger,
+            CoreStatements.Count,
+            _registry.Declared.Count + _measures.Declared.Count,
+            added);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -232,7 +384,9 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
 
         foreach (string column in live.Keys.OrderBy(name => name, StringComparer.Ordinal))
         {
-            if (DimensionRegistry.ReservedColumns.Contains(column) || _registry.IsDeclared(column))
+            if (DimensionRegistry.ReservedColumns.Contains(column)
+                || _registry.IsDeclared(column)
+                || _measures.IsDeclared(column))
             {
                 continue;
             }
@@ -253,10 +407,271 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         {
             throw new SchemaReconciliationException(
                 $"Undeclared column(s) in {Database}.{Table} still holding data: "
-                + $"{string.Join(", ", offenders)}. Declare them under TelemetryEngine:Dimensions, "
-                + "with Retired: true if collection should stop.");
+                + $"{string.Join(", ", offenders)}. Declare them under TelemetryEngine:Dimensions or "
+                + "TelemetryEngine:Measures, with Retired: true if collection should stop.");
         }
     }
+
+    private async Task ReconcileRollupsAsync(
+        PooledClickHouseConnection pooled, CancellationToken cancellationToken)
+    {
+        foreach (Rollup rollup in _rollups.Declared)
+        {
+            string desiredView = RollupRegistry.BuildViewDdl(rollup);
+
+            string? existing = await ReadCreateQueryAsync(
+                pooled, rollup.ViewName, cancellationToken).ConfigureAwait(false);
+
+            if (existing is null)
+            {
+                await ExecuteAsync(
+                    pooled, RollupRegistry.BuildTableDdl(rollup), cancellationToken).ConfigureAwait(false);
+                await ExecuteAsync(pooled, desiredView, cancellationToken).ConfigureAwait(false);
+
+                LogRollupCreated(_logger, rollup.Name, Database, rollup.TableName);
+                continue;
+            }
+
+            if (!DefinitionsAgree(existing, rollup))
+            {
+                LogRollupDrift(_logger, rollup.Name, Database, rollup.ViewName, rollup.TableName);
+            }
+        }
+    }
+
+    internal static bool DefinitionsAgree(string storedCreateQuery, Rollup rollup)
+    {
+        foreach (RollupColumn dimension in rollup.Dimensions)
+        {
+            if (!storedCreateQuery.Contains(dimension.Name, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        foreach (RollupMeasure measure in rollup.Measures)
+        {
+            if (!storedCreateQuery.Contains(measure.ColumnName, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return storedCreateQuery.Contains(rollup.BucketFunction, StringComparison.Ordinal);
+    }
+
+    private async Task<string?> ReadCreateQueryAsync(
+        PooledClickHouseConnection pooled, string table, CancellationToken cancellationToken)
+    {
+        await using ClickHouseCommand command = pooled.Connection.CreateCommand(
+            "SELECT create_table_query FROM system.tables "
+            + "WHERE database = {database:String} AND name = {table:String}");
+
+        command.Parameters.Add(new ClickHouseParameter { ParameterName = "database", Value = Database });
+        command.Parameters.Add(new ClickHouseParameter { ParameterName = "table", Value = table });
+
+        object? raw = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return raw as string;
+    }
+
+    internal static string BuildRetentionDdl(int retentionDays) =>
+        BuildRetentionDdl(retentionDays, []);
+
+    internal static string BuildRetentionDdl(
+        int retentionDays, IReadOnlyList<EventTypeRetentionOptions> perEventType)
+    {
+        StringBuilder ttl = new(128);
+
+        // Per-type clauses first, then the catch-all. Order is cosmetic -- measured on 26.7.1, every
+        // clause is evaluated independently and any match deletes, so the shortest applicable rule
+        // wins wherever it is written. Specific-before-general is simply how it reads.
+        foreach (EventTypeRetentionOptions rule in perEventType)
+        {
+            ttl.Append("toDateTime(timestamp) + INTERVAL ").Append(rule.Days).Append(" DAY DELETE");
+            ttl.Append(" WHERE event_type = '").Append(rule.EventType).Append("', ");
+        }
+
+        ttl.Append("toDateTime(timestamp) + INTERVAL ").Append(retentionDays).Append(" DAY DELETE");
+
+        return $"ALTER TABLE {Database}.{Table} MODIFY TTL {ttl} "
+            + "SETTINGS materialize_ttl_after_modify = 0";
+    }
+
+    internal static string? ReadRetentionDays(string? createTableQuery)
+    {
+        if (string.IsNullOrEmpty(createTableQuery))
+        {
+            return null;
+        }
+
+        Match match = RetentionPattern.Match(createTableQuery);
+
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        return match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value;
+    }
+
+    /// <summary>
+    /// Every TTL clause the live table carries, as (days, eventType) with a null event type for the
+    /// catch-all. Returns null when the table has no readable TTL at all.
+    /// </summary>
+    internal static List<(int Days, string? EventType)>? ReadRetentionRules(string? createTableQuery)
+    {
+        if (string.IsNullOrEmpty(createTableQuery))
+        {
+            return null;
+        }
+
+        int ttlAt = createTableQuery.IndexOf("\nTTL ", StringComparison.Ordinal);
+        if (ttlAt < 0)
+        {
+            ttlAt = createTableQuery.IndexOf(" TTL ", StringComparison.Ordinal);
+        }
+
+        if (ttlAt < 0)
+        {
+            return null;
+        }
+
+        // Bounded to the TTL clause. Scanning the whole statement would let a column named in a
+        // DEFAULT expression elsewhere be read as a retention rule.
+        int end = createTableQuery.IndexOf("\nSETTINGS", ttlAt, StringComparison.Ordinal);
+        string ttlText = end < 0 ? createTableQuery[ttlAt..] : createTableQuery[ttlAt..end];
+
+        List<(int, string?)> rules = [];
+
+        foreach (Match match in RetentionRulePattern.Matches(ttlText))
+        {
+            string days = match.Groups["d1"].Success ? match.Groups["d1"].Value : match.Groups["d2"].Value;
+
+            if (!int.TryParse(days, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed))
+            {
+                continue;
+            }
+
+            rules.Add((parsed, match.Groups["event"].Success ? match.Groups["event"].Value : null));
+        }
+
+        return rules.Count == 0 ? null : rules;
+    }
+
+    /// <summary>
+    /// Whether the live TTL already says what the configuration says. Compared as a set, because
+    /// clause order carries no meaning to ClickHouse and reordering it must not look like drift --
+    /// a reconciler that logs drift on every boot trains people to stop reading the log.
+    /// </summary>
+    internal static bool RetentionAgrees(
+        List<(int Days, string? EventType)> actual,
+        int retentionDays,
+        IReadOnlyList<EventTypeRetentionOptions> perEventType)
+    {
+        HashSet<(int, string?)> declared = [(retentionDays, null)];
+
+        foreach (EventTypeRetentionOptions rule in perEventType)
+        {
+            declared.Add((rule.Days, rule.EventType));
+        }
+
+        return declared.SetEquals(actual);
+    }
+
+    /// <summary>
+    /// Refuses a per-event-type retention that cannot do what it says.
+    ///
+    /// The longer-than-base case is the one that matters and it is not theoretical: declared
+    /// against a 90 day base, a 365 day rule for 'audit' deletes those rows at 90 days while the
+    /// configuration file, the code review and the log all say a year. Verified on 26.7.1 with a
+    /// 100-day-old row that a 365 day rule did not save.
+    /// </summary>
+    internal static void ValidateEventTypeRetention(
+        int retentionDays, IReadOnlyList<EventTypeRetentionOptions> perEventType)
+    {
+        HashSet<string> seen = new(StringComparer.Ordinal);
+
+        foreach (EventTypeRetentionOptions rule in perEventType)
+        {
+            string eventType = rule.EventType ?? string.Empty;
+
+            if (!EventTypeNamePattern.IsMatch(eventType))
+            {
+                throw new InvalidOperationException(
+                    $"TelemetryEngine:EventTypeRetention declares event type '{eventType}', which is "
+                    + "not a valid name. It must start with a letter and contain only letters, digits, "
+                    + "'_', '.', ':' or '-'. The name is written into a TTL condition, so nothing else "
+                    + "can be permitted here.");
+            }
+
+            if (!seen.Add(eventType))
+            {
+                throw new InvalidOperationException(
+                    $"TelemetryEngine:EventTypeRetention declares '{rule.EventType}' more than once. "
+                    + "ClickHouse would keep both clauses and apply the shorter, so the longer entry "
+                    + "would be a line of configuration that does nothing.");
+            }
+
+            if (rule.Days <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"TelemetryEngine:EventTypeRetention gives '{rule.EventType}' {rule.Days} day(s). "
+                    + "It must be at least 1; to stop collecting an event type, stop sending it.");
+            }
+
+            if (rule.Days >= retentionDays)
+            {
+                throw new InvalidOperationException(
+                    $"TelemetryEngine:EventTypeRetention keeps '{rule.EventType}' for {rule.Days} day(s), "
+                    + $"which is not shorter than TelemetryEngine:RetentionDays ({retentionDays}). A "
+                    + "compound TTL applies the shortest matching rule, so this entry would change "
+                    + "nothing while appearing to: the rows would still be deleted after "
+                    + $"{retentionDays} day(s). Raise RetentionDays instead.");
+            }
+        }
+    }
+
+    private async Task ReconcileRetentionAsync(
+        PooledClickHouseConnection pooled, CancellationToken cancellationToken)
+    {
+        if (_retentionDays <= 0)
+        {
+            return;
+        }
+
+        await using ClickHouseCommand command = pooled.Connection.CreateCommand(
+            "SELECT create_table_query FROM system.tables "
+            + "WHERE database = {database:String} AND name = {table:String}");
+
+        command.Parameters.Add(new ClickHouseParameter { ParameterName = "database", Value = Database });
+        command.Parameters.Add(new ClickHouseParameter { ParameterName = "table", Value = Table });
+
+        object? raw = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        List<(int Days, string? EventType)>? actual = ReadRetentionRules(raw as string);
+
+        if (actual is null)
+        {
+            LogRetentionUnreadable(_logger, Database, Table);
+            return;
+        }
+
+        if (RetentionAgrees(actual, _retentionDays, _eventTypeRetention))
+        {
+            return;
+        }
+
+        LogRetentionDrift(_logger, Database, Table, Describe(actual), Describe(_retentionDays, _eventTypeRetention));
+        await ExecuteAsync(
+            pooled, BuildRetentionDdl(_retentionDays, _eventTypeRetention), cancellationToken).ConfigureAwait(false);
+    }
+
+    private static string Describe(List<(int Days, string? EventType)> rules) =>
+        string.Join(", ", rules.Select(r => r.EventType is null ? $"{r.Days}d" : $"{r.Days}d for {r.EventType}"));
+
+    private static string Describe(int retentionDays, IReadOnlyList<EventTypeRetentionOptions> perEventType) =>
+        string.Join(
+            ", ",
+            perEventType.Select(r => $"{r.Days}d for {r.EventType}").Append($"{retentionDays}d"));
 
     private async Task<Dictionary<string, string>> ReadLiveColumnsAsync(
         PooledClickHouseConnection pooled, CancellationToken cancellationToken)

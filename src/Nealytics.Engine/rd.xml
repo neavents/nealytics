@@ -1,0 +1,84 @@
+<Directives xmlns="http://schemas.microsoft.com/netfx/2013/01/metadata">
+  <Application>
+    <Assembly Name="Octonica.ClickHouseClient">
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Guid, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Nullable`1[[System.Guid, System.Private.CoreLib]], System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.DateTimeOffset, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Nullable`1[[System.DateTimeOffset, System.Private.CoreLib]], System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.DateTime, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Nullable`1[[System.DateTime, System.Private.CoreLib]], System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Int32, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Nullable`1[[System.Int32, System.Private.CoreLib]], System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.UInt32, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Nullable`1[[System.UInt32, System.Private.CoreLib]], System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Int64, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Nullable`1[[System.Int64, System.Private.CoreLib]], System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.UInt64, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Nullable`1[[System.UInt64, System.Private.CoreLib]], System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Int16, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Nullable`1[[System.Int16, System.Private.CoreLib]], System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.UInt16, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Nullable`1[[System.UInt16, System.Private.CoreLib]], System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Byte, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Nullable`1[[System.Byte, System.Private.CoreLib]], System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.SByte, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Nullable`1[[System.SByte, System.Private.CoreLib]], System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Single, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Nullable`1[[System.Single, System.Private.CoreLib]], System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Double, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Nullable`1[[System.Double, System.Private.CoreLib]], System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Decimal, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Nullable`1[[System.Decimal, System.Private.CoreLib]], System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Boolean, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Utils.TypeDispatcher+Dispatcher`1[[System.Nullable`1[[System.Boolean, System.Private.CoreLib]], System.Private.CoreLib]]" Dynamic="Required All" />
+
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+ValueOrDefaultListDispatcher`1[[System.Guid, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+ValueOrDefaultListDispatcher`1[[System.DateTimeOffset, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+ValueOrDefaultListDispatcher`1[[System.DateTime, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+ValueOrDefaultListDispatcher`1[[System.Int32, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+ValueOrDefaultListDispatcher`1[[System.UInt32, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+ValueOrDefaultListDispatcher`1[[System.Int64, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+ValueOrDefaultListDispatcher`1[[System.UInt64, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+ValueOrDefaultListDispatcher`1[[System.Int16, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+ValueOrDefaultListDispatcher`1[[System.UInt16, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+ValueOrDefaultListDispatcher`1[[System.Byte, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+ValueOrDefaultListDispatcher`1[[System.SByte, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+ValueOrDefaultListDispatcher`1[[System.Single, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+ValueOrDefaultListDispatcher`1[[System.Double, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+ValueOrDefaultListDispatcher`1[[System.Decimal, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+ValueOrDefaultListDispatcher`1[[System.Boolean, System.Private.CoreLib]]" Dynamic="Required All" />
+
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+NullableStructParameterWriterDispatcher`1[[System.Guid, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+NullableStructParameterWriterDispatcher`1[[System.DateTimeOffset, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+NullableStructParameterWriterDispatcher`1[[System.DateTime, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+NullableStructParameterWriterDispatcher`1[[System.Int32, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+NullableStructParameterWriterDispatcher`1[[System.UInt32, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+NullableStructParameterWriterDispatcher`1[[System.Int64, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+NullableStructParameterWriterDispatcher`1[[System.UInt64, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+NullableStructParameterWriterDispatcher`1[[System.Int16, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+NullableStructParameterWriterDispatcher`1[[System.UInt16, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+NullableStructParameterWriterDispatcher`1[[System.Byte, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+NullableStructParameterWriterDispatcher`1[[System.SByte, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+NullableStructParameterWriterDispatcher`1[[System.Single, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+NullableStructParameterWriterDispatcher`1[[System.Double, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+NullableStructParameterWriterDispatcher`1[[System.Decimal, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTypeInfo+NullableStructParameterWriterDispatcher`1[[System.Boolean, System.Private.CoreLib]]" Dynamic="Required All" />
+
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTableColumn+NullableStructTableColumnDispatcher`1[[System.Guid, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTableColumn+NullableStructTableColumnDispatcher`1[[System.DateTimeOffset, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTableColumn+NullableStructTableColumnDispatcher`1[[System.DateTime, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTableColumn+NullableStructTableColumnDispatcher`1[[System.Int32, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTableColumn+NullableStructTableColumnDispatcher`1[[System.UInt32, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTableColumn+NullableStructTableColumnDispatcher`1[[System.Int64, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTableColumn+NullableStructTableColumnDispatcher`1[[System.UInt64, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTableColumn+NullableStructTableColumnDispatcher`1[[System.Int16, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTableColumn+NullableStructTableColumnDispatcher`1[[System.UInt16, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTableColumn+NullableStructTableColumnDispatcher`1[[System.Byte, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTableColumn+NullableStructTableColumnDispatcher`1[[System.SByte, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTableColumn+NullableStructTableColumnDispatcher`1[[System.Single, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTableColumn+NullableStructTableColumnDispatcher`1[[System.Double, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTableColumn+NullableStructTableColumnDispatcher`1[[System.Decimal, System.Private.CoreLib]]" Dynamic="Required All" />
+      <Type Name="Octonica.ClickHouseClient.Types.NullableTableColumn+NullableStructTableColumnDispatcher`1[[System.Boolean, System.Private.CoreLib]]" Dynamic="Required All" />
+    </Assembly>
+  </Application>
+</Directives>

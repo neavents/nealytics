@@ -27,6 +27,7 @@ internal sealed class TelemetryColumnBuffers : IDisposable
     private readonly int _count;
     private readonly TelemetryColumnLayout _layout;
     private readonly DimensionColumnBuffer[] _dimensionBuffers;
+    private readonly MeasureColumnBuffer[] _measureBuffers;
 
     internal readonly Guid[] EventIds;
     internal readonly string[] ProjectIds;
@@ -35,6 +36,11 @@ internal sealed class TelemetryColumnBuffers : IDisposable
     internal readonly string?[] UserIds;
     internal readonly string[] EventTypes;
     internal readonly string?[] ObjectIds;
+    internal readonly uint[] Seqs;
+    internal readonly string[] TrafficClasses;
+    internal readonly string[] PagePaths;
+    internal readonly string[] Referrers;
+    internal readonly DateTimeOffset[] IngestedAts;
     internal readonly string[] DeviceClasses;
     internal readonly string[] OperatingSystems;
     internal readonly string[] Browsers;
@@ -54,6 +60,11 @@ internal sealed class TelemetryColumnBuffers : IDisposable
         UserIds = ArrayPool<string?>.Shared.Rent(count);
         EventTypes = ArrayPool<string>.Shared.Rent(count);
         ObjectIds = ArrayPool<string?>.Shared.Rent(count);
+        Seqs = ArrayPool<uint>.Shared.Rent(count);
+        TrafficClasses = ArrayPool<string>.Shared.Rent(count);
+        PagePaths = ArrayPool<string>.Shared.Rent(count);
+        Referrers = ArrayPool<string>.Shared.Rent(count);
+        IngestedAts = ArrayPool<DateTimeOffset>.Shared.Rent(count);
         DeviceClasses = ArrayPool<string>.Shared.Rent(count);
         OperatingSystems = ArrayPool<string>.Shared.Rent(count);
         Browsers = ArrayPool<string>.Shared.Rent(count);
@@ -66,13 +77,23 @@ internal sealed class TelemetryColumnBuffers : IDisposable
         {
             _dimensionBuffers[i] = DimensionColumnBuffer.Create(layout.Dimensions[i], count);
         }
+
+        _measureBuffers = new MeasureColumnBuffer[layout.Measures.Count];
+        for (int i = 0; i < layout.Measures.Count; i++)
+        {
+            _measureBuffers[i] = MeasureColumnBuffer.Create(layout.Measures[i], count);
+        }
     }
 
     internal IReadOnlyList<DimensionColumnBuffer> DimensionBuffers => _dimensionBuffers;
 
+    internal IReadOnlyList<MeasureColumnBuffer> MeasureBuffers => _measureBuffers;
+
     /// <summary>Copies one batch into the column arrays, in insert order.</summary>
     internal void Fill(IReadOnlyList<GlobalTelemetryPayload> batch)
     {
+        DateTimeOffset ingestedAt = DateTimeOffset.UtcNow;
+
         for (int i = 0; i < _count; i++)
         {
             GlobalTelemetryPayload payload = batch[i];
@@ -84,6 +105,17 @@ internal sealed class TelemetryColumnBuffers : IDisposable
             UserIds[i] = payload.UserId;
             EventTypes[i] = payload.EventType;
             ObjectIds[i] = payload.ObjectId;
+            Seqs[i] = payload.Seq;
+
+            // Anything the edge did not classify is normal traffic. Empty would become its own
+            // GROUP BY bucket and quietly fall outside the default filter.
+            TrafficClasses[i] = string.IsNullOrEmpty(payload.TrafficClass) ? "normal" : payload.TrafficClass;
+            PagePaths[i] = payload.PagePath ?? string.Empty;
+            Referrers[i] = payload.Referrer ?? string.Empty;
+
+            // Server clock, stamped here rather than accepted from the caller: it is the only value
+            // in the row a client cannot get wrong, so clock skew is measurable against it.
+            IngestedAts[i] = ingestedAt;
 
             // LowCardinality columns: empty string rather than null keeps GROUP BY total.
             DeviceClasses[i] = payload.DeviceClass ?? string.Empty;
@@ -103,6 +135,15 @@ internal sealed class TelemetryColumnBuffers : IDisposable
                 DimensionColumnBuffer buffer = _dimensionBuffers[d];
                 string? value = null;
                 dimensions?.TryGetValue(buffer.Dimension.Name, out value);
+                buffer.Set(i, value);
+            }
+
+            Dictionary<string, string>? measures = payload.Measures;
+            for (int m = 0; m < _measureBuffers.Length; m++)
+            {
+                MeasureColumnBuffer buffer = _measureBuffers[m];
+                string? value = null;
+                measures?.TryGetValue(buffer.Measure.Name, out value);
                 buffer.Set(i, value);
             }
         }
@@ -125,6 +166,11 @@ internal sealed class TelemetryColumnBuffers : IDisposable
             ["user_id"] = new ArraySegment<string?>(UserIds, 0, _count),
             ["event_type"] = new ArraySegment<string>(EventTypes, 0, _count),
             ["object_id"] = new ArraySegment<string?>(ObjectIds, 0, _count),
+            ["seq"] = new ArraySegment<uint>(Seqs, 0, _count),
+            ["traffic_class"] = new ArraySegment<string>(TrafficClasses, 0, _count),
+            ["page_path"] = new ArraySegment<string>(PagePaths, 0, _count),
+            ["referrer"] = new ArraySegment<string>(Referrers, 0, _count),
+            ["ingested_at"] = new ArraySegment<DateTimeOffset>(IngestedAts, 0, _count),
             ["device_class"] = new ArraySegment<string>(DeviceClasses, 0, _count),
             ["os"] = new ArraySegment<string>(OperatingSystems, 0, _count),
             ["browser"] = new ArraySegment<string>(Browsers, 0, _count),
@@ -139,6 +185,12 @@ internal sealed class TelemetryColumnBuffers : IDisposable
             columns[buffer.Dimension.Name] = buffer.BuildSegment(_count);
         }
 
+        for (int i = 0; i < _measureBuffers.Length; i++)
+        {
+            MeasureColumnBuffer buffer = _measureBuffers[i];
+            columns[buffer.Measure.Name] = buffer.BuildSegment(_count);
+        }
+
         return columns;
     }
 
@@ -151,6 +203,11 @@ internal sealed class TelemetryColumnBuffers : IDisposable
         ArrayPool<string?>.Shared.Return(UserIds, true);
         ArrayPool<string>.Shared.Return(EventTypes, true);
         ArrayPool<string?>.Shared.Return(ObjectIds, true);
+        ArrayPool<uint>.Shared.Return(Seqs);
+        ArrayPool<string>.Shared.Return(TrafficClasses, true);
+        ArrayPool<string>.Shared.Return(PagePaths, true);
+        ArrayPool<string>.Shared.Return(Referrers, true);
+        ArrayPool<DateTimeOffset>.Shared.Return(IngestedAts);
         ArrayPool<string>.Shared.Return(DeviceClasses, true);
         ArrayPool<string>.Shared.Return(OperatingSystems, true);
         ArrayPool<string>.Shared.Return(Browsers, true);
@@ -161,6 +218,11 @@ internal sealed class TelemetryColumnBuffers : IDisposable
         for (int i = 0; i < _dimensionBuffers.Length; i++)
         {
             _dimensionBuffers[i].Dispose();
+        }
+
+        for (int i = 0; i < _measureBuffers.Length; i++)
+        {
+            _measureBuffers[i].Dispose();
         }
     }
 }

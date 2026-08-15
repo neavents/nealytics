@@ -48,8 +48,20 @@ public sealed partial class DimensionSanitizer
     /// Removes undeclared keys from <paramref name="payload"/> in place. Returns how many were
     /// dropped.
     /// </summary>
-    public int Sanitize(GlobalTelemetryPayload payload)
+    public int Sanitize(GlobalTelemetryPayload payload) => Sanitize(payload, out _);
+
+    /// <summary>
+    /// The same, reporting which keys were removed.
+    ///
+    /// The names come from the removal itself rather than from a second pass that reproduces the
+    /// rule. Two implementations of "is this declared" are two things to keep in step, and the one
+    /// that gets read — a response header, a validation report — is not the one that decides what
+    /// is stored, so a divergence would show the caller a set that was never what happened.
+    /// </summary>
+    public int Sanitize(GlobalTelemetryPayload payload, out IReadOnlyList<string> dropped)
     {
+        dropped = [];
+
         Dictionary<string, string>? dimensions = payload.Dimensions;
         if (dimensions is null || dimensions.Count == 0)
         {
@@ -88,6 +100,7 @@ public sealed partial class DimensionSanitizer
             payload.ProjectId,
             string.Join(", ", undeclared.GetRange(0, System.Math.Min(undeclared.Count, MaxNamesPerLogLine))));
 
+        dropped = undeclared;
         return undeclared.Count;
     }
 }

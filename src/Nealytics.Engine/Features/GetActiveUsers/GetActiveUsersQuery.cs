@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Diagnostics;
 using Nealytics.Engine.Infrastructure.Storage;
 using Octonica.ClickHouseClient;
@@ -45,10 +46,21 @@ public sealed partial class GetActiveUsersQuery
             new KeyValuePair<string, object?>("limit", request.Limit)
         };
 
+        if (request.TrafficClass is not null)
+        {
+            parameters.Add(new KeyValuePair<string, object?>("trafficClass", request.TrafficClass));
+        }
+
+        if (!string.IsNullOrEmpty(request.TimeZone))
+        {
+            parameters.Add(new KeyValuePair<string, object?>("tz", request.TimeZone));
+        }
+
         StringBuilder sql = new StringBuilder(256);
         sql.Append("SELECT ");
         sql.Append(bucketFunction);
-        sql.Append("(timestamp) AS bucket, ");
+        sql.Append(TimeBucket.Expression(request.TimeZone));
+        sql.Append(" AS bucket, ");
         sql.Append(uniqFunction);
         sql.Append('(');
         sql.Append(dimColumn);
@@ -56,6 +68,8 @@ public sealed partial class GetActiveUsersQuery
         sql.Append("FROM nealytics_core.global_events ");
         sql.Append("WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String} ");
         sql.Append("AND timestamp >= {fromTimestamp:DateTime64} AND timestamp <= {toTimestamp:DateTime64} ");
+        sql.Append(TrafficFilter.Clause(request.TrafficClass));
+        sql.Append(' ');
         sql.Append("GROUP BY bucket ORDER BY bucket ASC LIMIT {limit:Int32}");
 
         return (sql.ToString(), parameters);

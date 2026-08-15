@@ -12,6 +12,18 @@ namespace Nealytics.Engine.Tests.Integration;
 
 public class QueryErrorIntegrationTests
 {
+    /// <summary>
+    /// A registry declaring nothing, so /sessions takes its raw path. What is under test here is
+    /// what happens when ClickHouse is unreachable, and routing to a rollup would change which
+    /// statement fails rather than whether it does.
+    /// </summary>
+    private static RollupRegistry NoRollups()
+    {
+        TelemetryEngineOptions options = new();
+        DimensionRegistry dimensions = new(options);
+        return new RollupRegistry(options, dimensions, new MeasureRegistry(options, dimensions));
+    }
+
     private static ClickHouseConnectionFactory UnreachableFactory()
     {
         TelemetryEngineOptions options = new TelemetryEngineOptions
@@ -27,7 +39,11 @@ public class QueryErrorIntegrationTests
     public async Task TimelineQuery_WhenClickHouseUnreachable_PropagatesException()
     {
         await using ClickHouseConnectionFactory factory = UnreachableFactory();
-        GetProjectTimelineQuery query = new GetProjectTimelineQuery(factory, NullLogger<GetProjectTimelineQuery>.Instance);
+        TelemetryEngineOptions emptySchema = new();
+        DimensionRegistry dimensions = new(emptySchema);
+        GetProjectTimelineQuery query = new GetProjectTimelineQuery(
+            factory, dimensions, new MeasureRegistry(emptySchema, dimensions),
+            NullLogger<GetProjectTimelineQuery>.Instance);
         TimelineQueryRequest request = new TimelineQueryRequest { ProjectId = "p", TenantId = "t", Limit = 10 };
 
         Func<Task> act = () => query.ExecuteAsync(request, CancellationToken.None);
@@ -39,7 +55,8 @@ public class QueryErrorIntegrationTests
     public async Task SessionAnalyticsQuery_WhenClickHouseUnreachable_PropagatesException()
     {
         await using ClickHouseConnectionFactory factory = UnreachableFactory();
-        GetSessionAnalyticsQuery query = new GetSessionAnalyticsQuery(factory, NullLogger<GetSessionAnalyticsQuery>.Instance);
+        GetSessionAnalyticsQuery query = new GetSessionAnalyticsQuery(
+            factory, NoRollups(), NullLogger<GetSessionAnalyticsQuery>.Instance);
         SessionAnalyticsRequest request = new SessionAnalyticsRequest
         {
             ProjectId = "p",

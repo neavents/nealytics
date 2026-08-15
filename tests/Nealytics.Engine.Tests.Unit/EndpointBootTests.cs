@@ -18,6 +18,13 @@ public sealed class NoDatabaseWebFactory : WebApplicationFactory<Program>
     {
         Environment.SetEnvironmentVariable("TelemetryEngine__JwtSymmetricKey", JwtKey);
         Environment.SetEnvironmentVariable("TelemetryEngine__AllowedProjectKeys", "unit-key-1,unit-key-2");
+
+        // unit-key-1 is pinned, unit-key-2 deliberately is not. Every other test in this assembly
+        // sends projectId "p" through unit-key-1, so the whole suite doubles as evidence that
+        // pinning does not break the ordinary path — and IngestResponseHeaderTests can then prove
+        // the refusal without a second factory racing this one over process-global env vars.
+        Environment.SetEnvironmentVariable("TelemetryEngine__Projects__0__Key", "unit-key-1");
+        Environment.SetEnvironmentVariable("TelemetryEngine__Projects__0__ProjectId", "p");
         Environment.SetEnvironmentVariable("TelemetryEngine__ClickHouseConnectionString",
             "Host=127.0.0.1;Port=9;Database=nealytics_core;User=default;Password=;");
         Environment.SetEnvironmentVariable("TelemetryEngine__WriteAheadLogDirectory",

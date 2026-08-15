@@ -18,6 +18,7 @@ public static class GetBreakdownEndpoint
             HttpContext context,
             GetBreakdownQuery query,
             BreakdownColumns columns,
+            MeasureRegistry measures,
             IOptions<TelemetryEngineOptions> options,
             CancellationToken cancellationToken) =>
         {
@@ -36,7 +37,11 @@ public static class GetBreakdownEndpoint
                 context.Request.Query["to"].ToString(),
                 context.Request.Query["limit"].ToString(),
                 context.Request.Query["orderBy"].ToString(),
+                context.Request.Query["traffic"].ToString(),
+                context.Request.Query["exact"].ToString(),
+                context.Request.Query["mode"].ToString(),
                 columns,
+                measures,
                 engineOptions.MaxQueryLimit,
                 engineOptions.DefaultSessionQueryRangeHours,
                 DateTime.UtcNow);

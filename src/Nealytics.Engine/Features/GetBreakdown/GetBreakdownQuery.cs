@@ -6,6 +6,7 @@ using System.Data.Common;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using Nealytics.Engine.Infrastructure.Configuration;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -24,13 +25,16 @@ using Octonica.ClickHouseClient;
 public sealed partial class GetBreakdownQuery
 {
     private readonly ClickHouseConnectionFactory _connectionFactory;
+    private readonly RollupRegistry _rollups;
     private readonly ILogger<GetBreakdownQuery> _logger;
 
     public GetBreakdownQuery(
         ClickHouseConnectionFactory connectionFactory,
+        RollupRegistry rollups,
         ILogger<GetBreakdownQuery> logger)
     {
         _connectionFactory = connectionFactory;
+        _rollups = rollups;
         _logger = logger;
     }
 
@@ -55,7 +59,10 @@ public sealed partial class GetBreakdownQuery
     /// available, and it is safe because the caller's bytes never reach the builder.
     /// </summary>
     internal static (string Sql, IReadOnlyList<KeyValuePair<string, object?>> Parameters) BuildQuery(
-        in BreakdownRequest request)
+        in BreakdownRequest request) => BuildQuery(request, null);
+
+    internal static (string Sql, IReadOnlyList<KeyValuePair<string, object?>> Parameters) BuildQuery(
+        in BreakdownRequest request, RollupPlan? plan)
     {
         List<KeyValuePair<string, object?>> parameters =
         [
@@ -66,17 +73,37 @@ public sealed partial class GetBreakdownQuery
             new("limit", request.Limit),
         ];
 
+        if (request.TrafficClass is not null)
+        {
+            parameters.Add(new KeyValuePair<string, object?>("trafficClass", request.TrafficClass));
+        }
+
+        if (plan is RollupPlan rollup)
+        {
+            return BuildRollupQuery(request, rollup, parameters);
+        }
+
         string aggregate = request.Metric switch
         {
-            BreakdownMetric.Events => "count()",
-            BreakdownMetric.Sessions => "uniqExact(session_id)",
-            BreakdownMetric.Users => "uniqExact(user_id)",
+            BreakdownMetric.Events => request.Exact ? "uniqExact(event_id)" : "count()",
+            // uniqExact holds every distinct value in memory; uniq is HyperLogLog and holds a
+            // fixed small amount whatever the cardinality. Exact stays the default so no existing
+            // number moves, but a wide range over a large estate needs the escape hatch or the
+            // query does not get slower, it fails.
+            BreakdownMetric.Sessions => request.Approximate ? "uniq(session_id)" : "uniqExact(session_id)",
+            BreakdownMetric.Users => request.Approximate ? "uniq(user_id)" : "uniqExact(user_id)",
+
+            // Both halves are canonical instances resolved from the registry and a closed map, so
+            // neither has ever been caller input. Same property BreakdownColumns relies on.
+            BreakdownMetric.Measure => $"{request.MeasureFunction}({request.MeasureColumn})",
+
             _ => throw new ArgumentOutOfRangeException(nameof(request), request.Metric, "Unhandled metric."),
         };
 
         StringBuilder where = new(256);
         where.Append(" WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String}");
         where.Append(" AND timestamp >= {fromTimestamp:DateTime64} AND timestamp <= {toTimestamp:DateTime64}");
+        where.Append(TrafficFilter.Clause(request.TrafficClass));
 
         if (!string.IsNullOrEmpty(request.EventType))
         {
@@ -146,7 +173,7 @@ public sealed partial class GetBreakdownQuery
         activity?.SetTag("neavents.tenant_id", request.TenantId);
         activity?.SetTag("nealytics.group_by", request.GroupByColumn);
 
-        string metricWire = BreakdownRequestFactory.ToWireFormat(request.Metric);
+        string metricWire = request.MetricWire ?? BreakdownRequestFactory.ToWireFormat(request.Metric);
         LogQueryStarted(
             _logger, request.ProjectId, request.TenantId, metricWire,
             request.GroupByColumn, request.Filters.Count);
@@ -155,8 +182,10 @@ public sealed partial class GetBreakdownQuery
 
         try
         {
+            RollupPlan? plan = RollupPlanner.Select(request, _rollups);
+
             (string sqlCommandText, IReadOnlyList<KeyValuePair<string, object?>> parameters) =
-                BuildQuery(request);
+                BuildQuery(request, plan);
 
             await using PooledClickHouseConnection lease =
                 await _connectionFactory.AcquireAsync(cancellationToken);
@@ -176,7 +205,7 @@ public sealed partial class GetBreakdownQuery
             await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
             List<BreakdownRow> rows = new(request.Limit);
-            long total = 0;
+            double total = 0;
             long groupCount = 0;
 
             while (await reader.ReadAsync(cancellationToken))
@@ -184,10 +213,14 @@ public sealed partial class GetBreakdownQuery
                 rows.Add(new BreakdownRow
                 {
                     Key = reader.IsDBNull(0) ? string.Empty : reader.GetString(0),
-                    Value = Convert.ToInt64(reader.GetValue(1), CultureInfo.InvariantCulture),
+                    Value = reader.IsDBNull(1)
+                        ? 0
+                        : Convert.ToDouble(reader.GetValue(1), CultureInfo.InvariantCulture),
                 });
 
-                total = Convert.ToInt64(reader.GetValue(2), CultureInfo.InvariantCulture);
+                total = reader.IsDBNull(2)
+                    ? 0
+                    : Convert.ToDouble(reader.GetValue(2), CultureInfo.InvariantCulture);
                 groupCount = Convert.ToInt64(reader.GetValue(3), CultureInfo.InvariantCulture);
             }
 
@@ -215,6 +248,8 @@ public sealed partial class GetBreakdownQuery
             {
                 GroupBy = request.GroupByColumn,
                 Metric = metricWire,
+                Grain = BreakdownRequestFactory.ToGrain(request.Metric),
+                Source = plan is RollupPlan used ? "rollup:" + used.Rollup.Name : "raw",
                 From = request.From,
                 To = request.To,
                 Total = total,
@@ -233,5 +268,84 @@ public sealed partial class GetBreakdownQuery
             long elapsedTicks = Stopwatch.GetTimestamp() - startTicks;
             TelemetryDiagnostics.QueryReadDuration.Record((double)elapsedTicks / Stopwatch.Frequency);
         }
+    }
+
+    /// <summary>
+    /// The same statement shape, read from pre-aggregated state instead of raw rows.
+    ///
+    /// The CTE, the grand total and the group count are identical on purpose: `share` and
+    /// `truncated` must mean exactly what they mean on the raw path, or a chart would change
+    /// meaning when it changed source.
+    ///
+    /// The range is half open — `bucket >= from AND bucket < to`. A rollup row is one whole bucket,
+    /// and <see cref="RollupPlanner.IsAligned"/> has already refused any range whose ends are not on
+    /// a boundary, so every bucket this touches is fully inside the request.
+    /// </summary>
+    private static (string Sql, IReadOnlyList<KeyValuePair<string, object?>> Parameters) BuildRollupQuery(
+        in BreakdownRequest request,
+        RollupPlan plan,
+        List<KeyValuePair<string, object?>> parameters)
+    {
+        StringBuilder where = new(256);
+        where.Append(" WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String}");
+        where.Append(" AND bucket >= {fromTimestamp:DateTime64} AND bucket < {toTimestamp:DateTime64}");
+
+        if (!string.IsNullOrEmpty(request.EventType))
+        {
+            where.Append(" AND event_type = {eventType:String}");
+            parameters.Add(new KeyValuePair<string, object?>("eventType", request.EventType));
+        }
+
+        for (int i = 0; i < request.Filters.Count; i++)
+        {
+            BreakdownFilter filter = request.Filters[i];
+            string parameterName = string.Create(
+                CultureInfo.InvariantCulture, $"filter{i.ToString(CultureInfo.InvariantCulture)}");
+
+            // No toString() here: the materialized view already normalised every grouping column to
+            // a String, which is also why a rollup key and a raw key are the same string.
+            where.Append(" AND ");
+            where.Append(filter.Column);
+            where.Append(" = {");
+            where.Append(parameterName);
+            where.Append(":String}");
+
+            parameters.Add(new KeyValuePair<string, object?>(parameterName, filter.Value));
+        }
+
+        string orderBy = request.Order switch
+        {
+            BreakdownOrder.ValueDescending => "value DESC",
+            BreakdownOrder.ValueAscending => "value ASC",
+            BreakdownOrder.KeyAscending => "key ASC",
+            _ => throw new ArgumentOutOfRangeException(nameof(request), request.Order, "Unhandled order."),
+        };
+
+        StringBuilder sql = new(768);
+        sql.Append("WITH grouped AS (SELECT ");
+        sql.Append(request.GroupByColumn);
+        sql.Append(" AS key, ");
+        sql.Append(plan.ValueExpression);
+        sql.Append(" AS value FROM ");
+        sql.Append(RollupRegistry.Database);
+        sql.Append('.');
+        sql.Append(plan.Rollup.TableName);
+        sql.Append(where);
+        sql.Append(" GROUP BY key");
+
+        if (plan.DropZeroGroups)
+        {
+            sql.Append(" HAVING value > 0");
+        }
+
+        sql.Append(')');
+        sql.Append(" SELECT key, value,");
+        sql.Append(" (SELECT sum(value) FROM grouped) AS grand_total,");
+        sql.Append(" (SELECT count() FROM grouped) AS group_count");
+        sql.Append(" FROM grouped ORDER BY ");
+        sql.Append(orderBy);
+        sql.Append(" LIMIT {limit:Int32}");
+
+        return (sql.ToString(), parameters);
     }
 }

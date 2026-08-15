@@ -9,6 +9,9 @@ using Nealytics.Engine.Features.GetEventTimeSeries;
 using Nealytics.Engine.Features.GetActiveUsers;
 using Nealytics.Engine.Features.GetTopEvents;
 using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Features.GetFunnel;
+using Nealytics.Engine.Features.GetSchema;
+using Nealytics.Engine.Features.ValidateTelemetry;
 
 public sealed class GlobalTelemetryPayload
 {
@@ -32,6 +35,29 @@ public sealed class GlobalTelemetryPayload
     /// dropped at ingest, loudly and counted; see IngestValidation.SanitizeDimensions.
     /// </summary>
     public Dictionary<string, string>? Dimensions { get; init; }
+
+    public Dictionary<string, string>? Measures { get; init; }
+
+    /// <summary>
+    /// Monotonic per session, starting at 0. The ordering key within a session.
+    ///
+    /// Client clocks are unreliable — badly so on cheap devices — so anything that orders events
+    /// inside a session must order by this, never by <see cref="Timestamp"/>.
+    /// </summary>
+    public uint Seq { get; init; }
+
+    /// <summary>
+    /// <c>normal</c>, <c>bot</c> or <c>internal</c>. Read endpoints exclude everything but
+    /// <c>normal</c> unless asked otherwise.
+    ///
+    /// Flagged, never dropped: when an owner asks why a number differs from their own count, the
+    /// raw rows are the only way to answer.
+    /// </summary>
+    public string TrafficClass { get; init; } = string.Empty;
+
+    public string PagePath { get; init; } = string.Empty;
+
+    public string Referrer { get; init; } = string.Empty;
 
     // Derived at the edge from the User-Agent and Cloudflare request metadata, never sent by
     // the client — so a caller cannot forge them, and they cost the source document nothing.
@@ -69,6 +95,19 @@ public sealed class GlobalTelemetryPayload
 [JsonSerializable(typeof(BreakdownResponse))]
 [JsonSerializable(typeof(BreakdownRow))]
 [JsonSerializable(typeof(List<BreakdownRow>))]
+[JsonSerializable(typeof(SchemaResponse))]
+[JsonSerializable(typeof(SchemaDimension))]
+[JsonSerializable(typeof(SchemaMeasure))]
+[JsonSerializable(typeof(List<SchemaDimension>))]
+[JsonSerializable(typeof(List<SchemaMeasure>))]
+[JsonSerializable(typeof(SchemaEventType))]
+[JsonSerializable(typeof(List<SchemaEventType>))]
+[JsonSerializable(typeof(FunnelResponse))]
+[JsonSerializable(typeof(FunnelStepResult))]
+[JsonSerializable(typeof(FunnelSegment))]
+[JsonSerializable(typeof(List<FunnelStepResult>))]
+[JsonSerializable(typeof(List<FunnelSegment>))]
+[JsonSerializable(typeof(ValidateTelemetryResponse))]
 public partial class TelemetryAotContext : JsonSerializerContext
 {
 }

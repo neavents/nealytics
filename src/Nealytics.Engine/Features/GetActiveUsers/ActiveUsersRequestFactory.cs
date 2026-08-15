@@ -2,6 +2,7 @@ namespace Nealytics.Engine.Features.GetActiveUsers;
 
 using System;
 using System.Globalization;
+using Nealytics.Engine.Infrastructure.Configuration;
 
 public readonly struct ActiveUsersRequestResult
 {
@@ -39,6 +40,8 @@ public static class ActiveUsersRequestFactory
         string? modeRaw,
         string? fromRaw,
         string? toRaw,
+        string? tzRaw,
+        string? trafficRaw,
         int maxLimit,
         int defaultRangeHours,
         DateTime nowUtc)
@@ -97,15 +100,35 @@ public static class ActiveUsersRequestFactory
             return ActiveUsersRequestResult.Fail(StatusBadRequest, "'from' must be before or equal to 'to'.");
         }
 
+        string? timeZone = null;
+        if (!string.IsNullOrEmpty(tzRaw))
+        {
+            if (!TimeBucket.IsWellFormed(tzRaw))
+            {
+                return ActiveUsersRequestResult.Fail(
+                    StatusBadRequest,
+                    "'tz' must be an IANA time zone name such as Europe/Istanbul.");
+            }
+
+            timeZone = tzRaw;
+        }
+
+        if (!TrafficFilter.TryParse(trafficRaw, out string? trafficClass))
+        {
+            return ActiveUsersRequestResult.Fail(StatusBadRequest, TrafficFilter.Rejection(trafficRaw));
+        }
+
         return ActiveUsersRequestResult.Ok(new ActiveUsersRequest
         {
             ProjectId = projectId,
             TenantId = tenantId,
             From = fromUtc,
             To = toUtc,
+            TrafficClass = trafficClass,
             Interval = interval,
             Dimension = dimension,
             Mode = mode,
+            TimeZone = timeZone,
             Limit = limit
         });
     }

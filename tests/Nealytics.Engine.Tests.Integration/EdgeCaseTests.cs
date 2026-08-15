@@ -66,14 +66,37 @@ public class EdgeCaseTests : IntegrationTestBase, IAsyncLifetime
     }
 
     [Fact]
-    public async Task POST_Track_WithMaxLengthFields_Returns202()
+    public async Task POST_Track_AtTheDocumentedLimits_Returns202()
     {
-        var longId = new string('a', 200);
+        // Exactly at the bound, in the accepting direction. An off-by-one here silently refuses the
+        // longest legitimate id a deployment has rather than an abusive one.
+        var longId = new string('a', 256);
+        var longEventType = new string('e', 128);
+
         Client.DefaultRequestHeaders.Add("X-Project-Key", "test-key-1");
-        var payload = new { projectId = longId, tenantId = longId, sessionId = longId, eventType = longId };
+        var payload = new { projectId = longId, tenantId = longId, sessionId = longId, eventType = longEventType };
         var response = await Client.PostAsJsonAsync("/api/v1/telemetry/track", payload);
         Client.DefaultRequestHeaders.Remove("X-Project-Key");
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+    }
+
+    [Fact]
+    public async Task POST_Track_PastTheEventTypeLimit_Returns400WithItsReason()
+    {
+        // event_type leads the sort key after project and tenant, so an unbounded one widens the
+        // primary index for every row in the table rather than only for the offending one. 128 is
+        // generous against real names — `search_result_click` is twenty characters.
+        Client.DefaultRequestHeaders.Add("X-Project-Key", "test-key-1");
+        var payload = new
+        {
+            projectId = "p", tenantId = "t", sessionId = "s",
+            eventType = new string('e', 129),
+        };
+        var response = await Client.PostAsJsonAsync("/api/v1/telemetry/track", payload);
+        Client.DefaultRequestHeaders.Remove("X-Project-Key");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        response.Headers.GetValues("X-Nealytics-Rejected").Should().Contain("field_too_long");
     }
 
     [Fact]

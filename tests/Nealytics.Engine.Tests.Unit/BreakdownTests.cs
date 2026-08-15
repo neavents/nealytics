@@ -26,6 +26,30 @@ public class BreakdownTests
             Dimensions = [new DimensionOptions { Name = name, Retired = true }],
         }));
 
+    private static MeasureRegistry NoMeasures()
+    {
+        TelemetryEngineOptions options = new();
+        return new MeasureRegistry(options, new DimensionRegistry(options));
+    }
+
+    internal static MeasureRegistry Measures(params (string Name, string Type, string Aggregations)[] measures)
+    {
+        TelemetryEngineOptions options = new()
+        {
+            Measures =
+            [
+                .. measures.Select(m => new MeasureOptions
+                {
+                    Name = m.Name,
+                    Type = m.Type,
+                    Aggregations = m.Aggregations,
+                }),
+            ],
+        };
+
+        return new MeasureRegistry(options, new DimensionRegistry(options));
+    }
+
     private static BreakdownRequestResult Create(
         string? groupBy,
         BreakdownColumns? columns = null,
@@ -35,11 +59,16 @@ public class BreakdownTests
         string? orderBy = null,
         string? eventType = null,
         string? projectId = "proj",
-        string? tenantId = "tenant")
+        string? tenantId = "tenant",
+        MeasureRegistry? measures = null,
+        string? traffic = null,
+        string? exact = null,
+        string? mode = null)
         => BreakdownRequestFactory.Create(
             projectId, tenantId, metric, groupBy, eventType,
-            filters ?? [], null, null, limit, orderBy,
+            filters ?? [], null, null, limit, orderBy, traffic, exact, mode,
             columns ?? Columns("widget_id", "shelf_id"),
+            measures ?? NoMeasures(),
             maxLimit: 10_000, defaultRangeHours: 24, nowUtc: Now);
 
     // ─── The allowlist ───

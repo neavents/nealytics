@@ -94,9 +94,14 @@ public class SchemaReconcilerGuardTests
 
         await Task.CompletedTask;
 
+        DimensionRegistry registry = new(options);
+
         return new ClickHouseSchemaMigrator(
             factory,
-            new DimensionRegistry(options),
+            registry,
+            new MeasureRegistry(options, registry),
+            new RollupRegistry(options, registry, new MeasureRegistry(options, registry)),
+            Microsoft.Extensions.Options.Options.Create(options),
             NullLogger<ClickHouseSchemaMigrator>.Instance);
     }
 
@@ -286,9 +291,14 @@ public class SchemaReconcilerGuardTests
             Dimensions = [new DimensionOptions { Name = "probe_unreachable", Type = "String" }],
         };
 
+        DimensionRegistry unreachableRegistry = new(options);
+
         ClickHouseSchemaMigrator migrator = new(
             new ClickHouseConnectionFactory(Microsoft.Extensions.Options.Options.Create(options)),
-            new DimensionRegistry(options),
+            unreachableRegistry,
+            new MeasureRegistry(options, unreachableRegistry),
+            new RollupRegistry(options, unreachableRegistry, new MeasureRegistry(options, unreachableRegistry)),
+            Microsoft.Extensions.Options.Options.Create(options),
             NullLogger<ClickHouseSchemaMigrator>.Instance);
 
         Func<Task> start = () => migrator.StartAsync(CancellationToken.None);

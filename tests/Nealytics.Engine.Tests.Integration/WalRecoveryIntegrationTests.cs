@@ -80,8 +80,9 @@ public class WalRecoveryIntegrationTests : IAsyncLifetime
         TelemetryChannelBroker broker = new TelemetryChannelBroker(options);
         IHostApplicationLifetime lifetime = Substitute.For<IHostApplicationLifetime>();
 
+        DimensionRegistry replayRegistry = new(options.Value);
         ClickHouseBatchWriter writer = new ClickHouseBatchWriter(
-            factory, new DimensionRegistry(options.Value), options,
+            factory, replayRegistry, new MeasureRegistry(options.Value, replayRegistry), options,
             NullLogger<ClickHouseBatchWriter>.Instance);
         TelemetryBatchProcessor processor = new TelemetryBatchProcessor(
             broker, wal, writer, lifetime, options,
@@ -111,8 +112,9 @@ public class WalRecoveryIntegrationTests : IAsyncLifetime
         TelemetryChannelBroker broker = new TelemetryChannelBroker(options);
         IHostApplicationLifetime lifetime = Substitute.For<IHostApplicationLifetime>();
 
+        DimensionRegistry replayRegistry = new(options.Value);
         ClickHouseBatchWriter writer = new ClickHouseBatchWriter(
-            factory, new DimensionRegistry(options.Value), options,
+            factory, replayRegistry, new MeasureRegistry(options.Value, replayRegistry), options,
             NullLogger<ClickHouseBatchWriter>.Instance);
         TelemetryBatchProcessor processor = new TelemetryBatchProcessor(
             broker, wal, writer, lifetime, options,

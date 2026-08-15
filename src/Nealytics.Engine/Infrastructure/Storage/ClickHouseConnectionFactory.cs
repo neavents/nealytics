@@ -3,6 +3,7 @@ namespace Nealytics.Engine.Infrastructure.Storage;
 using System;
 using System.Collections.Concurrent;
 using System.Data;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,9 +16,28 @@ public sealed class ClickHouseConnectionFactory : IAsyncDisposable
     private readonly TelemetryEngineOptions _options;
     private readonly string _connectionString;
     private readonly SemaphoreSlim? _acquireGate;
-    private readonly ConcurrentQueue<ClickHouseConnection> _idleConnections;
+    private readonly ConcurrentQueue<IdleConnection> _idleConnections;
+    private readonly TimeSpan _maxIdle;
     private int _totalCreated;
     private volatile bool _disposed;
+
+    /// <summary>
+    /// A pooled connection and the moment it went idle.
+    ///
+    /// <para><b>Why the timestamp is the fix.</b> ClickHouse closes a connection that has been idle
+    /// past <c>idle_connection_timeout</c> — 3600 seconds by default — and logs nothing, because
+    /// closing an idle socket is not an error. The client keeps reporting <c>Open</c>, so
+    /// <see cref="ClickHouseConnectionFactory.AcquireAsync"/> could not tell a live connection from
+    /// a corpse and had to find out by failing a write.</para>
+    ///
+    /// <para><b>Discarding on failure was not enough.</b> That path exists and works, but it costs
+    /// one failed insert per dead connection. Measured on this estate: a pool of 16, five retries a
+    /// batch, and cross-batch backoff meant fifteen consecutive failures over four minutes without
+    /// draining the pool — indistinguishable from a hard outage, while <c>/health</c> and
+    /// <c>/ready</c> stayed green because <c>SELECT</c> opens its own path and only the columnar
+    /// writer breaks.</para>
+    /// </summary>
+    private readonly record struct IdleConnection(ClickHouseConnection Connection, long IdleSinceTicks);
 
     public ClickHouseConnectionFactory(IOptions<TelemetryEngineOptions> options)
     {
@@ -26,8 +46,26 @@ public sealed class ClickHouseConnectionFactory : IAsyncDisposable
         _acquireGate = _options.ConnectionPoolSize > 0
             ? new SemaphoreSlim(_options.ConnectionPoolSize, _options.ConnectionPoolSize)
             : null;
-        _idleConnections = new ConcurrentQueue<ClickHouseConnection>();
+        _idleConnections = new ConcurrentQueue<IdleConnection>();
+        _maxIdle = _options.ConnectionMaxIdleSeconds > 0
+            ? TimeSpan.FromSeconds(_options.ConnectionMaxIdleSeconds)
+            : Timeout.InfiniteTimeSpan;
     }
+
+    /// <summary>
+    /// Whether a connection idle since <paramref name="idleSinceTicks"/> is too old to trust.
+    /// Internal so the rule can be tested without a server.
+    /// </summary>
+    /// <remarks>
+    /// <c>Stopwatch.GetElapsedTime</c>, not a raw tick subtraction. A <c>Stopwatch</c> tick is
+    /// <c>1 / Stopwatch.Frequency</c> of a second — a nanosecond on Linux — while a
+    /// <c>TimeSpan</c> tick is 100ns. Comparing one against the other made every connection look
+    /// a hundred times older than it was, which recycles the pool on every acquire and turns it
+    /// into a connect-per-batch loop.
+    /// </remarks>
+    internal bool IsStale(long idleSinceTicks, long nowTicks) =>
+        _maxIdle != Timeout.InfiniteTimeSpan
+        && Stopwatch.GetElapsedTime(idleSinceTicks, nowTicks) >= _maxIdle;
 
     private static string BuildConnectionString(TelemetryEngineOptions options)
     {
@@ -48,15 +86,21 @@ public sealed class ClickHouseConnectionFactory : IAsyncDisposable
 
         try
         {
-            while (_idleConnections.TryDequeue(out ClickHouseConnection? pooled))
+            long now = Stopwatch.GetTimestamp();
+
+            while (_idleConnections.TryDequeue(out IdleConnection pooled))
             {
-                if (pooled.State == ConnectionState.Open)
+                // Age first. State is checked second because it cannot answer this question: a
+                // connection the server closed an hour ago still reports Open, which is exactly how
+                // a corpse used to be handed out and only reveal itself on the write.
+                if (pooled.Connection.State == ConnectionState.Open
+                    && !IsStale(pooled.IdleSinceTicks, now))
                 {
-                    return new PooledClickHouseConnection(pooled, this);
+                    return new PooledClickHouseConnection(pooled.Connection, this);
                 }
 
                 Interlocked.Decrement(ref _totalCreated);
-                pooled.Dispose();
+                pooled.Connection.Dispose();
             }
 
             ClickHouseConnection connection = new ClickHouseConnection(_connectionString);
@@ -108,7 +152,7 @@ public sealed class ClickHouseConnectionFactory : IAsyncDisposable
                 return;
             }
 
-            _idleConnections.Enqueue(connection);
+            _idleConnections.Enqueue(new IdleConnection(connection, Stopwatch.GetTimestamp()));
         }
         finally
         {
@@ -138,9 +182,9 @@ public sealed class ClickHouseConnectionFactory : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _disposed = true;
-        while (_idleConnections.TryDequeue(out ClickHouseConnection? connection))
+        while (_idleConnections.TryDequeue(out IdleConnection idle))
         {
-            await connection.DisposeAsync();
+            await idle.Connection.DisposeAsync();
         }
 
         _acquireGate?.Dispose();

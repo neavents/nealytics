@@ -8,6 +8,9 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Nealytics.Engine.Infrastructure.Configuration;
+using System.Globalization;
+using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Infrastructure.Diagnostics;
 using Nealytics.Engine.Infrastructure.Storage;
 using Octonica.ClickHouseClient;
@@ -33,7 +36,7 @@ public sealed partial class GetEventTimeSeriesQuery
         in EventTimeSeriesRequest request)
     {
         string bucketFunction = TimeSeriesIntervalParser.ToBucketFunction(request.Interval);
-        bool grouped = request.GroupBy != TimeSeriesGroupBy.None;
+        bool grouped = !string.IsNullOrEmpty(request.GroupByColumn);
 
         List<KeyValuePair<string, object?>> parameters = new List<KeyValuePair<string, object?>>(6)
         {
@@ -43,14 +46,25 @@ public sealed partial class GetEventTimeSeriesQuery
             new KeyValuePair<string, object?>("toTimestamp", request.To)
         };
 
+        if (request.TrafficClass is not null)
+        {
+            parameters.Add(new KeyValuePair<string, object?>("trafficClass", request.TrafficClass));
+        }
+
+        if (!string.IsNullOrEmpty(request.TimeZone))
+        {
+            parameters.Add(new KeyValuePair<string, object?>("tz", request.TimeZone));
+        }
+
         StringBuilder sql = new StringBuilder(256);
         sql.Append("SELECT ");
         sql.Append(bucketFunction);
-        sql.Append("(timestamp) AS bucket, ");
+        sql.Append(TimeBucket.Expression(request.TimeZone));
+        sql.Append(" AS bucket, ");
 
         if (grouped)
         {
-            sql.Append(TimeSeriesGroupByParser.ToColumn(request.GroupBy));
+            sql.Append(request.GroupByColumn);
             sql.Append(" AS series, ");
         }
 
@@ -58,6 +72,22 @@ public sealed partial class GetEventTimeSeriesQuery
         sql.Append("FROM nealytics_core.global_events ");
         sql.Append("WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String} ");
         sql.Append("AND timestamp >= {fromTimestamp:DateTime64} AND timestamp <= {toTimestamp:DateTime64}");
+        sql.Append(TrafficFilter.Clause(request.TrafficClass));
+
+        // Same shape as /breakdown: toString() so one comparison works for every declared type,
+        // and a bound parameter so the value is never concatenated. The column arrived from the
+        // allowlist, not from the caller.
+        for (int i = 0; i < (request.Filters?.Count ?? 0); i++)
+        {
+            BreakdownFilter filter = request.Filters![i];
+            string parameterName = string.Create(
+                CultureInfo.InvariantCulture, $"filter{i.ToString(CultureInfo.InvariantCulture)}");
+
+            sql.Append(" AND toString(").Append(filter.Column).Append(") = {")
+                .Append(parameterName).Append(":String}");
+
+            parameters.Add(new KeyValuePair<string, object?>(parameterName, filter.Value));
+        }
 
         if (!string.IsNullOrEmpty(request.EventType))
         {
@@ -114,7 +144,7 @@ public sealed partial class GetEventTimeSeriesQuery
 
             await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
-            bool grouped = request.GroupBy != TimeSeriesGroupBy.None;
+            bool grouped = !string.IsNullOrEmpty(request.GroupByColumn);
             List<EventTimeSeriesPoint> points = new List<EventTimeSeriesPoint>(request.Limit);
             long totalCount = 0;
 

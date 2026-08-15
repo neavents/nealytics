@@ -17,6 +17,8 @@ using Octonica.ClickHouseClient;
 //   track       POST /track  — single-event durable ingest (WAL group-commit path)
 //   beacon      POST /beacon — batched ingest (many events per request)
 //   timeline|timeseries|active|top   read endpoints (JWT)
+//   breakdown|breakdown-rollup       the same grouping answered from raw and from a rollup
+//   breakdown-measure|breakdown-measure-rollup   the same, for sum(amount)
 //
 // This tool is intentionally exempt from the engine's no-var / no-comment / AOT rules.
 
@@ -36,6 +38,7 @@ using HttpClient client = new HttpClient(handler)
 };
 
 await WaitForLivenessAsync(client);
+await PreflightSourceAsync(client, options);
 
 if (options.Warmup > 0)
 {
@@ -46,7 +49,11 @@ if (options.Warmup > 0)
 List<LevelResult> results = new List<LevelResult>();
 foreach (int concurrency in options.Concurrency)
 {
-    string tenant = $"bench-{options.Mode}-c{concurrency}-{Now()}";
+    // A seeding run pins every level to one tenant so the read modes have a single target. The
+    // per-level tenant exists to keep the zero-loss count honest, so pinning it means the stored
+    // count is cumulative across levels rather than per level -- hence loss verification is off
+    // for a seed run, and the script says so.
+    string tenant = options.SeedTenant ?? $"bench-{options.Mode}-c{concurrency}-{Now()}";
     Console.WriteLine($"\nLevel: concurrency={concurrency}, {(options.Duration > 0 ? options.Duration + "s" : options.Requests + " reqs")}, tenant={tenant}");
     LevelResult result = await RunLevelAsync(client, options, concurrency, options.Requests, options.Duration, tenant, options.IsWriteMode && options.VerifyLoss);
     results.Add(result);
@@ -195,21 +202,13 @@ async Task<bool> SendOneAsync(HttpClient c, BenchOptions opt, string tenant, lon
         {
             using HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/telemetry/beacon?k={opt.ProjectKey}")
             {
-                Content = new StringContent(BeaconPayload("bench", tenant, i, opt.BeaconBatch), Encoding.UTF8, "application/json")
+                Content = new StringContent(BeaconPayload("bench", tenant, i, opt.BeaconBatch, opt.Declared), Encoding.UTF8, "application/json")
             };
             using HttpResponseMessage res = await c.SendAsync(req);
             return res.StatusCode is HttpStatusCode.NoContent or HttpStatusCode.Accepted;
         }
 
-        string url = opt.Mode switch
-        {
-            "timeline" => "/api/v1/telemetry/timeline?limit=100",
-            "timeseries" => "/api/v1/analytics/timeseries?from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&interval=day",
-            "active" => "/api/v1/analytics/active?interval=day&by=user&from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z",
-            "top" => "/api/v1/analytics/top?from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z",
-            _ => throw new InvalidOperationException($"Unknown mode '{opt.Mode}'.")
-        };
-        using HttpRequestMessage readReq = new HttpRequestMessage(HttpMethod.Get, url);
+        using HttpRequestMessage readReq = new HttpRequestMessage(HttpMethod.Get, ReadUrl(opt.Mode));
         readReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwt);
         using HttpResponseMessage readRes = await c.SendAsync(readReq);
         return readRes.StatusCode == HttpStatusCode.OK;
@@ -220,13 +219,93 @@ async Task<bool> SendOneAsync(HttpClient c, BenchOptions opt, string tenant, lon
     }
 }
 
+// The read URLs live in one place because the preflight source check below has to interrogate the
+// exact query the benchmark then runs. Two copies would drift, and a preflight that verifies a
+// different query than the hot loop measures is worse than no preflight at all.
+//
+// breakdown and breakdown-rollup differ only in whether the range lands on a day boundary. Both
+// group by the same column over the same rows, so the pair isolates the routing decision rather
+// than comparing two different questions. RollupPlanner.IsAligned refuses a rollup for the first
+// because answering 00:00:01-00:00:01 from daily buckets would return whole days -- a wrong number
+// that looks entirely healthy.
+static string ReadUrl(string mode) => mode switch
+{
+    "timeline" => "/api/v1/telemetry/timeline?limit=100",
+    "timeseries" => "/api/v1/analytics/timeseries?from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&interval=day",
+    "active" => "/api/v1/analytics/active?interval=day&by=user&from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z",
+    "top" => "/api/v1/analytics/top?from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z",
+    "breakdown" => "/api/v1/analytics/breakdown?groupBy=product_id&metric=events&eventType=bench&from=2026-01-01T00:00:01Z&to=2026-12-31T00:00:01Z&limit=100",
+    "breakdown-rollup" => "/api/v1/analytics/breakdown?groupBy=product_id&metric=events&eventType=bench&from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&limit=100",
+    "breakdown-measure" => "/api/v1/analytics/breakdown?groupBy=product_id&metric=sum(amount)&eventType=bench&from=2026-01-01T00:00:01Z&to=2026-12-31T00:00:01Z&limit=100",
+    "breakdown-measure-rollup" => "/api/v1/analytics/breakdown?groupBy=product_id&metric=sum(amount)&eventType=bench&from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&limit=100",
+    _ => throw new InvalidOperationException($"Unknown mode '{mode}'.")
+};
+
+// Which source the mode claims to measure. A benchmark that records "rollup: 40x faster" while the
+// planner quietly fell back to raw is a lie told with real numbers, and nothing else in the harness
+// would notice -- both paths return 200 and identical rows by design.
+static string? ExpectedSource(string mode) => mode switch
+{
+    "breakdown" or "breakdown-measure" => "raw",
+    "breakdown-rollup" => "rollup:",
+    "breakdown-measure-rollup" => "rollup:",
+    _ => null
+};
+
+static async Task PreflightSourceAsync(HttpClient c, BenchOptions opt)
+{
+    string? expected = ExpectedSource(opt.Mode);
+    if (expected is null)
+    {
+        return;
+    }
+
+    using HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get, ReadUrl(opt.Mode));
+    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", MakeJwt(opt.JwtKey, "bench", opt.ReadTenant ?? "bench"));
+    using HttpResponseMessage res = await c.SendAsync(req);
+    string body = await res.Content.ReadAsStringAsync();
+
+    if (!res.IsSuccessStatusCode)
+    {
+        throw new InvalidOperationException($"Preflight for mode '{opt.Mode}' returned {(int)res.StatusCode}: {body}");
+    }
+
+    using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(body);
+    string source = document.RootElement.TryGetProperty("source", out System.Text.Json.JsonElement element)
+        ? element.GetString() ?? ""
+        : "";
+    int rows = document.RootElement.TryGetProperty("rows", out System.Text.Json.JsonElement rowsElement)
+        ? rowsElement.GetArrayLength()
+        : 0;
+
+    if (!source.StartsWith(expected, StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException(
+            $"Mode '{opt.Mode}' is meant to measure '{expected}' but the engine answered from '{source}'. " +
+            "Recording this run would attribute one path's timings to the other.");
+    }
+
+    if (rows == 0)
+    {
+        throw new InvalidOperationException(
+            $"Mode '{opt.Mode}' returned no rows. Seed the tenant first (./scripts/run-benchmark.sh read) " +
+            "-- an empty table benchmarks the absence of work.");
+    }
+
+    Console.WriteLine($"Preflight: mode={opt.Mode} source={source} rows={rows}");
+}
+
 static string TrackPayload(string projectId, string tenantId, string sessionId)
 {
     string timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
     return $"{{\"projectId\":\"{projectId}\",\"tenantId\":\"{tenantId}\",\"sessionId\":\"{sessionId}\",\"eventType\":\"bench\",\"metadataJson\":\"{{}}\",\"timestamp\":\"{timestamp}\"}}";
 }
 
-static string BeaconPayload(string projectId, string tenantId, long i, int batch)
+// Only carries dimensions and measures when the bench schema is mounted. Sending them to an engine
+// that declares none is not harmless: the sanitizer drops each unknown key, counts it and logs it,
+// so the write benchmark would be measuring rejection bookkeeping and the run would fill the log
+// with drops that look like a defect.
+static string BeaconPayload(string projectId, string tenantId, long i, int batch, bool declared)
 {
     string timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
     StringBuilder sb = new StringBuilder("[");
@@ -236,7 +315,15 @@ static string BeaconPayload(string projectId, string tenantId, long i, int batch
         {
             sb.Append(',');
         }
-        sb.Append($"{{\"projectId\":\"{projectId}\",\"tenantId\":\"{tenantId}\",\"sessionId\":\"s{i}_{j}\",\"eventType\":\"bench\",\"metadataJson\":\"{{}}\",\"timestamp\":\"{timestamp}\"}}");
+        sb.Append($"{{\"projectId\":\"{projectId}\",\"tenantId\":\"{tenantId}\",\"sessionId\":\"s{i}_{j}\",\"eventType\":\"bench\",\"metadataJson\":\"{{}}\",\"timestamp\":\"{timestamp}\"");
+        if (declared)
+        {
+            long n = i * batch + j;
+            sb.Append($",\"objectId\":\"p{n % 500}\"");
+            sb.Append($",\"dimensions\":{{\"product_id\":\"p{n % 500}\",\"category_id\":\"c{n % 20}\",\"campaign_id\":\"k{n % 5}\"}}");
+            sb.Append($",\"measures\":{{\"amount\":\"{n % 1000}\"}}");
+        }
+        sb.Append('}');
     }
     sb.Append(']');
     return sb.ToString();
@@ -394,8 +481,11 @@ sealed class BenchOptions
     public string? MetricsUrl { get; init; }
     public string? ReadTenant { get; init; }
 
+    public bool Declared { get; init; }
+    public string? SeedTenant { get; init; }
+
     public bool IsWriteMode => Mode == "track" || Mode == "beacon";
-    public bool NeedsJwt => Mode is "timeline" or "timeseries" or "active" or "top";
+    public bool NeedsJwt => !IsWriteMode && Mode != "noop";
 
     public string Describe() =>
         $"Nealytics bench: mode={Mode} target={BaseUrl} concurrency=[{string.Join(",", Concurrency)}] " +
@@ -423,6 +513,8 @@ sealed class BenchOptions
             Duration = double.Parse(map.GetValueOrDefault("duration", "0"), CultureInfo.InvariantCulture),
             Warmup = int.Parse(map.GetValueOrDefault("warmup", "3000"), CultureInfo.InvariantCulture),
             BeaconBatch = int.Parse(map.GetValueOrDefault("beacon-batch", "50"), CultureInfo.InvariantCulture),
+            Declared = string.Equals(map.GetValueOrDefault("declared", "false"), "true", StringComparison.OrdinalIgnoreCase),
+            SeedTenant = map.GetValueOrDefault("seed-tenant", "") is { Length: > 0 } s ? s : null,
             VerifyLoss = !string.Equals(map.GetValueOrDefault("verify-loss", "true"), "false", StringComparison.OrdinalIgnoreCase),
             ClickHouseConnectionString = map.GetValueOrDefault("ch", Env("TelemetryEngine__ClickHouseConnectionString", "Host=127.0.0.1;Port=9000;Database=nealytics_core;User=default;Password=;")),
             OutFile = map.GetValueOrDefault("out", "bench/RESULTS.md"),

@@ -13,7 +13,22 @@ public class ClickHouseBatchWriterTests
             Dimensions = [.. dimensions.Select(d => new DimensionOptions { Name = d.Name, Type = d.Type })],
         };
 
-        return new TelemetryColumnLayout(new DimensionRegistry(options));
+        DimensionRegistry registry = new(options);
+        return new TelemetryColumnLayout(registry, new MeasureRegistry(options, registry));
+    }
+
+    private static TelemetryColumnLayout LayoutWith(
+        (string Name, string Type)[] dimensions,
+        (string Name, string Type)[] measures)
+    {
+        TelemetryEngineOptions options = new()
+        {
+            Dimensions = [.. dimensions.Select(d => new DimensionOptions { Name = d.Name, Type = d.Type })],
+            Measures = [.. measures.Select(m => new MeasureOptions { Name = m.Name, Type = m.Type })],
+        };
+
+        DimensionRegistry registry = new(options);
+        return new TelemetryColumnLayout(registry, new MeasureRegistry(options, registry));
     }
 
     [Fact]
@@ -47,9 +62,7 @@ public class ClickHouseBatchWriterTests
         // The shipped engine declares nothing. object_id is "the thing this event is about";
         // device_class/os/browser/country are derived at the edge from the User-Agent and
         // Cloudflare request metadata. No deployment vocabulary appears here at all.
-        command.Should().Contain(
-            "(event_id, project_id, tenant_id, session_id, user_id, event_type, object_id, "
-            + "device_class, os, browser, country, metadata_json, timestamp)");
+        command.Should().Contain("(event_id, project_id, tenant_id, session_id, user_id, event_type, object_id, seq, traffic_class, page_path, referrer, ingested_at, device_class, os, browser, country, metadata_json, timestamp)");
     }
 
     [Fact]
@@ -59,8 +72,7 @@ public class ClickHouseBatchWriterTests
             Layout(("widget_id", "String"), ("plan_tier", "LowCardinality")), asyncInsert: false);
 
         command.Should().Contain(
-            "(event_id, project_id, tenant_id, session_id, user_id, event_type, object_id, "
-            + "device_class, os, browser, country, metadata_json, timestamp, widget_id, plan_tier)");
+            "(event_id, project_id, tenant_id, session_id, user_id, event_type, object_id, seq, traffic_class, page_path, referrer, ingested_at, device_class, os, browser, country, metadata_json, timestamp, widget_id, plan_tier)");
     }
 
     [Fact]

@@ -215,11 +215,29 @@ public class V12FeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
     }
 
     [Fact]
-    public async Task TimeSeries_InvalidGroupBy_Returns400()
+    public async Task TimeSeries_UnknownGroupBy_Returns400()
     {
         HttpResponseMessage response = await GetRaw("p", "t",
-            "/api/v1/analytics/timeseries?groupBy=user_id");
+            "/api/v1/analytics/timeseries?groupBy=no_such_column");
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Theory]
+    [InlineData("user_id")]
+    [InlineData("session_id")]
+    [InlineData("device_class")]
+    [InlineData("country")]
+    public async Task TimeSeries_AcceptsAnyGroupableCoreColumn(string column)
+    {
+        // These used to be a 400. TimeSeriesGroupBy was a closed enum over a handful of columns, so
+        // a declared dimension was invisible to five of the six read endpoints — the whole point of
+        // a config-driven engine, unusable from everywhere except /breakdown. Both endpoints now
+        // resolve through the same allowlist /breakdown uses, which is also the injection boundary:
+        // what reaches the SQL builder is the allowlist's own string, never the caller's.
+        HttpResponseMessage response = await GetRaw("p", "t",
+            $"/api/v1/analytics/timeseries?groupBy={column}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     // ──────── 4.3 Top-N ────────
@@ -293,11 +311,24 @@ public class V12FeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
     }
 
     [Fact]
-    public async Task TopEvents_InvalidDimension_Returns400()
+    public async Task TopEvents_UnknownDimension_Returns400()
     {
         HttpResponseMessage response = await GetRaw("p", "t",
-            "/api/v1/analytics/top?dimension=session_id");
+            "/api/v1/analytics/top?dimension=no_such_column");
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Theory]
+    [InlineData("session_id")]
+    [InlineData("user_id")]
+    [InlineData("object_id")]
+    [InlineData("os")]
+    public async Task TopEvents_AcceptsAnyGroupableCoreColumn(string dimension)
+    {
+        HttpResponseMessage response = await GetRaw("p", "t",
+            $"/api/v1/analytics/top?dimension={dimension}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     // ──────── Section 3 user_id on ingest + timeline ────────

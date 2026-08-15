@@ -1,0 +1,24 @@
+services:
+  clickhouse-bench:
+    image: clickhouse/clickhouse-server:latest
+    container_name: nealytics-clickhouse-bench
+    # Deliberately not 9000/8123. The integration suite and scripts/aot-smoke.sh both use
+    # docker-compose.test.yml on the default ports and both tear it down with `down -v` — so a
+    # benchmark sharing them destroys whatever else is running, and an AOT publish that has been
+    # compiling for an hour is exactly the thing you do not want to discover this way.
+    ports:
+      - "9100:9000"
+      - "8223:8123"
+    environment:
+      - CLICKHOUSE_SKIP_USER_SETUP=1
+    volumes:
+      - ./clickhouse-init.sql:/docker-entrypoint-initdb.d/init.sql
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

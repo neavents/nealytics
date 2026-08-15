@@ -23,12 +23,13 @@ public sealed partial class ClickHouseBatchWriter : ITelemetryBatchWriter
     public ClickHouseBatchWriter(
         ClickHouseConnectionFactory connectionFactory,
         DimensionRegistry registry,
+        MeasureRegistry measures,
         IOptions<TelemetryEngineOptions> options,
         ILogger<ClickHouseBatchWriter> logger)
     {
         _connectionFactory = connectionFactory;
         _logger = logger;
-        _layout = new TelemetryColumnLayout(registry);
+        _layout = new TelemetryColumnLayout(registry, measures);
         _insertCommand = BuildInsertCommand(_layout, options.Value.EnableAsyncInsert);
     }
 
@@ -37,6 +38,13 @@ public sealed partial class ClickHouseBatchWriter : ITelemetryBatchWriter
             + "they did not parse as the declared type {DeclaredType}. Those cells were written NULL.")]
     private static partial void LogDimensionValuesRejected(
         ILogger logger, string dimension, int rejectedCount, int batchCount, string declaredType);
+
+    [LoggerMessage(EventId = 9102, Level = LogLevel.Warning,
+        Message = "Measure '{Measure}' rejected {RejectedCount} value(s) in a batch of {BatchCount}: "
+            + "they did not parse as the declared type {DeclaredType}, or fell outside its declared "
+            + "bounds. Those cells were written NULL.")]
+    private static partial void LogMeasureValuesRejected(
+        ILogger logger, string measure, int rejectedCount, int batchCount, string declaredType);
 
     /// <summary>
     /// The INSERT's column list, built from <paramref name="layout"/> rather than written out —
@@ -82,6 +90,7 @@ public sealed partial class ClickHouseBatchWriter : ITelemetryBatchWriter
 
         buffers.Fill(batch);
         ReportRejectedDimensionValues(buffers, count);
+        ReportRejectedMeasureValues(buffers, count);
         Dictionary<string, object?> columns = buffers.BuildColumns();
 
         await using PooledClickHouseConnection lease =
@@ -134,6 +143,31 @@ public sealed partial class ClickHouseBatchWriter : ITelemetryBatchWriter
             TelemetryDiagnostics.DimensionValuesRejected.Add(
                 buffer.RejectedValueCount,
                 new KeyValuePair<string, object?>("dimension", buffer.Dimension.Name));
+        }
+    }
+
+    private void ReportRejectedMeasureValues(TelemetryColumnBuffers buffers, int count)
+    {
+        IReadOnlyList<MeasureColumnBuffer> measureBuffers = buffers.MeasureBuffers;
+
+        for (int i = 0; i < measureBuffers.Count; i++)
+        {
+            MeasureColumnBuffer buffer = measureBuffers[i];
+            if (buffer.RejectedValueCount == 0)
+            {
+                continue;
+            }
+
+            LogMeasureValuesRejected(
+                _logger,
+                buffer.Measure.Name,
+                buffer.RejectedValueCount,
+                count,
+                buffer.Measure.ConfiguredType);
+
+            TelemetryDiagnostics.MeasureValuesRejected.Add(
+                buffer.RejectedValueCount,
+                new KeyValuePair<string, object?>("measure", buffer.Measure.Name));
         }
     }
 }

@@ -55,3 +55,38 @@ public class SchemaDefinitionTests
             "retention should drop whole parts rather than run per-row deletes");
     }
 }
+
+public class SchemaPartitioningTests
+{
+    private static string ReadInitSql()
+    {
+        DirectoryInfo? directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            string candidate = Path.Combine(directory.FullName, "clickhouse-init.sql");
+            if (File.Exists(candidate))
+            {
+                return File.ReadAllText(candidate);
+            }
+            directory = directory.Parent;
+        }
+        throw new FileNotFoundException("clickhouse-init.sql not found walking up from test output directory.");
+    }
+
+    [Fact]
+    public void Schema_PartitionsByMonth()
+    {
+        ReadInitSql().Should().Contain("PARTITION BY toYYYYMM(timestamp)",
+            "every query filters on timestamp, and the sort key leads with event_type, so a query "
+            + "that does not pin an event type cannot prune by time through the primary index alone");
+    }
+
+    [Fact]
+    public void Schema_PartitionKeyIsAFunctionOfTheSortKey()
+    {
+        string sql = ReadInitSql();
+
+        sql.Should().MatchRegex(@"ORDER BY \([^)]*\btimestamp\b[^)]*\)",
+            "a partition key must be derivable from the sorting key columns");
+    }
+}

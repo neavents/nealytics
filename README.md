@@ -91,7 +91,7 @@ curl -X POST http://localhost:5000/api/v1/telemetry/track \
     "tenantId": "tenant-1",
     "sessionId": "abc-123",
     "eventType": "page_view",
-    "itemId": "/home",
+    "objectId": "/home",
     "metadataJson": "{\"referrer\": \"google.com\"}"
   }'
 ```
@@ -118,6 +118,55 @@ So the beacon endpoint accepts a JSON array of events and deserializes them as a
 
 Auth: `?k=` query parameter only (sendBeacon doesn't let you set custom headers).
 
+### What the engine refuses, and how you find out
+
+Validation is deliberately small — an analytics pipeline that rejects events is an analytics
+pipeline with holes in it — but it is not nothing, because two caller-supplied fields are
+structural:
+
+| Rule | Why it is not merely tidiness |
+|---|---|
+| `projectId`, `tenantId`, `sessionId` required | without them a row belongs to nobody |
+| `eventType` required, ≤ 128 chars | it leads the sort key after project and tenant, so an unbounded one widens the index for every row in the table |
+| `projectId` / `tenantId` / `sessionId` / `objectId` / `userId` ≤ 256 chars | |
+| `timestamp` no more than **24 h in the future** | it is the partition key. A year-2099 row creates a partition that TTL never reaches, and nothing surfaces it short of reading `system.parts` |
+
+The past is accepted without limit. A backfill is legitimate and a phone whose clock is behind is
+ordinary; only the future is impossible.
+
+**How you learn about it** differs by endpoint, because the callers differ:
+
+- `/track` is server-side code that can react. A refusal returns `400` with
+  **`X-Nealytics-Rejected: <reason>`**, so one status code does not stand for six different fixes.
+  An accepted event whose undeclared keys were stripped returns `202` with
+  **`X-Nealytics-Dropped: key1,key2`** — accepted deliberately, because refusing would turn one
+  misspelled key into total loss for that event type.
+- `/beacon` cannot be told anything: `sendBeacon` discards the response. So a bad element is
+  skipped, the rest of the batch is kept, and the skip is counted on
+  `nealytics_events_rejected_total{reason,transport}` and logged. It used to be a bare `continue`
+  with no counter and no log, which is the same shape as a pipeline dropping everything while
+  every signal says it is healthy.
+
+Use `POST /api/v1/telemetry/validate` to see all of this without writing a row — including the
+project pin below, so a dry run can never report `accepted` for something `/track` refuses.
+
+### Pinning a key to its project (optional)
+
+A valid project key can write **any** `projectId` it likes. One leaked or copy-pasted key therefore
+writes into a neighbour's data, and nothing objects. To close that:
+
+```jsonc
+"AllowedProjectKeys": "shop:key123,blog:key456",
+"Projects": [ { "Key": "shop:key123", "ProjectId": "shop" } ]
+```
+
+- **Per key.** `blog:key456` above is unpinned and behaves exactly as before, so this can be adopted
+  one service at a time rather than as a migration. With no `Projects` at all, nothing changes.
+- **Project only, never tenant.** One edge worker legitimately serves every tenant through a single
+  key — that is the architecture — so a tenant pin would be wrong by design.
+- **A pin naming a key that isn't in `AllowedProjectKeys` refuses the boot.** Dead security config
+  is worse than none: in a review it reads as a control that is in force.
+
 Both endpoints are rate limited under the `"ingestion"` policy. You can tune the limits via [`RateLimitPermitCount`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs), [`RateLimitWindowSeconds`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs), and [`RateLimitQueueSize`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs).
 
 ---
@@ -138,7 +187,7 @@ curl http://localhost:5000/api/v1/telemetry/timeline?limit=50 \
 Query params:
 - `limit` (default 100, max set by [`MaxQueryLimit`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs))
 - `before` (ISO 8601 timestamp) — cursor for backward pagination; returns events strictly older than this value
-- `eventType`, `sessionId`, `itemId` — optional exact-match filters (each ≤ 256 chars), applied on top of the tenant scope
+- `eventType`, `sessionId`, `objectId` — optional exact-match filters (each ≤ 256 chars), applied on top of the tenant scope
 - `metaKey` + `metaValue` — optional metadata filter (both required together, each ≤ 256 chars). Matches events where `JSONExtractString(metadata_json, metaKey) = metaValue`. Note: `metadata_json` is unindexed, so this is a full scan over the time range — prefer narrowing with `before`/filters. Both are passed as parameters (never interpolated).
 
 ```bash
@@ -159,7 +208,7 @@ Query params:
 - `interval` — `minute`, `hour` (default), or `day`. Any other value returns `400`.
 - `from` / `to` (ISO 8601, defaults to last 24 hours). `from` must be ≤ `to`.
 - `eventType` — optional exact-match filter
-- `groupBy` — optional split into per-series counts: `event_type`, `item_id`, or `session_id` (whitelisted; any other value returns `400`). When set, each point gains a `series` field and the query groups by `(bucket, series)`. `LIMIT` caps total `bucket×series` rows, so avoid very high-cardinality dimensions (`session_id`); prefer `event_type`/`item_id`.
+- `groupBy` — optional split into per-series counts: any core column or declared dimension (validated against the same allowlist `/analytics/breakdown` uses; any other value returns `400`). When set, each point gains a `series` field and the query groups by `(bucket, series)`. `LIMIT` caps total `bucket×series` rows, so avoid very high-cardinality dimensions (`session_id`); prefer `event_type`/`object_id`.
 - `limit` — max number of buckets returned (defaults to `MaxQueryLimit`)
 
 Response (ungrouped `series` is omitted):
@@ -240,6 +289,69 @@ Because `user_id` is nullable, distinct counts **skip anonymous (`NULL`) events*
 }
 ```
 
+### GET `/api/v1/schema`
+
+What this deployment collects: core columns, declared dimensions, declared measures with their
+allowed aggregations and bounds, and every valid `metric` value. Build a generic UI against this
+instead of hardcoding column names.
+
+It also reports what is **actually arriving**, which is a different question from what is declared:
+
+- `eventTypes` — a census of the event types seen in the last 30 days, with counts.
+- `populated` / `nonEmptyCount` on every dimension and measure — whether that column holds a
+  non-empty value on any row in the same window.
+
+```json
+{
+  "dimensions": [
+    { "name": "menu_id", "type": "String", "populated": true,  "nonEmptyCount": 4477 },
+    { "name": "locale",  "type": "LowCardinality", "populated": false, "nonEmptyCount": 0 }
+  ],
+  "eventTypesAvailable": true,
+  "populationAvailable": true
+}
+```
+
+**Why a declared-but-empty column is worth an endpoint.** It looks healthy from every other angle:
+the config is valid, the reconciler created the column, the query allowlist offers it, and a
+breakdown over it returns `200` with no rows — exactly what a venue with no traffic returns. The
+only component that can tell those apart is the one holding the data.
+
+This is not hypothetical. Four dimensions in the Neavents deployment — `locale`,
+`translation_present`, `query_id` and `has_photo` — were declared, reconciled and offered for the
+whole retention window while sitting empty on every row, because the producer that fills them was
+written but never deployed. Nothing anywhere reported a problem.
+
+Note what `populated` does **not** claim. A column can be full of the wrong thing: `menu_id` carried
+the packed payload's dense id for months, so a leaderboard on it drew two confident bars labelled
+`"0"` and `"01MENU"`. Population is not correctness. Absence of population is a gap, and that half
+is cheap to report.
+
+`eventTypesAvailable` and `populationAvailable` are `false` when a census could not be taken. Read
+them: a failed lookup and an empty column are different facts, and only one of them is a bug. Both
+counts are cached for 5 minutes, and the population census is a single scan covering every declared
+column rather than one query each.
+
+### GET `/api/v1/analytics/breakdown`
+
+Ranks any allowed column. `groupBy` accepts a core column or a declared dimension; `metric` accepts
+`events`, `sessions`, `users`, or an aggregation over a declared measure such as `avg(dwell_ms)` or
+`p95(dwell_ms)`. The response echoes `grain` (`event` / `session` / `user`) and `truncated`.
+
+`groupBy` and every `filter` name are validated against an allowlist and never interpolated — a
+caller-supplied string reaches the SQL builder nowhere. An unknown name is a `400` naming it.
+
+Two more parameters worth knowing:
+
+- `traffic` — `normal` (default), `bot`, `internal` or `all`. Reads exclude everything but normal
+  traffic unless told otherwise. Nothing is dropped at ingest, so `traffic=all` always gets it back.
+- `exact=true` — counts `uniqExact(event_id)` instead of rows. The table is a `ReplacingMergeTree`
+  and no query uses `FINAL`, so a WAL replay after a restart can leave an event present twice until
+  a background merge collapses it. Slower and exact, versus fast and eventually right.
+
+The response reports `grain` (`event` / `session` / `user`), `source` (`raw` or `rollup:<name>`) and
+`truncated`, so a number always says what it counted and where it came from.
+
 ### GET `/api/v1/analytics/top`
 
 Top-N events or items by count, descending, within your tenant scope.
@@ -250,9 +362,12 @@ curl "http://localhost:5000/api/v1/analytics/top?dimension=event_type&from=2026-
 ```
 
 Query params:
-- `dimension` — `event_type` (default) or `item_id` (whitelisted; any other value returns `400`). `item_id` results **exclude `NULL` keys**.
+- `dimension` — `event_type` (default), any other core column, or any declared dimension (validated against the same allowlist `/analytics/breakdown` uses; any other value returns `400`). Nullable columns **exclude `NULL` keys**, so the leaderboard ranks values rather than absence.
 - `from` / `to` (ISO 8601, defaults to last 24 hours). `from` must be ≤ `to`.
 - `limit` — number of rows (default 20, clamped to `MaxQueryLimit`).
+- `traffic` — `normal` (default), `bot`, `internal`, or `all`.
+- `exact=true` — counts distinct `event_id` instead of rows. Slower and correct; see below.
+- `mode=approx` — counts distinct **sessions and users** with HyperLogLog instead of exactly.
 
 ```json
 {
@@ -261,6 +376,37 @@ Query params:
   "items": [ { "key": "view", "count": 1240 }, { "key": "purchase", "count": 318 } ]
 }
 ```
+
+---
+
+### GET `/api/v1/analytics/funnel`
+
+Ordered conversion through a sequence of events, within a time window per session or per user.
+
+```bash
+curl "http://localhost:5000/api/v1/analytics/funnel\
+?step=app_open&step=item_view&step=add_to_cart&step=checkout\
+&grain=sessions&windowSeconds=1800&breakdownBy=locale\
+&from=2026-06-01T00:00:00Z&to=2026-06-08T00:00:00Z" \
+  -H "Authorization: Bearer <your-jwt>"
+```
+
+Query params:
+- `step` — repeated, **2 to 10** of them, in order. Each is an event type, optionally with one
+  filter: `step=item_view:section_id=01J...`. One step is a count, not a funnel, so one is refused.
+- `grain` — `sessions` (default) or `users`. Echoed back, so two widgets cannot disagree about what
+  they counted.
+- `windowSeconds` — how long the whole sequence may take, default `1800`, max `86400`.
+- `breakdownBy` — a declared dimension or groupable core column. **This is where the value is.**
+- `from` / `to`, `traffic`, `tz` as elsewhere.
+
+**Ordered by `seq`, never by `timestamp`.** Client clocks on cheap Android are hours out, so a
+funnel ordered by the clock reports a sequence the user never performed — and it looks entirely
+plausible, which is worse than an obviously broken one.
+
+**The aggregate number is close to useless; the segment differences are the finding.** A funnel
+converting at 12% in Turkish and 3% in English is a translation-quality problem you can now prove
+rather than suspect. That is what `breakdownBy` is for, and why it takes a declared dimension.
 
 ---
 
@@ -297,6 +443,158 @@ Everything below is the deep dive. How things actually work under the hood.
 Every setting is an environment variable prefixed with `TelemetryEngine__`. You can also set them in [`appsettings.json`](src/Nealytics.Engine/appsettings.json) under the `TelemetryEngine` section. Environment variables take precedence.
 
 Full source: [`TelemetryEngineOptions.cs`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs)
+
+### Declared schema
+
+The engine ships knowing no column names beyond the core ones. A deployment declares its own.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `Dimensions__N__Name` | _(empty)_ | snake_case column name, `[a-z][a-z0-9_]{0,62}`. A dimension is a GROUP BY key. |
+| `Dimensions__N__Type` | `String` | `String` \| `LowCardinality` \| `UInt64` \| `Int64` \| `DateTime` |
+| `Dimensions__N__Retired` | `false` | Stops collection, keeps the column and every row. |
+| `Measures__N__Name` | _(empty)_ | snake_case column name. A measure is a quantity to aggregate, never grouped by. |
+| `Measures__N__Type` | _(required)_ | `UInt8` \| `UInt16` \| `UInt32` \| `UInt64` \| `Int16` \| `Int32` \| `Int64` \| `Float32` \| `Float64` \| `Decimal` |
+| `Measures__N__Aggregations` | `sum,avg,min,max,count` | Subset of `sum,avg,min,max,count,p50,p75,p90,p95,p99`. Anything not declared is a 400. |
+| `Measures__N__Minimum` / `Maximum` | _(none)_ | Inclusive bounds. Out-of-range values are rejected and counted, never clamped. |
+| `Measures__N__Retired` | `false` | Same contract as a retired dimension. |
+| `MaxDimensions` / `MaxMeasures` | `64` | Ceilings. The registry issues DDL, so a config bug must not add columns without limit. |
+| `RetentionDays` | `90` | Applied to the table's TTL at startup when it differs. |
+| `EventTypeRetention__N__EventType` / `Days` | _(none)_ | Keeps one event type for **less** time than the base. See below. |
+| `Projects__N__Key` / `ProjectId` | _(none)_ | Pins a key to one project. Empty ⇒ any valid key may write any project, as today. |
+
+#### Per-event-type retention
+
+Every analytics deployment has one event type an order of magnitude larger than the rest, worth
+nothing individually once it has been rolled up:
+
+```json
+"RetentionDays": 90,
+"EventTypeRetention": [ { "EventType": "item_impression", "Days": 30 } ]
+```
+
+becomes a compound `TTL` on `global_events`. **It can only ever be shorter than `RetentionDays`,
+and the engine refuses to boot otherwise.** That is not a style rule — it was measured. ClickHouse
+evaluates every TTL clause independently and any match deletes, so:
+
+- **Clause order is irrelevant.** A 45-day-old impression was removed by a 30 day rule written
+  *after* the 90 day catch-all.
+- **The shortest applicable rule wins.** A 100-day-old row with a 365 day rule was deleted anyway
+  by a 30 day base. Allowing that would mean the config file, the code review and the startup log
+  all say a year while the rows are gone in a month.
+
+To keep something *longer*, raise `RetentionDays`.
+
+Five core columns arrived with this: `seq` (monotonic per session — order within a session by this,
+never by `timestamp`, because client clocks lie), `ingested_at` (server clock, so skew is measurable),
+`traffic_class`, `page_path` and `referrer`.
+
+**`traffic_class` changes what every read returns.** Values are `normal`, `bot` and `internal`, and
+reads now count `normal` only unless you pass `?traffic=all|normal|bot|internal`. Bots were labelled
+at the edge from the day `device_class` existed and nothing ever filtered on the label, so every
+number this engine has served included preview crawlers and link unfurlers. Numbers dropping when
+you upgrade is the fix working. Nothing is dropped at ingest — `traffic=all` always gets it back,
+which is the only way to answer someone disputing a figure.
+| `Rollups__N__Name` | _(empty)_ | Pre-aggregate table suffix. Creates `rollup_<name>` plus its materialized view. |
+| `Rollups__N__Grain` | `day` | `hour` \| `day` \| `session` |
+| `Rollups__N__EventTypes` | _(all)_ | Comma separated. Empty means every event type. |
+| `Rollups__N__Dimensions` | _(none)_ | Comma separated declared dimensions to group by. |
+| `Rollups__N__Measures` | _(none)_ | Comma separated `measure:aggregation`, e.g. `dwell_ms:sum,dwell_ms:avg`. Percentiles are refused — they stay on the raw table. |
+
+#### Session rollups
+
+`Grain: session` gives **one row per session** instead of per time bucket, and `/api/v1/analytics/sessions`
+reads it instead of scanning raw:
+
+```jsonc
+{ "Name": "sessions", "Grain": "session", "EventTypes": "",
+  "Dimensions": "menu_id,locale", "Measures": "dwell_ms:sum,dwell_ms:max" }
+```
+
+This is what replaces a scheduled sessionizer. A job that sweeps sessions idle for thirty minutes
+has to be re-run for late arrivals and *still* leaves a hole when one lands after the re-run — so
+"how long was that session" gets an answer that depends on when you asked. An `AggregatingMergeTree`
+fed by a materialized view cannot have that hole: a late event is simply another partial state that
+merges in. "Session ended" needs no idle rule at all, it is `maxMerge(timestamp)`.
+
+Three properties worth knowing before you declare one, all measured on 26.7.1:
+
+- **A session crossing midnight is stored as two rows and regrouped into one at read time.** The
+  partition key has to be a function of the ORDER BY columns and `min(timestamp)` is an aggregate,
+  so the key is a plain `event_date`. A 23:50–00:05 session reads back as a single 900-second
+  session. Any daily bucketing has this property; it is honest, not a bug.
+- **It does not key on `event_type`,** unlike every bucketed rollup. A session touching five event
+  types would otherwise become five rows whose duration is measured per event type — a number that
+  looks entirely reasonable and answers a question nobody asked.
+- **Bounce is computed at read time,** from `uniqExactMerge(event_types)`, not frozen into a flag at
+  write time. The definition can change without rebuilding the table.
+
+`/sessions` reads the rollup only when **both ends of the range sit on midnight** and the rollup
+**filters no event types** — one declared over `app_open,menu_view` holds only those rows, so its
+per-session event count is not the session's event count. Otherwise it scans raw. The response says
+which, in `source`.
+
+A session rollup is never used by `/breakdown` or `/timeseries`: it has no `bucket` column and no
+`event_type` key, so the question is not the same one.
+
+```bash
+TelemetryEngine__Rollups__0__Name=daily_by_product
+TelemetryEngine__Rollups__0__Grain=day
+TelemetryEngine__Rollups__0__EventTypes=view,impression
+TelemetryEngine__Rollups__0__Dimensions=product_id,campaign_id
+TelemetryEngine__Rollups__0__Measures=cart_value:sum,cart_value:avg
+```
+
+Each rollup stores `events`, `sessions` and `users` plus the declared measure states, and normalises
+its grouping keys the same way `/analytics/breakdown` does, so a rollup and the raw table answer the
+same question with the same keys.
+
+`/analytics/breakdown` routes to a rollup automatically and **says which store answered** in the
+response's `source` field — `raw`, or `rollup:<name>`. A chart that silently changed data source is
+one nobody can debug, so this is reported for the same reason `truncated` is.
+
+A rollup answers a request only when all of these hold, and falls back to raw otherwise:
+
+- **The range is aligned to the bucket.** A rollup row is one whole day (or hour). Answering
+  12:00–18:00 from a daily rollup would return the whole day and look entirely healthy, so both ends
+  must sit on a boundary; the routed query then covers `[from, to)`.
+- The `groupBy` column and every `filter` column are stored in that rollup.
+- The request names an event type the rollup aggregated. A rollup restricted to some event types
+  will never answer a request that spans all of them, because it would undercount.
+- For a measure metric, that exact `measure:aggregation` pair is stored. Percentiles never route.
+
+When several rollups match, the one with the fewest grouping columns wins. A rollup **aggregates from the moment it is created** — existing
+rows are not backfilled, which the startup log says explicitly. Changing a rollup's shape is not
+done by editing it: the engine leaves an existing rollup alone and warns, because recreating the
+view would start aggregating a new shape while every stored row kept the old one.
+
+Past a handful of entries, declare them in a file instead — `TelemetryEngine__SchemaFile=/etc/nealytics/schema.json`,
+whose root is a `TelemetryEngine` section. It is the same configuration system, one more provider,
+so an environment variable still overrides anything in it. See
+[`neavents-schema.example.json`](neavents-schema.example.json).
+
+```bash
+TelemetryEngine__Dimensions__0__Name=product_id
+TelemetryEngine__Dimensions__0__Type=String
+TelemetryEngine__Dimensions__1__Name=campaign_id
+TelemetryEngine__Dimensions__1__Type=LowCardinality
+TelemetryEngine__Measures__0__Name=cart_value
+TelemetryEngine__Measures__0__Type=Decimal
+TelemetryEngine__Measures__0__Aggregations=sum,avg,p95
+```
+
+Each becomes a real typed ClickHouse column, created at startup. **Removing a declaration is refused
+at boot if the column holds data** — set `Retired: true` instead. Deletion must not be expressible by
+absence, because absence is what a mistake looks like.
+
+Check a declaration without writing anything:
+
+```bash
+curl -XPOST localhost:5000/api/v1/telemetry/validate -H 'X-Project-Key: myapp:mykey123' \
+  -d '{"projectId":"myapp","tenantId":"t1","sessionId":"s1","eventType":"view",
+       "dimensions":{"product_id":"SKU-1","typo":"x"},"measures":{"cart_value":"49.90"}}'
+# -> { "accepted": false, "droppedDimensions": ["typo"], ... }
+```
 
 ### Database & Storage
 
@@ -424,11 +722,16 @@ CREATE TABLE nealytics_core.global_events
     session_id String,
     user_id Nullable(String),
     event_type LowCardinality(String),
-    item_id Nullable(String),
+    object_id Nullable(String),
+    device_class LowCardinality(String) DEFAULT '',
+    os LowCardinality(String) DEFAULT '',
+    browser LowCardinality(String) DEFAULT '',
+    country LowCardinality(String) DEFAULT '',
     metadata_json String CODEC(ZSTD(1)),
-    timestamp DateTime64(3, 'UTC')
+    timestamp DateTime64(3, 'UTC') CODEC(Delta, ZSTD(1))
 )
 ENGINE = ReplacingMergeTree()
+PARTITION BY toYYYYMM(timestamp)
 ORDER BY (project_id, tenant_id, event_type, timestamp, event_id)
 TTL toDateTime(timestamp) + INTERVAL 90 DAY DELETE
 SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
@@ -443,6 +746,65 @@ Design decisions:
 - **`DateTime64(3, 'UTC')`** gives millisecond precision in UTC. Good enough for analytics, avoids timezone headaches.
 - **`ReplacingMergeTree`** engine. Crash recovery replays the Write-Ahead Log at least once, so a batch that committed to ClickHouse but was not yet acknowledged in the WAL can be re-inserted after a restart. Because `event_id` is part of the sorting key, these duplicates collapse to a single row on merge, giving idempotent recovery. Deduplication is eventual (it happens on background merges); use `FINAL` in a query when you need exact-once results immediately.
 - **`TTL toDateTime(timestamp) + INTERVAL 90 DAY DELETE`** with `ttl_only_drop_parts = 1` evicts events older than 90 days by dropping whole parts, keeping the store bounded without expensive per-row deletes.
+
+### Running more than one ClickHouse node
+
+One node took **318,448 events/s with zero loss** on a 12-core laptop (see
+[`bench/RESULTS.md`](bench/RESULTS.md)), so the first answer is usually *you do not need to yet* —
+and the second is *add a rollup before you add a node*, because the rollup is 8–22× on the read path
+and a shard is not.
+
+When you do need one, the engine does not have to change. It issues plain SQL against
+`nealytics_core.global_events`, so a **`Distributed`** table by that name works exactly like the
+local one:
+
+```sql
+-- On every node: the local shard, which is what clickhouse-init.sql already creates.
+CREATE TABLE nealytics_core.global_events_local ON CLUSTER analytics AS nealytics_core.global_events;
+
+-- The name the engine talks to. sipHash64(tenant_id) keeps a tenant on one shard, so every query
+-- this engine issues -- all of which filter project_id + tenant_id first -- hits exactly one.
+CREATE TABLE nealytics_core.global_events ON CLUSTER analytics
+AS nealytics_core.global_events_local
+ENGINE = Distributed(analytics, nealytics_core, global_events_local, sipHash64(tenant_id));
+```
+
+Three things to know before you do it:
+
+- **Shard on `tenant_id`, not randomly.** Every query builder puts `project_id` and `tenant_id` in
+  the `WHERE` unconditionally, so a tenant-keyed shard turns each read into a single-shard query.
+  Shard at random and every read fans out to every node and merges.
+- **`uniqExact` does not distribute cheaply.** Exact distinct counting ships the whole hash set
+  between nodes. Use `mode=approx` on `/breakdown` and `/active` for anything estate-wide — that is
+  what the switch is for.
+- **The schema reconciler is not cluster-aware.** It issues `ALTER TABLE` without `ON CLUSTER`, so
+  it widens the node it connects to and no other. Until that changes, run declared-schema changes
+  against each node, or point the engine at a node and replicate the DDL yourself.
+
+The engine itself scales out already: each instance owns its own WAL and they all write to the same
+ClickHouse, so replicas are additive with no coordination. That path is architecturally clean and
+**untested** — nothing in this repo runs two instances.
+
+### Partitioning an existing table
+
+`clickhouse-init.sql` only runs on an empty data volume, so a deployment that already has data never
+gets the partition key from it — and unlike a column, a partition key cannot be `ALTER`ed in. The
+table has to be rebuilt:
+
+```bash
+./scripts/repartition.sh
+```
+
+It reads the live definition rather than a file (declared dimensions and measures are columns no
+file knows about), copies, swaps with `EXCHANGE TABLES` — atomic on the default Atomic engine —
+copies anything that arrived during the copy, and leaves the old table in place for you to drop
+deliberately. Ingest keeps running throughout. Running it on an already-partitioned table is a
+no-op.
+
+This is a performance change, not a correctness fix: retention works without it. What it buys is
+time pruning for queries that do not pin an `eventType` — the sort key leads with `event_type`, so
+those cannot prune by time through the primary index at all — and retention becoming a
+metadata-only partition drop instead of a part rewrite.
 
 ### Migration (existing deployments)
 
@@ -470,6 +832,20 @@ Source: [`TelemetryDiagnostics.cs`](src/Nealytics.Engine/Infrastructure/Diagnost
 | `nealytics_storage_write_duration_seconds` | Histogram | Time spent per batch insert (including retries) |
 | `nealytics_query_read_duration_seconds` | Histogram | Time spent per read query |
 | `nealytics_queue_depth_current` | Gauge | Current number of events in the in memory channel |
+
+And the four that exist so that nothing the engine discards is invisible. Every one of them is
+tagged, and a non-zero reading on any of them means data you sent is not data you can query:
+
+| Metric | Tags | What it means |
+|---|---|---|
+| `nealytics_unknown_dimensions_dropped_total` | `dimension`, `project_id` | a key you send is not declared, so the value is gone |
+| `nealytics_unknown_measures_dropped_total` | `measure`, `project_id` | the same, for measures |
+| `nealytics_dimension_values_rejected_total` | `dimension` | declared, but the value did not parse as the declared type; the cell is `NULL` and the batch still commits |
+| `nealytics_measure_values_rejected_total` | `measure` | the same, including a value outside a declared `Minimum`/`Maximum` |
+| `nealytics_events_rejected_total` | `reason`, `transport` | a whole event refused. `transport` is `track` or `beacon`; `reason` comes from a closed set, never from anything the caller sent |
+
+The first two are worth an alert on any non-zero value: they mean a producer and this deployment's
+declaration disagree, and the disagreement is silent everywhere else.
 
 These export over OTLP by default. Set `EnablePrometheusScrape=true` to additionally expose them at `GET /metrics` in Prometheus text format. That endpoint is **unauthenticated** by convention — keep it on an internal network / behind your ingress.
 
@@ -515,6 +891,46 @@ The [`Dockerfile`](Dockerfile) uses a multi stage build:
 
 The container runs as a non root `nealytics` user. The WAL directory (`/app/logs/`) is pre created with correct ownership.
 
+### `rd.xml`: the file that decides whether the binary stores anything
+
+`src/Nealytics.Engine/rd.xml` is not optional and not a tuning knob. **Without a correct one, the
+published binary builds, starts, answers `/health` and `/ready`, returns `202` on every ingest, and
+commits no rows at all.**
+
+The cause is not trimming. The ClickHouse client reaches its column writers through
+`Activator.CreateInstance(typeof(Dispatcher<>).MakeGenericType(t))`. Under Native AOT there is no
+JIT, and a generic instantiation over a **value** type has no shared canonical code to fall back on
+— so an instantiation ILC was never told to emit simply does not exist at runtime. Reference types
+share canonical code and are fine. No metadata switch helps, because the problem is missing *code*,
+not missing metadata: `TrimMode=partial`, `IlcGenerateCompleteTypeMetadata=true` and
+`IlcTrimMetadata=false` all fail identically.
+
+Four dispatcher types need rooting, not one:
+
+| Type | Path | Argument |
+|---|---|---|
+| ``Utils.TypeDispatcher+Dispatcher`1`` | columns generally | the column's CLR type, so `T` **and** `Nullable<T>` |
+| ``Types.NullableTypeInfo+ValueOrDefaultListDispatcher`1`` | writes | underlying struct only |
+| ``Types.NullableTypeInfo+NullableStructParameterWriterDispatcher`1`` | query parameters | underlying struct only |
+| ``Types.NullableTableColumn+NullableStructTableColumnDispatcher`1`` | reads | underlying struct only |
+
+The last three carry `NotNullableValueTypeConstraint`, so naming a `Nullable<T>` instantiation of
+them describes something the constraint forbids — it roots nothing while looking like coverage.
+`NullableObjTableColumnDispatcher` is reference-constrained and needs no entry.
+
+**If you add a column type, do not discover the missing entries from stack traces.** Each fix
+advances the error to the next uncovered dispatcher, and each round costs a full ILC publish —
+measured at roughly three hours. Disassemble the client assembly, take every arity-1 generic type
+that reaches a `MakeGenericType`/`Activator.CreateInstance` call site, and check each one's generic
+constraints before deciding which instantiations it needs.
+
+**`dotnet test` cannot catch any of this.** The test host is the JIT, where `MakeGenericType` always
+works, so every test in the repo passes against a binary that loses every row.
+`RuntimeDirectivesCoverageTests` covers the static half — it asserts each `dispatcher[[type]]` pair
+the insert path can produce is present — but only `scripts/aot-smoke.sh`, which publishes and runs
+the real binary, proves the dynamic half. That is why it is a required CI job with a very long
+timeout, and why it asserts a row was **committed** rather than that ingest returned `202`.
+
 ---
 
 ## Project Structure
@@ -533,8 +949,20 @@ src/Nealytics.Engine/
       TelemetryBatchProcessor.cs          # BackgroundService: WAL replay, retry, backoff, drain
       ITelemetryBatchWriter.cs            # Insert abstraction (fault-injectable in tests)
       ClickHouseBatchWriter.cs            # Zero-alloc columnar insert
-      TelemetryColumnMapper.cs            # Payload -> column arrays
+      TelemetryColumnLayout.cs            # The one ordered column list: core + dimensions + measures
+      TelemetryColumnBuffers.cs           # Payload -> pooled column arrays
+      DimensionColumnBuffer.cs            # One declared dimension's column, typed
+      MeasureColumnBuffer.cs              # One declared measure's column, typed + bounds-checked
       TelemetryInsertMath.cs              # Backoff + timestamp math (pure, testable)
+    GetFunnel/
+      GetFunnelEndpoint.cs                # GET /api/v1/analytics/funnel
+      GetFunnelQuery.cs                   # windowFunnel over toDateTime(timestamp), ordered by seq
+      FunnelRequestFactory.cs             # Step/grain/window parsing (pure, testable)
+    GetSchema/
+      GetSchemaEndpoint.cs                # GET /api/v1/schema — what THIS deployment collects
+      GetEventTypesQuery.cs               # Cached event-type census, degrades to unavailable
+    ValidateTelemetry/
+      ValidateTelemetryEndpoint.cs        # POST /api/v1/telemetry/validate — dry run, writes nothing
     GetProjectTimeline/
       GetProjectTimelineEndpoint.cs       # GET /api/v1/telemetry/timeline
       GetProjectTimelineQuery.cs          # ClickHouse query + testable SQL builder
@@ -568,7 +996,7 @@ src/Nealytics.Engine/
       GetTopEventsEndpoint.cs             # GET /api/v1/analytics/top
       GetTopEventsQuery.cs                # Top-N count query + testable SQL builder
       TopEventsRequestFactory.cs          # Request parsing/validation (pure, testable)
-      TopDimension.cs                     # event_type/item_id whitelist enum + parser
+      TopDimensionRules.cs                # null-exclusion rule for the ranked column
       TopEventItem.cs                     # Response model
       TopEventsResponse.cs                # Response model
   Infrastructure/
@@ -588,6 +1016,30 @@ src/Nealytics.Engine/
 Vertical Slice Architecture. Each feature is self contained in its own folder. Infrastructure is shared across slices but has no business logic.
 
 ---
+
+## Benchmarks
+
+`bench/RESULTS.md` carries measured numbers, not estimates: **318,448 events/s ingested with zero
+loss** on one 12-core box, and the read path answered from a rollup **8–22× faster** than from raw
+with the rows proven identical.
+
+```bash
+./scripts/run-benchmark.sh all                    # noop, track, beacon
+./scripts/run-benchmark.sh read                   # every read endpoint, raw vs rollup
+BENCH_ISOLATED=1 ./scripts/run-benchmark.sh all   # on its own ClickHouse, ports 9100/8223
+```
+
+Use `BENCH_ISOLATED=1` (and `INTEGRATION_ISOLATED=1` for the integration suite) whenever anything
+else might be using ClickHouse. Both scripts finish with `docker compose down -v`, and
+`scripts/aot-smoke.sh` uses the same default ports — a benchmark started during an AOT publish
+destroys it, and an AOT publish takes long enough that you will not be watching.
+
+**Put the WAL on real storage before believing a write number.** `BENCH_WAL_DIR` defaults to a
+`/tmp` path, and if `/tmp` is tmpfs the WAL is in RAM, `fsync` is a memcpy, and the benchmark
+measures durable ingest with its durability switched off. It reported 6× too high that way.
+
+See [`bench/README.md`](bench/README.md) for the layer definitions and how to produce a before/after
+pair on one host.
 
 ## Testing
 

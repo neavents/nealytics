@@ -22,7 +22,31 @@ public class TelemetryColumnBuffersTests
             Dimensions = [.. dimensions.Select(d => new DimensionOptions { Name = d.Name, Type = d.Type })],
         };
 
-        return new TelemetryColumnLayout(new DimensionRegistry(options));
+        DimensionRegistry registry = new(options);
+        return new TelemetryColumnLayout(registry, new MeasureRegistry(options, registry));
+    }
+
+    private static TelemetryColumnLayout LayoutWith(
+        (string Name, string Type)[] dimensions,
+        (string Name, string Type, double? Minimum, double? Maximum)[] measures)
+    {
+        TelemetryEngineOptions options = new()
+        {
+            Dimensions = [.. dimensions.Select(d => new DimensionOptions { Name = d.Name, Type = d.Type })],
+            Measures =
+            [
+                .. measures.Select(m => new MeasureOptions
+                {
+                    Name = m.Name,
+                    Type = m.Type,
+                    Minimum = m.Minimum,
+                    Maximum = m.Maximum,
+                }),
+            ],
+        };
+
+        DimensionRegistry registry = new(options);
+        return new TelemetryColumnLayout(registry, new MeasureRegistry(options, registry));
     }
 
     [Fact]

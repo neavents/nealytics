@@ -28,6 +28,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <RdXmlFile Include="rd.xml" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Nealytics.Engine.Tests.Unit" />
     <InternalsVisibleTo Include="Nealytics.Engine.Tests.Integration" />
   </ItemGroup>
