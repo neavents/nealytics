@@ -1,5 +1,5 @@
 <p align="left">
-  <img src="assets/Nealytics.png" alt="Nealytics" width="200" />
+  <img src="assets/nealytics_v2.png" alt="Nealytics" width="full" />
 </p>
 
 # Nealytics
