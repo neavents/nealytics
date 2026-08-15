@@ -10,7 +10,7 @@ public readonly struct TimelineQueryRequest
     public DateTime? Before { get; init; }
     public string? EventType { get; init; }
     public string? SessionId { get; init; }
-    public string? ItemId { get; init; }
+    public string? ObjectId { get; init; }
     public string? MetaKey { get; init; }
     public string? MetaValue { get; init; }
 }

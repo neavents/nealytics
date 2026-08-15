@@ -1,54 +1,10 @@
 using FluentAssertions;
+using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Features.GetTopEvents;
+using Nealytics.Engine.Infrastructure.Configuration;
 
 namespace Nealytics.Engine.Tests.Unit;
 
-public class TopDimensionParserTests
-{
-    [Theory]
-    [InlineData("event_type", TopDimension.EventType)]
-    [InlineData("item_id", TopDimension.ItemId)]
-    public void TryParse_ValidValues_ReturnsTrue(string raw, TopDimension expected)
-    {
-        TopDimensionParser.TryParse(raw, out var dimension).Should().BeTrue();
-        dimension.Should().Be(expected);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData(null)]
-    [InlineData("session_id")]
-    [InlineData("EVENT_TYPE")]
-    public void TryParse_InvalidValues_ReturnsFalseAndDefaultsToEventType(string? raw)
-    {
-        TopDimensionParser.TryParse(raw, out var dimension).Should().BeFalse();
-        dimension.Should().Be(TopDimension.EventType);
-    }
-
-    [Theory]
-    [InlineData(TopDimension.EventType, "event_type")]
-    [InlineData(TopDimension.ItemId, "item_id")]
-    public void ToColumn_MapsWhitelistedColumn(TopDimension dimension, string expected)
-    {
-        TopDimensionParser.ToColumn(dimension).Should().Be(expected);
-    }
-
-    [Fact]
-    public void ExcludesNull_OnlyForItemId()
-    {
-        TopDimensionParser.ExcludesNull(TopDimension.ItemId).Should().BeTrue();
-        TopDimensionParser.ExcludesNull(TopDimension.EventType).Should().BeFalse();
-    }
-
-    [Fact]
-    public void Mappers_UndefinedEnum_Throw()
-    {
-        Action column = () => TopDimensionParser.ToColumn((TopDimension)99);
-        Action wire = () => TopDimensionParser.ToWireFormat((TopDimension)99);
-        column.Should().Throw<ArgumentOutOfRangeException>();
-        wire.Should().Throw<ArgumentOutOfRangeException>();
-    }
-}
 
 public class TopEventsRequestFactoryTests
 {
@@ -57,8 +13,26 @@ public class TopEventsRequestFactoryTests
     private static TopEventsRequestResult Create(
         string? projectId = "proj", string? tenantId = "tenant", string? limit = null,
         string? dimension = null, string? from = null, string? to = null,
-        int maxLimit = 1000, int defaultRangeHours = 24)
-        => TopEventsRequestFactory.Create(projectId, tenantId, limit, dimension, from, to, maxLimit, defaultRangeHours, Now);
+        string? traffic = null, string? exact = null, int maxLimit = 1000, int defaultRangeHours = 24)
+        => TopEventsRequestFactory.Create(
+            projectId, tenantId, limit, dimension, TestColumns(), TestMeasures(),
+            from, to, traffic, exact, maxLimit, defaultRangeHours, Now);
+
+    private static BreakdownColumns TestColumns() =>
+        new(new DimensionRegistry(new TelemetryEngineOptions
+        {
+            Dimensions = [new DimensionOptions { Name = "widget_id", Type = "String" }],
+        }));
+
+    private static MeasureRegistry TestMeasures()
+    {
+        TelemetryEngineOptions options = new()
+        {
+            Measures = [new MeasureOptions { Name = "dwell_ms", Type = "UInt32" }],
+        };
+
+        return new MeasureRegistry(options, new DimensionRegistry(options));
+    }
 
     [Theory]
     [InlineData(null, "t")]
@@ -81,7 +55,7 @@ public class TopEventsRequestFactoryTests
     {
         var result = Create();
         result.Success.Should().BeTrue();
-        result.Request.Dimension.Should().Be(TopDimension.EventType);
+        result.Request.DimensionColumn.Should().Be("event_type");
         result.Request.Limit.Should().Be(20);
         result.Request.To.Should().Be(Now);
         result.Request.From.Should().Be(Now.AddHours(-24));
@@ -96,15 +70,38 @@ public class TopEventsRequestFactoryTests
     [Fact]
     public void ValidDimension_IsParsed()
     {
-        Create(dimension: "item_id").Request.Dimension.Should().Be(TopDimension.ItemId);
+        Create(dimension: "object_id").Request.DimensionColumn.Should().Be("object_id");
+    }
+
+    [Theory]
+    [InlineData("event_id")]
+    [InlineData("metadata_json")]
+    [InlineData("timestamp")]
+    [InlineData("EVENT_TYPE")]
+    [InlineData("nope")]
+    [InlineData("object_id; DROP TABLE global_events")]
+    public void InvalidDimension_Returns400(string dimension)
+    {
+        var result = Create(dimension: dimension);
+        result.Success.Should().BeFalse();
+        result.ErrorStatusCode.Should().Be(TopEventsRequestFactory.StatusBadRequest);
     }
 
     [Fact]
-    public void InvalidDimension_Returns400()
+    public void DeclaredDimension_IsRankable()
     {
-        var result = Create(dimension: "user_id");
+        Create(dimension: "widget_id").Request.DimensionColumn.Should().Be(
+            "widget_id",
+            "a declared dimension was invisible to this endpoint before");
+    }
+
+    [Fact]
+    public void Measure_IsNotRankable()
+    {
+        var result = Create(dimension: "dwell_ms");
+
         result.Success.Should().BeFalse();
-        result.ErrorStatusCode.Should().Be(TopEventsRequestFactory.StatusBadRequest);
+        result.ErrorMessage.Should().Contain("is a declared measure, not a dimension");
     }
 
     [Theory]
@@ -137,25 +134,67 @@ public class TopEventsRequestFactoryTests
         result.Request.From.Should().Be(new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc));
         result.Request.To.Should().Be(new DateTime(2026, 6, 8, 0, 0, 0, DateTimeKind.Utc));
     }
+
+    [Theory]
+    [InlineData("true", true)]
+    [InlineData("True", false)]
+    [InlineData("1", false)]
+    [InlineData("yes", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void OnlyTheLiteralTrueOptsIntoTheSlowPath(string? raw, bool expected)
+    {
+        // Strict on purpose, and matching /breakdown exactly. A near-miss silently making every
+        // query in a dashboard slower is worse than a near-miss doing nothing, and two endpoints
+        // disagreeing about how "exact" is spelled would be worse than either.
+        Create(exact: raw).Request.Exact.Should().Be(expected);
+    }
 }
 
 public class TopEventsQueryBuilderTests
 {
-    private static TopEventsRequest Request(TopDimension dimension = TopDimension.EventType, int limit = 20) =>
+    private static TopEventsRequest Request(
+        string dimensionColumn = "event_type", int limit = 20, bool exact = false) =>
         new TopEventsRequest
         {
             ProjectId = "proj",
             TenantId = "tenant",
             From = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
             To = new DateTime(2026, 6, 8, 0, 0, 0, DateTimeKind.Utc),
-            Dimension = dimension,
-            Limit = limit
+            DimensionColumn = dimensionColumn,
+            Limit = limit,
+            Exact = exact,
         };
+
+    /// <summary>
+    /// Counting rows versus counting distinct events.
+    ///
+    /// No query uses FINAL, so a WAL replay leaves duplicates counted until a background merge
+    /// collapses them. The default stays the fast one and says so; exactness is opt-in and slower,
+    /// which is the honest trade rather than a hidden one.
+    /// </summary>
+    [Fact]
+    public void BuildQuery_ByDefault_CountsRows()
+    {
+        var (sql, _) = GetTopEventsQuery.BuildQuery(Request());
+
+        sql.Should().Contain("count() AS event_count");
+        sql.Should().NotContain("uniqExact(event_id)");
+    }
+
+    [Fact]
+    public void BuildQuery_WhenExact_CountsDistinctEventIds()
+    {
+        var (sql, _) = GetTopEventsQuery.BuildQuery(Request(exact: true));
+
+        sql.Should().Contain("uniqExact(event_id) AS event_count");
+    }
+
 
     [Fact]
     public void BuildQuery_EventType_HasNoNullExclusion()
     {
-        var (sql, _) = GetTopEventsQuery.BuildQuery(Request(TopDimension.EventType));
+        var (sql, _) = GetTopEventsQuery.BuildQuery(Request("event_type"));
 
         sql.Should().Contain("SELECT event_type AS key, count() AS event_count");
         sql.Should().Contain("GROUP BY key ORDER BY event_count DESC LIMIT {limit:Int32}");
@@ -165,10 +204,10 @@ public class TopEventsQueryBuilderTests
     [Fact]
     public void BuildQuery_ItemId_ExcludesNullKeys()
     {
-        var (sql, _) = GetTopEventsQuery.BuildQuery(Request(TopDimension.ItemId));
+        var (sql, _) = GetTopEventsQuery.BuildQuery(Request("object_id"));
 
-        sql.Should().Contain("SELECT item_id AS key");
-        sql.Should().Contain("AND item_id IS NOT NULL");
+        sql.Should().Contain("SELECT object_id AS key");
+        sql.Should().Contain("AND object_id IS NOT NULL");
     }
 
     [Fact]
@@ -192,5 +231,23 @@ public class TopEventsQueryBuilderTests
         parameters[2].Value.Should().Be(request.From);
         parameters[3].Value.Should().Be(request.To);
         parameters[4].Value.Should().Be(7);
+    }
+}
+
+public class TopDimensionRulesTests
+{
+    [Fact]
+    public void EventType_IsNeverNull_SoNullsAreNotExcluded()
+    {
+        TopDimensionRules.ExcludesNull("event_type").Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("object_id")]
+    [InlineData("widget_id")]
+    [InlineData("user_id")]
+    public void NullableColumns_ExcludeNulls_SoTheLeaderboardRanksValuesNotAbsence(string column)
+    {
+        TopDimensionRules.ExcludesNull(column).Should().BeTrue();
     }
 }

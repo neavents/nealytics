@@ -2,6 +2,8 @@ namespace Nealytics.Engine.Features.GetTopEvents;
 
 using System;
 using System.Globalization;
+using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Infrastructure.Configuration;
 
 public readonly struct TopEventsRequestResult
 {
@@ -36,8 +38,12 @@ public static class TopEventsRequestFactory
         string? tenantId,
         string? limitRaw,
         string? dimensionRaw,
+        BreakdownColumns columns,
+        MeasureRegistry measures,
         string? fromRaw,
         string? toRaw,
+        string? trafficRaw,
+        string? exactRaw,
         int maxLimit,
         int defaultRangeHours,
         DateTime nowUtc)
@@ -52,10 +58,24 @@ public static class TopEventsRequestFactory
             return TopEventsRequestResult.Fail(StatusBadRequest, "Project ID and Tenant ID must not exceed 256 characters.");
         }
 
-        TopDimension dimension = TopDimension.EventType;
-        if (!string.IsNullOrEmpty(dimensionRaw) && !TopDimensionParser.TryParse(dimensionRaw, out dimension))
+        string dimensionColumn = "event_type";
+        if (!string.IsNullOrEmpty(dimensionRaw))
         {
-            return TopEventsRequestResult.Fail(StatusBadRequest, "'dimension' must be one of: event_type, item_id.");
+            if (measures.IsActive(dimensionRaw))
+            {
+                return TopEventsRequestResult.Fail(
+                    StatusBadRequest,
+                    $"'{dimensionRaw}' is a declared measure, not a dimension. A top-N ranks the "
+                    + "values of a dimension; a measure is the quantity being ranked.");
+            }
+
+            if (!columns.TryResolve(dimensionRaw, out string resolved))
+            {
+                return TopEventsRequestResult.Fail(
+                    StatusBadRequest, columns.RejectionMessage("dimension", dimensionRaw));
+            }
+
+            dimensionColumn = resolved;
         }
 
         int limit = Math.Clamp(DefaultLimit, 1, maxLimit);
@@ -84,14 +104,21 @@ public static class TopEventsRequestFactory
             return TopEventsRequestResult.Fail(StatusBadRequest, "'from' must be before or equal to 'to'.");
         }
 
+        if (!TrafficFilter.TryParse(trafficRaw, out string? trafficClass))
+        {
+            return TopEventsRequestResult.Fail(StatusBadRequest, TrafficFilter.Rejection(trafficRaw));
+        }
+
         return TopEventsRequestResult.Ok(new TopEventsRequest
         {
             ProjectId = projectId,
             TenantId = tenantId,
             From = fromUtc,
             To = toUtc,
-            Dimension = dimension,
-            Limit = limit
+            TrafficClass = trafficClass,
+            DimensionColumn = dimensionColumn,
+            Limit = limit,
+            Exact = string.Equals(exactRaw, "true", StringComparison.Ordinal),
         });
     }
 }

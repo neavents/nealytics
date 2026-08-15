@@ -2,6 +2,9 @@ namespace Nealytics.Engine.Features.GetProjectTimeline;
 
 using System;
 using System.Collections.Generic;
+using Nealytics.Engine.Infrastructure.Configuration;
+using System.Linq;
+using System.Globalization;
 using System.Data.Common;
 using System.Diagnostics;
 using System.Text;
@@ -16,21 +19,32 @@ public sealed partial class GetProjectTimelineQuery
 {
     private readonly ClickHouseConnectionFactory _connectionFactory;
     private readonly ILogger<GetProjectTimelineQuery> _logger;
+    private readonly string[] _dimensionColumns;
+    private readonly string[] _measureColumns;
+    private readonly string[] _declaredColumns;
 
     public GetProjectTimelineQuery(
         ClickHouseConnectionFactory connectionFactory,
+        DimensionRegistry dimensions,
+        MeasureRegistry measures,
         ILogger<GetProjectTimelineQuery> logger)
     {
         _connectionFactory = connectionFactory;
         _logger = logger;
+        _dimensionColumns = [.. dimensions.Active.Select(d => d.Name)];
+        _measureColumns = [.. measures.Active.Select(m => m.Name)];
+        _declaredColumns = [.. _dimensionColumns, .. _measureColumns];
     }
 
     [LoggerMessage(EventId = 2001, Level = LogLevel.Information,
         Message = "Executing timeline query for Project: {ProjectId} / Tenant: {TenantId}.")]
     private static partial void LogQueryStarted(ILogger logger, string projectId, string tenantId);
 
+    internal const int CoreColumnCount = 7;
+
     internal static (string Sql, IReadOnlyList<KeyValuePair<string, object?>> Parameters) BuildQuery(
-        in TimelineQueryRequest request)
+        in TimelineQueryRequest request,
+        IReadOnlyList<string>? declaredColumns = null)
     {
         List<KeyValuePair<string, object?>> parameters = new List<KeyValuePair<string, object?>>(7)
         {
@@ -39,8 +53,19 @@ public sealed partial class GetProjectTimelineQuery
         };
 
         StringBuilder sql = new StringBuilder(
-            "SELECT event_id, session_id, user_id, event_type, item_id, metadata_json, timestamp " +
-            "FROM nealytics_core.global_events " +
+            "SELECT event_id, session_id, user_id, event_type, object_id, metadata_json, timestamp");
+
+        if (declaredColumns is not null)
+        {
+            for (int i = 0; i < declaredColumns.Count; i++)
+            {
+                sql.Append(", ");
+                sql.Append(declaredColumns[i]);
+            }
+        }
+
+        sql.Append(
+            " FROM nealytics_core.global_events " +
             "WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String}");
 
         if (request.Before.HasValue)
@@ -61,10 +86,10 @@ public sealed partial class GetProjectTimelineQuery
             parameters.Add(new KeyValuePair<string, object?>("sessionId", request.SessionId));
         }
 
-        if (!string.IsNullOrEmpty(request.ItemId))
+        if (!string.IsNullOrEmpty(request.ObjectId))
         {
-            sql.Append(" AND item_id = {itemId:String}");
-            parameters.Add(new KeyValuePair<string, object?>("itemId", request.ItemId));
+            sql.Append(" AND object_id = {objectId:String}");
+            parameters.Add(new KeyValuePair<string, object?>("objectId", request.ObjectId));
         }
 
         if (!string.IsNullOrEmpty(request.MetaKey) && !string.IsNullOrEmpty(request.MetaValue))
@@ -95,7 +120,7 @@ public sealed partial class GetProjectTimelineQuery
 
         try
         {
-            (string sqlCommandText, IReadOnlyList<KeyValuePair<string, object?>> parameters) = BuildQuery(request);
+            (string sqlCommandText, IReadOnlyList<KeyValuePair<string, object?>> parameters) = BuildQuery(request, _declaredColumns);
 
             await using PooledClickHouseConnection lease =
                 await _connectionFactory.AcquireAsync(cancellationToken);
@@ -124,9 +149,12 @@ public sealed partial class GetProjectTimelineQuery
                     SessionId = reader.GetString(1),
                     UserId = reader.IsDBNull(2) ? null : reader.GetString(2),
                     EventType = reader.GetString(3),
-                    ItemId = reader.IsDBNull(4) ? null : reader.GetString(4),
+                    ObjectId = reader.IsDBNull(4) ? null : reader.GetString(4),
                     MetadataJson = reader.GetString(5),
-                    Timestamp = DateTime.SpecifyKind(reader.GetDateTime(6), DateTimeKind.Utc)
+                    Timestamp = DateTime.SpecifyKind(reader.GetDateTime(6), DateTimeKind.Utc),
+                    Dimensions = ReadDeclared(reader, CoreColumnCount, _dimensionColumns),
+                    Measures = ReadDeclared(
+                        reader, CoreColumnCount + _dimensionColumns.Length, _measureColumns)
                 };
                 events.Add(item);
             }
@@ -152,5 +180,32 @@ public sealed partial class GetProjectTimelineQuery
             double executionSeconds = (double)elapsedTicks / Stopwatch.Frequency;
             TelemetryDiagnostics.QueryReadDuration.Record(executionSeconds);
         }
+    }
+
+    private static Dictionary<string, string>? ReadDeclared(
+        DbDataReader reader, int offset, string[] columns)
+    {
+        Dictionary<string, string>? values = null;
+
+        for (int i = 0; i < columns.Length; i++)
+        {
+            int ordinal = offset + i;
+
+            if (reader.IsDBNull(ordinal))
+            {
+                continue;
+            }
+
+            string? text = Convert.ToString(reader.GetValue(ordinal), CultureInfo.InvariantCulture);
+
+            if (string.IsNullOrEmpty(text))
+            {
+                continue;
+            }
+
+            (values ??= new Dictionary<string, string>(StringComparer.Ordinal))[columns[i]] = text;
+        }
+
+        return values;
     }
 }

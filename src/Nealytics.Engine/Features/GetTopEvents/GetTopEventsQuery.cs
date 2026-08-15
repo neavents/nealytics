@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Data.Common;
 using System.Diagnostics;
 using System.Text;
+using Nealytics.Engine.Infrastructure.Configuration;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -32,7 +33,7 @@ public sealed partial class GetTopEventsQuery
     internal static (string Sql, IReadOnlyList<KeyValuePair<string, object?>> Parameters) BuildQuery(
         in TopEventsRequest request)
     {
-        string dimColumn = TopDimensionParser.ToColumn(request.Dimension);
+        string dimColumn = request.DimensionColumn;
 
         List<KeyValuePair<string, object?>> parameters = new List<KeyValuePair<string, object?>>(5)
         {
@@ -43,15 +44,21 @@ public sealed partial class GetTopEventsQuery
             new KeyValuePair<string, object?>("limit", request.Limit)
         };
 
+        if (request.TrafficClass is not null)
+        {
+            parameters.Add(new KeyValuePair<string, object?>("trafficClass", request.TrafficClass));
+        }
+
         StringBuilder sql = new StringBuilder(256);
         sql.Append("SELECT ");
         sql.Append(dimColumn);
-        sql.Append(" AS key, count() AS event_count ");
+        sql.Append(request.Exact ? " AS key, uniqExact(event_id) AS event_count " : " AS key, count() AS event_count ");
         sql.Append("FROM nealytics_core.global_events ");
         sql.Append("WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String} ");
         sql.Append("AND timestamp >= {fromTimestamp:DateTime64} AND timestamp <= {toTimestamp:DateTime64}");
+        sql.Append(TrafficFilter.Clause(request.TrafficClass));
 
-        if (TopDimensionParser.ExcludesNull(request.Dimension))
+        if (TopDimensionRules.ExcludesNull(request.DimensionColumn))
         {
             sql.Append(" AND ");
             sql.Append(dimColumn);
@@ -73,7 +80,7 @@ public sealed partial class GetTopEventsQuery
         activity?.SetTag("neavents.project_id", request.ProjectId);
         activity?.SetTag("neavents.tenant_id", request.TenantId);
 
-        string dimensionWire = TopDimensionParser.ToWireFormat(request.Dimension);
+        string dimensionWire = request.DimensionColumn;
         LogQueryStarted(_logger, request.ProjectId, request.TenantId, dimensionWire);
         long startTicks = Stopwatch.GetTimestamp();
 

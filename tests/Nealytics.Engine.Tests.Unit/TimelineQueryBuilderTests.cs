@@ -21,7 +21,7 @@ public class TimelineQueryBuilderTests
         sql.Should().EndWith("ORDER BY timestamp DESC LIMIT {limit:Int32}");
         sql.Should().NotContain("event_type =");
         sql.Should().NotContain("session_id =");
-        sql.Should().NotContain("item_id =");
+        sql.Should().NotContain("object_id =");
         sql.Should().NotContain("timestamp <");
 
         parameters.Should().HaveCount(3);
@@ -58,18 +58,18 @@ public class TimelineQueryBuilderTests
             Limit = 10,
             EventType = "click",
             SessionId = "sess-1",
-            ItemId = "/home"
+            ObjectId = "/home"
         };
 
         (string sql, var parameters) = GetProjectTimelineQuery.BuildQuery(request);
 
         sql.Should().Contain("AND event_type = {eventType:String}");
         sql.Should().Contain("AND session_id = {sessionId:String}");
-        sql.Should().Contain("AND item_id = {itemId:String}");
+        sql.Should().Contain("AND object_id = {objectId:String}");
 
         parameters.Should().ContainSingle(p => p.Key == "eventType" && (string)p.Value! == "click");
         parameters.Should().ContainSingle(p => p.Key == "sessionId" && (string)p.Value! == "sess-1");
-        parameters.Should().ContainSingle(p => p.Key == "itemId" && (string)p.Value! == "/home");
+        parameters.Should().ContainSingle(p => p.Key == "objectId" && (string)p.Value! == "/home");
         parameters.Should().HaveCount(6);
     }
 
@@ -85,14 +85,14 @@ public class TimelineQueryBuilderTests
             Limit = 10,
             EventType = emptyValue,
             SessionId = emptyValue,
-            ItemId = emptyValue
+            ObjectId = emptyValue
         };
 
         (string sql, var parameters) = GetProjectTimelineQuery.BuildQuery(request);
 
         sql.Should().NotContain("event_type =");
         sql.Should().NotContain("session_id =");
-        sql.Should().NotContain("item_id =");
+        sql.Should().NotContain("object_id =");
         parameters.Should().HaveCount(3);
     }
 

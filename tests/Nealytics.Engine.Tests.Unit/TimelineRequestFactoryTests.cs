@@ -9,9 +9,9 @@ public class TimelineRequestFactoryTests
 
     private static TimelineRequestResult Create(
         string? projectId = "proj", string? tenantId = "tenant", string? limit = null,
-        string? before = null, string? eventType = null, string? sessionId = null, string? itemId = null,
+        string? before = null, string? eventType = null, string? sessionId = null, string? objectId = null,
         string? metaKey = null, string? metaValue = null)
-        => TimelineRequestFactory.Create(projectId, tenantId, limit, before, eventType, sessionId, itemId, metaKey, metaValue, MaxLimit);
+        => TimelineRequestFactory.Create(projectId, tenantId, limit, before, eventType, sessionId, objectId, metaKey, metaValue, MaxLimit);
 
     [Theory]
     [InlineData(null, "tenant")]
@@ -84,35 +84,35 @@ public class TimelineRequestFactoryTests
     [InlineData("   ")]
     public void Create_BlankFilters_NormalizeToNull(string blank)
     {
-        TimelineRequestResult result = Create(eventType: blank, sessionId: blank, itemId: blank);
+        TimelineRequestResult result = Create(eventType: blank, sessionId: blank, objectId: blank);
 
         result.Success.Should().BeTrue();
         result.Request.EventType.Should().BeNull();
         result.Request.SessionId.Should().BeNull();
-        result.Request.ItemId.Should().BeNull();
+        result.Request.ObjectId.Should().BeNull();
     }
 
     [Fact]
     public void Create_PopulatedFilters_ArePreserved()
     {
-        TimelineRequestResult result = Create(eventType: "click", sessionId: "s1", itemId: "/x");
+        TimelineRequestResult result = Create(eventType: "click", sessionId: "s1", objectId: "/x");
 
         result.Request.EventType.Should().Be("click");
         result.Request.SessionId.Should().Be("s1");
-        result.Request.ItemId.Should().Be("/x");
+        result.Request.ObjectId.Should().Be("/x");
     }
 
     [Theory]
     [InlineData("eventType")]
     [InlineData("sessionId")]
-    [InlineData("itemId")]
+    [InlineData("objectId")]
     public void Create_FilterTooLong_Returns400(string which)
     {
         string big = new string('a', 257);
         TimelineRequestResult result = Create(
             eventType: which == "eventType" ? big : null,
             sessionId: which == "sessionId" ? big : null,
-            itemId: which == "itemId" ? big : null);
+            objectId: which == "objectId" ? big : null);
 
         result.Success.Should().BeFalse();
         result.ErrorStatusCode.Should().Be(TimelineRequestFactory.StatusBadRequest);

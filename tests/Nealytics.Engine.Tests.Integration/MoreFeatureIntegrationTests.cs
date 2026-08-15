@@ -12,13 +12,19 @@ public class MoreFeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
     public MoreFeatureIntegrationTests(TestWebApplicationFactory factory) : base(factory) { }
 
     public Task InitializeAsync() => Task.CompletedTask;
-    public Task DisposeAsync() => Task.CompletedTask;
+    /// <summary>
+    /// The fixed project ids this class writes under. The suite shares
+    /// nealytics_core.global_events with the running estate, so each class removes its own
+    /// rows — nothing else will. This used to be done, accidentally, by another class's
+    /// TRUNCATE of the whole table.
+    /// </summary>
+    public Task DisposeAsync() => ClickHouseTestSupport.DeleteProjectsAsync("p-tsiso", "p-page", "p-item", "p-min", "p-siso");
 
     private static string RecentTimestamp(int minutesAgo) =>
         DateTime.UtcNow.AddMinutes(-minutesAgo).ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
 
     private async Task Ingest(string projectId, string tenantId, string sessionId, string eventType,
-        string? itemId = null, string? timestamp = null)
+        string? objectId = null, string? timestamp = null)
     {
         var payload = new
         {
@@ -26,7 +32,7 @@ public class MoreFeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
             tenantId,
             sessionId,
             eventType,
-            itemId,
+            objectId,
             timestamp = timestamp ?? RecentTimestamp(1),
             metadataJson = "{}"
         };
@@ -47,7 +53,8 @@ public class MoreFeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
     [Fact]
     public async Task Beacon_MultipleEvents_AllPersisted()
     {
-        string projectId = $"p-beacon-{Guid.NewGuid():N}";
+        await using TestProject project = TestProject.New("p-beacon");
+        string projectId = project.Id;
         var payload = new[]
         {
             new { projectId, tenantId = "t", sessionId = "s", eventType = "load", timestamp = RecentTimestamp(1), metadataJson = "{}" },
@@ -88,14 +95,14 @@ public class MoreFeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
     public async Task Timeline_ItemIdFilter_ReturnsOnlyMatching()
     {
         string tenantId = $"t-item-{Guid.NewGuid():N}";
-        await Ingest("p-item", tenantId, "s", "click", itemId: "/pricing");
-        await Ingest("p-item", tenantId, "s", "click", itemId: "/home");
+        await Ingest("p-item", tenantId, "s", "click", objectId: "/pricing");
+        await Ingest("p-item", tenantId, "s", "click", objectId: "/home");
         await Task.Delay(4000);
 
-        JsonElement body = await GetJson("/api/v1/telemetry/timeline?limit=50&itemId=/pricing", "p-item", tenantId);
+        JsonElement body = await GetJson("/api/v1/telemetry/timeline?limit=50&objectId=/pricing", "p-item", tenantId);
         JsonElement events = body.GetProperty("events");
         events.GetArrayLength().Should().Be(1);
-        events[0].GetProperty("itemId").GetString().Should().Be("/pricing");
+        events[0].GetProperty("objectId").GetString().Should().Be("/pricing");
     }
 
     [Fact]
@@ -165,7 +172,8 @@ public class MoreFeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
     [Fact]
     public async Task Dedup_DistinctEventIds_AreNotCollapsed()
     {
-        string projectId = $"p-nodup-{Guid.NewGuid():N}";
+        await using TestProject project = TestProject.New("p-nodup");
+        string projectId = project.Id;
         string ts = RecentTimestamp(1);
         Client.DefaultRequestHeaders.Add("X-Project-Key", "test-key-1");
         for (int i = 0; i < 4; i++)
@@ -193,7 +201,8 @@ public class MoreFeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
     [Fact]
     public async Task Ttl_EventsOlderThanRetention_AreEvictedOnMerge()
     {
-        string projectId = $"p-ttl-{Guid.NewGuid():N}";
+        await using TestProject project = TestProject.New("p-ttl");
+        string projectId = project.Id;
         Client.DefaultRequestHeaders.Add("X-Project-Key", "test-key-1");
 
         var oldEvent = new

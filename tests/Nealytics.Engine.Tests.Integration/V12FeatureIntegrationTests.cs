@@ -14,11 +14,17 @@ public class V12FeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
 
     public Task InitializeAsync() => Task.CompletedTask;
 
-    public Task DisposeAsync() => Task.CompletedTask;
+    /// <summary>
+    /// The fixed project ids this class writes under. The suite shares
+    /// nealytics_core.global_events with the running estate, so each class removes its own
+    /// rows — nothing else will. This used to be done, accidentally, by another class's
+    /// TRUNCATE of the whole table.
+    /// </summary>
+    public Task DisposeAsync() => ClickHouseTestSupport.DeleteProjectsAsync("p-top", "p-dau", "p-grp", "p-iso", "p-meta", "p-topiso");
 
     private async Task Ingest(
         string projectId, string tenantId, string sessionId, string eventType,
-        string? userId = null, string? itemId = null, string? metadataJson = null, DateTime? timestamp = null)
+        string? userId = null, string? objectId = null, string? metadataJson = null, DateTime? timestamp = null)
     {
         var payload = new
         {
@@ -27,7 +33,7 @@ public class V12FeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
             sessionId,
             userId,
             eventType,
-            itemId,
+            objectId,
             timestamp = (timestamp ?? DateTime.UtcNow).ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
             metadataJson = metadataJson ?? "{}"
         };
@@ -209,11 +215,29 @@ public class V12FeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
     }
 
     [Fact]
-    public async Task TimeSeries_InvalidGroupBy_Returns400()
+    public async Task TimeSeries_UnknownGroupBy_Returns400()
     {
         HttpResponseMessage response = await GetRaw("p", "t",
-            "/api/v1/analytics/timeseries?groupBy=user_id");
+            "/api/v1/analytics/timeseries?groupBy=no_such_column");
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Theory]
+    [InlineData("user_id")]
+    [InlineData("session_id")]
+    [InlineData("device_class")]
+    [InlineData("country")]
+    public async Task TimeSeries_AcceptsAnyGroupableCoreColumn(string column)
+    {
+        // These used to be a 400. TimeSeriesGroupBy was a closed enum over a handful of columns, so
+        // a declared dimension was invisible to five of the six read endpoints — the whole point of
+        // a config-driven engine, unusable from everywhere except /breakdown. Both endpoints now
+        // resolve through the same allowlist /breakdown uses, which is also the injection boundary:
+        // what reaches the SQL builder is the allowlist's own string, never the caller's.
+        HttpResponseMessage response = await GetRaw("p", "t",
+            $"/api/v1/analytics/timeseries?groupBy={column}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     // ──────── 4.3 Top-N ────────
@@ -250,17 +274,17 @@ public class V12FeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
         string tenantId = $"t-topitem-{Guid.NewGuid():N}";
         string projectId = "p-top";
 
-        await Ingest(projectId, tenantId, "s1", "view", itemId: "/home");
-        await Ingest(projectId, tenantId, "s1", "view", itemId: "/home");
-        await Ingest(projectId, tenantId, "s1", "view", itemId: null);
+        await Ingest(projectId, tenantId, "s1", "view", objectId: "/home");
+        await Ingest(projectId, tenantId, "s1", "view", objectId: "/home");
+        await Ingest(projectId, tenantId, "s1", "view", objectId: null);
 
         await Task.Delay(4000);
 
         JsonElement body = await Get(projectId, tenantId,
-            "/api/v1/analytics/top?dimension=item_id&from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z");
+            "/api/v1/analytics/top?dimension=object_id&from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z");
 
         JsonElement items = body.GetProperty("items");
-        items.GetArrayLength().Should().Be(1, "the NULL item_id row must be excluded");
+        items.GetArrayLength().Should().Be(1, "the NULL object_id row must be excluded");
         items[0].GetProperty("key").GetString().Should().Be("/home");
         items[0].GetProperty("count").GetInt64().Should().Be(2);
     }
@@ -287,11 +311,24 @@ public class V12FeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
     }
 
     [Fact]
-    public async Task TopEvents_InvalidDimension_Returns400()
+    public async Task TopEvents_UnknownDimension_Returns400()
     {
         HttpResponseMessage response = await GetRaw("p", "t",
-            "/api/v1/analytics/top?dimension=session_id");
+            "/api/v1/analytics/top?dimension=no_such_column");
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Theory]
+    [InlineData("session_id")]
+    [InlineData("user_id")]
+    [InlineData("object_id")]
+    [InlineData("os")]
+    public async Task TopEvents_AcceptsAnyGroupableCoreColumn(string dimension)
+    {
+        HttpResponseMessage response = await GetRaw("p", "t",
+            $"/api/v1/analytics/top?dimension={dimension}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     // ──────── Section 3 user_id on ingest + timeline ────────

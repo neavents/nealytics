@@ -9,6 +9,29 @@ using Nealytics.Engine.Infrastructure.Configuration;
 
 namespace Nealytics.Engine.Tests.Integration;
 
+/// <summary>
+/// Boots the real application against the real ClickHouse.
+///
+/// <b>Dimensions are deliberately not declared here.</b> Declaring one would have the schema
+/// reconciler add that column to the target database — which for a developer running these locally
+/// is the same <c>nealytics_core.global_events</c> the deployment writes to. The moment a test put
+/// a value in it, the deployment's own service would refuse to boot, because it does not declare
+/// that name. Hardcoding the deployment's names instead would put one product's vocabulary back
+/// into an engine whose whole point is not having any.
+///
+/// So the declaration comes from the environment, exactly as it does in production:
+///
+/// <code>
+/// TelemetryEngine__Dimensions__0__Name=menu_id TelemetryEngine__Dimensions__0__Type=String \
+/// TelemetryEngine__Dimensions__1__Name=section_id TelemetryEngine__Dimensions__1__Type=String \
+/// TelemetryEngine__Dimensions__2__Name=table_id TelemetryEngine__Dimensions__2__Type=String \
+///   dotnet test
+/// </code>
+///
+/// Against an empty database none of that is needed. Against a database a deployment is using, it
+/// is required, and the failure is loud and says exactly which column and how many rows — see
+/// ClickHouseSchemaMigrator's refuse-to-start rules. That is the guard working, not a broken test.
+/// </summary>
 public class TestWebApplicationFactory : WebApplicationFactory<Program>
 {
     public TestWebApplicationFactory()

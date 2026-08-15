@@ -65,25 +65,9 @@ jobs:
 
       - name: Init ClickHouse schema
         run: |
-          docker exec ${{ job.services.clickhouse.id }} clickhouse-client -q "CREATE DATABASE IF NOT EXISTS nealytics_core"
-          docker exec ${{ job.services.clickhouse.id }} clickhouse-client -q "
-            CREATE TABLE IF NOT EXISTS nealytics_core.global_events
-            (
-                event_id UUID,
-                project_id LowCardinality(String),
-                tenant_id String,
-                session_id String,
-                user_id Nullable(String),
-                event_type LowCardinality(String),
-                item_id Nullable(String),
-                metadata_json String CODEC(ZSTD(1)),
-                timestamp DateTime64(3, 'UTC')
-            )
-            ENGINE = ReplacingMergeTree()
-            ORDER BY (project_id, tenant_id, event_type, timestamp, event_id)
-            TTL toDateTime(timestamp) + INTERVAL 90 DAY DELETE
-            SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
-          "
+          docker cp clickhouse-init.sql ${{ job.services.clickhouse.id }}:/tmp/clickhouse-init.sql
+          docker exec ${{ job.services.clickhouse.id }} clickhouse-client --queries-file /tmp/clickhouse-init.sql
+          docker exec ${{ job.services.clickhouse.id }} clickhouse-client -q "DESCRIBE nealytics_core.global_events"
 
       - name: Integration tests
         env:
@@ -92,3 +76,64 @@ jobs:
           TelemetryEngine__AllowedProjectKeys: "test-key-1,test-key-2"
           TelemetryEngine__WriteAheadLogDirectory: "/tmp/nealytics-ci-wal/"
         run: dotnet test tests/Nealytics.Engine.Tests.Integration --verbosity normal
+
+  aot-smoke:
+    runs-on: ubuntu-latest
+    needs: build
+    # ILC is the long pole here, and "tens of minutes" was an underestimate. Measured on a
+    # developer machine with other containers running: ILC alone ran ~2h50m for a single publish,
+    # on two consecutive runs. A 2-core hosted runner will not be faster. At timeout-minutes: 120
+    # this job could never have reached its first assertion -- it would have been killed
+    # mid-compile and read as an infrastructure flake rather than as a limit that was simply too
+    # low for the work.
+    #
+    # Bounded well below the six-hour job limit so a genuinely stuck compile still fails loudly.
+    # Generous rather than tight: a timeout that trips on a legitimate build is a flaky job, and a
+    # flaky job gets ignored -- which for this job means shipping a binary that accepts events,
+    # passes every health check, and stores nothing.
+    #
+    # The tempting shortcut is to drop IlcOptimizationPreference=Speed for CI, which compiles far
+    # faster. Deliberately not taken: release.yml and the Dockerfile publish with Speed, so a CI
+    # job proving a *different* build configuration proves the wrong artifact. Optimisation
+    # preference is not supposed to change which generic instantiations ILC emits -- but "not
+    # supposed to" is the precise shape of the assumption that produced the outage this job exists
+    # to catch.
+    timeout-minutes: 300
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:latest
+        ports:
+          - 9000:9000
+          - 8123:8123
+        env:
+          CLICKHOUSE_SKIP_USER_SETUP: 1
+        options: >-
+          --ulimit nofile=262144:262144
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install AOT toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+
+      - name: Wait for ClickHouse
+        run: |
+          for i in $(seq 1 60); do
+            if docker exec ${{ job.services.clickhouse.id }} clickhouse-client -q "SELECT 1" >/dev/null 2>&1; then
+              echo "ClickHouse ready after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "ClickHouse did not become ready"; exit 1
+
+      - name: Init ClickHouse schema
+        run: |
+          docker cp clickhouse-init.sql ${{ job.services.clickhouse.id }}:/tmp/clickhouse-init.sql
+          docker exec ${{ job.services.clickhouse.id }} clickhouse-client --queries-file /tmp/clickhouse-init.sql
+
+      - name: AOT smoke
+        run: ./scripts/aot-smoke.sh

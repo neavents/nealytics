@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
+using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Infrastructure.Configuration;
 
 public static class GetTopEventsEndpoint
@@ -16,6 +17,8 @@ public static class GetTopEventsEndpoint
         endpoints.MapGet("/api/v1/analytics/top", async (
             HttpContext context,
             GetTopEventsQuery query,
+            BreakdownColumns columns,
+            MeasureRegistry measures,
             IOptions<TelemetryEngineOptions> options,
             CancellationToken cancellationToken) =>
         {
@@ -27,8 +30,12 @@ public static class GetTopEventsEndpoint
                 user.FindFirst("tenant_id")?.Value,
                 context.Request.Query["limit"].ToString(),
                 context.Request.Query["dimension"].ToString(),
+                columns,
+                measures,
                 context.Request.Query["from"].ToString(),
                 context.Request.Query["to"].ToString(),
+                context.Request.Query["traffic"].ToString(),
+                context.Request.Query["exact"].ToString(),
                 engineOptions.MaxQueryLimit,
                 engineOptions.DefaultSessionQueryRangeHours,
                 DateTime.UtcNow);

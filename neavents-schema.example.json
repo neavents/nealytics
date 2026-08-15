@@ -1,0 +1,87 @@
+{
+  "//": [
+    "An example deployment schema, mounted with TelemetryEngine__SchemaFile.",
+    "",
+    "The engine ships knowing none of these names. This file is what a deployment declares, and it",
+    "is a file rather than seventy indexed environment variables so it can be committed, diffed and",
+    "reviewed. An environment variable still overrides anything set here.",
+    "",
+    "A dimension answers 'which one' and is a GROUP BY key. A measure answers 'how much' and is",
+    "aggregated, never grouped by. Removing a declaration is refused at boot while the column holds",
+    "data — set Retired: true instead.",
+    "",
+    "The names below are a QR-menu deployment's vocabulary and mean nothing to the engine."
+  ],
+
+  "TelemetryEngine": {
+    "//Retention": [
+      "Impressions are an order of magnitude more numerous than anything else here and are worth",
+      "nothing individually once daily_by_object has aggregated them.",
+      "",
+      "A per-type entry can only ever be SHORTER than RetentionDays. ClickHouse evaluates every TTL",
+      "clause independently and any match deletes, so the shortest applicable rule wins no matter",
+      "what order they are written in — which means a longer entry would delete the rows on the base",
+      "schedule while claiming to keep them. The engine refuses to boot on that rather than let a",
+      "config file say one thing while the data says another."
+    ],
+    "RetentionDays": 90,
+    "EventTypeRetention": [
+      { "EventType": "item_impression", "Days": 30 }
+    ],
+
+    "Dimensions": [
+      { "Name": "menu_id", "Type": "String" },
+      { "Name": "section_id", "Type": "String" },
+      { "Name": "table_id", "Type": "String" },
+      { "Name": "locale", "Type": "LowCardinality" },
+      { "Name": "query_id", "Type": "String" },
+
+      { "//": "Snapshotted onto the event, never joined at query time: when a photo is added in",
+        "//2": "September, August must still compare as without-photo. A live join would report",
+        "//3": "that every August impression had one.",
+        "Name": "has_photo", "Type": "LowCardinality" },
+      { "Name": "is_available", "Type": "LowCardinality" },
+      { "Name": "translation_present", "Type": "LowCardinality" }
+    ],
+
+    "Measures": [
+      { "//": "Bounded because a forgotten tab is not a read. Out of range is rejected and counted,",
+        "//2": "never clamped, so the loss is visible instead of silently changing the average.",
+        "Name": "dwell_ms", "Type": "UInt32", "Aggregations": "sum,avg,max,p95",
+        "Minimum": 0, "Maximum": 1800000 },
+
+      { "Name": "position", "Type": "UInt16", "Aggregations": "avg,min,max", "Minimum": 0 },
+      { "Name": "result_count", "Type": "UInt16", "Aggregations": "sum,avg", "Minimum": 0 },
+      { "Name": "scroll_pct", "Type": "UInt8", "Aggregations": "avg,max", "Minimum": 0, "Maximum": 100 },
+      { "Name": "price", "Type": "Decimal", "Aggregations": "sum,avg" }
+    ],
+
+    "Rollups": [
+      { "//": "Answers the zero-impression and CTR reports without scanning raw. Impressions are",
+        "//2": "the highest-volume event by an order of magnitude, so this is the one that decides",
+        "//3": "whether the dashboard stays usable as venues are added.",
+        "Name": "daily_by_object", "Grain": "day",
+        "EventTypes": "item_impression,item_view",
+        "Dimensions": "object_id,section_id,menu_id,locale,has_photo,is_available",
+        "Measures": "dwell_ms:sum,dwell_ms:avg,position:avg" },
+
+      { "Name": "daily_by_table", "Grain": "day",
+        "EventTypes": "app_open,menu_view",
+        "Dimensions": "table_id,menu_id,locale",
+        "Measures": "" },
+
+      { "//": "One row per session rather than per time bucket, which is what replaces a scheduled",
+        "//2": "sessionizer. A job sweeping sessions idle for thirty minutes has to be re-run for",
+        "//3": "late arrivals and still leaves a hole when one lands after the re-run; a merge tree",
+        "//4": "fed by a view cannot, because a late event is just another partial state.",
+        "//5": "",
+        "//6": "EventTypes is deliberately empty: a session rollup that filters them holds only",
+        "//7": "those rows, so its per-session event count is not the session's event count, and",
+        "//8": "/sessions will refuse to read it.",
+        "Name": "sessions", "Grain": "session",
+        "EventTypes": "",
+        "Dimensions": "menu_id,table_id,locale",
+        "Measures": "dwell_ms:sum,dwell_ms:max" }
+    ]
+  }
+}

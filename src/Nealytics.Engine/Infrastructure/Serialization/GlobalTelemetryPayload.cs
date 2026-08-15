@@ -8,6 +8,10 @@ using Nealytics.Engine.Features.GetSessionAnalytics;
 using Nealytics.Engine.Features.GetEventTimeSeries;
 using Nealytics.Engine.Features.GetActiveUsers;
 using Nealytics.Engine.Features.GetTopEvents;
+using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Features.GetFunnel;
+using Nealytics.Engine.Features.GetSchema;
+using Nealytics.Engine.Features.ValidateTelemetry;
 
 public sealed class GlobalTelemetryPayload
 {
@@ -17,22 +21,46 @@ public sealed class GlobalTelemetryPayload
     public string SessionId { get; init; } = string.Empty;
     public string? UserId { get; init; }
     public string EventType { get; init; } = string.Empty;
-    public string? ItemId { get; init; }
 
-    // Dimensions that used to be buried in MetadataJson. Aggregates cannot group on a JSON
-    // string without parsing every row, which is why per-menu and per-section analytics
-    // reported themselves unmeasured while the data was arriving all along.
-    public string? MenuId { get; init; }
-    public string? SectionId { get; init; }
+    /// <summary>The thing this event is about. Generic by design — every engine has one.</summary>
+    public string? ObjectId { get; init; }
 
     /// <summary>
-    /// The table a diner scanned, resolved at the edge from the QR code's tracking token.
-    /// Null for menu-scoped codes and for direct visits.
+    /// Deployment-declared dimensions, keyed by column name.
+    ///
+    /// These are real typed columns, not a JSON bag: ClickHouse cannot GROUP BY a field inside a
+    /// JSON string without parsing every row, which is why per-dimension analytics used to report
+    /// itself unmeasured while the data was arriving all along. What changed is only *where the
+    /// names come from* — configuration, never this assembly. A key that is not declared is
+    /// dropped at ingest, loudly and counted; see IngestValidation.SanitizeDimensions.
     /// </summary>
-    public string? TableId { get; init; }
+    public Dictionary<string, string>? Dimensions { get; init; }
+
+    public Dictionary<string, string>? Measures { get; init; }
+
+    /// <summary>
+    /// Monotonic per session, starting at 0. The ordering key within a session.
+    ///
+    /// Client clocks are unreliable — badly so on cheap devices — so anything that orders events
+    /// inside a session must order by this, never by <see cref="Timestamp"/>.
+    /// </summary>
+    public uint Seq { get; init; }
+
+    /// <summary>
+    /// <c>normal</c>, <c>bot</c> or <c>internal</c>. Read endpoints exclude everything but
+    /// <c>normal</c> unless asked otherwise.
+    ///
+    /// Flagged, never dropped: when an owner asks why a number differs from their own count, the
+    /// raw rows are the only way to answer.
+    /// </summary>
+    public string TrafficClass { get; init; } = string.Empty;
+
+    public string PagePath { get; init; } = string.Empty;
+
+    public string Referrer { get; init; } = string.Empty;
 
     // Derived at the edge from the User-Agent and Cloudflare request metadata, never sent by
-    // the client — so a caller cannot forge them, and they cost the menu document nothing.
+    // the client — so a caller cannot forge them, and they cost the source document nothing.
     public string DeviceClass { get; init; } = string.Empty;
     public string Os { get; init; } = string.Empty;
     public string Browser { get; init; } = string.Empty;
@@ -48,6 +76,7 @@ public sealed class GlobalTelemetryPayload
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(GlobalTelemetryPayload))]
 [JsonSerializable(typeof(List<GlobalTelemetryPayload>))]
+[JsonSerializable(typeof(Dictionary<string, string>))]
 [JsonSerializable(typeof(ProjectTimelineResponse))]
 [JsonSerializable(typeof(GlobalTimelineItem))]
 [JsonSerializable(typeof(List<GlobalTimelineItem>))]
@@ -63,6 +92,22 @@ public sealed class GlobalTelemetryPayload
 [JsonSerializable(typeof(TopEventsResponse))]
 [JsonSerializable(typeof(TopEventItem))]
 [JsonSerializable(typeof(List<TopEventItem>))]
+[JsonSerializable(typeof(BreakdownResponse))]
+[JsonSerializable(typeof(BreakdownRow))]
+[JsonSerializable(typeof(List<BreakdownRow>))]
+[JsonSerializable(typeof(SchemaResponse))]
+[JsonSerializable(typeof(SchemaDimension))]
+[JsonSerializable(typeof(SchemaMeasure))]
+[JsonSerializable(typeof(List<SchemaDimension>))]
+[JsonSerializable(typeof(List<SchemaMeasure>))]
+[JsonSerializable(typeof(SchemaEventType))]
+[JsonSerializable(typeof(List<SchemaEventType>))]
+[JsonSerializable(typeof(FunnelResponse))]
+[JsonSerializable(typeof(FunnelStepResult))]
+[JsonSerializable(typeof(FunnelSegment))]
+[JsonSerializable(typeof(List<FunnelStepResult>))]
+[JsonSerializable(typeof(List<FunnelSegment>))]
+[JsonSerializable(typeof(ValidateTelemetryResponse))]
 public partial class TelemetryAotContext : JsonSerializerContext
 {
 }

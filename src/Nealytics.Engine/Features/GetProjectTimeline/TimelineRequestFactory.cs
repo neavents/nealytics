@@ -36,7 +36,7 @@ public static class TimelineRequestFactory
         string? beforeRaw,
         string? eventType,
         string? sessionId,
-        string? itemId,
+        string? objectId,
         string? metaKey,
         string? metaValue,
         int maxLimit)
@@ -66,13 +66,13 @@ public static class TimelineRequestFactory
 
         string? normalizedEventType = Normalize(eventType);
         string? normalizedSessionId = Normalize(sessionId);
-        string? normalizedItemId = Normalize(itemId);
+        string? normalizedObjectId = Normalize(objectId);
         string? normalizedMetaKey = Normalize(metaKey);
         string? normalizedMetaValue = Normalize(metaValue);
 
         if (normalizedEventType?.Length > MaxFieldLength
             || normalizedSessionId?.Length > MaxFieldLength
-            || normalizedItemId?.Length > MaxFieldLength
+            || normalizedObjectId?.Length > MaxFieldLength
             || normalizedMetaKey?.Length > MaxFieldLength
             || normalizedMetaValue?.Length > MaxFieldLength)
         {
@@ -89,7 +89,7 @@ public static class TimelineRequestFactory
             Before = cursor,
             EventType = normalizedEventType,
             SessionId = normalizedSessionId,
-            ItemId = normalizedItemId,
+            ObjectId = normalizedObjectId,
             MetaKey = hasMetaFilter ? normalizedMetaKey : null,
             MetaValue = hasMetaFilter ? normalizedMetaValue : null
         });

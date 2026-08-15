@@ -36,7 +36,7 @@ public class GlobalTelemetryPayloadTests : UnitTestBase
     {
         var payload = new GlobalTelemetryPayload();
 
-        payload.ItemId.Should().BeNull();
+        payload.ObjectId.Should().BeNull();
     }
 
     [Fact]
@@ -48,14 +48,14 @@ public class GlobalTelemetryPayloadTests : UnitTestBase
             TenantId = "tenant-abc",
             SessionId = "sess-xyz",
             EventType = "page_view",
-            ItemId = "item-456"
+            ObjectId = "item-456"
         };
 
         payload.ProjectId.Should().Be("proj-123");
         payload.TenantId.Should().Be("tenant-abc");
         payload.SessionId.Should().Be("sess-xyz");
         payload.EventType.Should().Be("page_view");
-        payload.ItemId.Should().Be("item-456");
+        payload.ObjectId.Should().Be("item-456");
     }
 
     [Fact]

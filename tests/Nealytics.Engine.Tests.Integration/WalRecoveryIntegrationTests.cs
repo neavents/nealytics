@@ -52,7 +52,8 @@ public class WalRecoveryIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task Recovery_ReplaysUncommittedWalEntries_IntoClickHouse_AndDeletesSealedSegment()
     {
-        string projectId = $"p-recovery-{Guid.NewGuid():N}";
+        await using TestProject project = TestProject.New("p-recovery");
+        string projectId = project.Id;
         IOptions<TelemetryEngineOptions> options = BuildOptions();
 
         // ── Simulate a crashed process that left 25 uncommitted events in the WAL ──
@@ -79,7 +80,10 @@ public class WalRecoveryIntegrationTests : IAsyncLifetime
         TelemetryChannelBroker broker = new TelemetryChannelBroker(options);
         IHostApplicationLifetime lifetime = Substitute.For<IHostApplicationLifetime>();
 
-        ClickHouseBatchWriter writer = new ClickHouseBatchWriter(factory, options);
+        DimensionRegistry replayRegistry = new(options.Value);
+        ClickHouseBatchWriter writer = new ClickHouseBatchWriter(
+            factory, replayRegistry, new MeasureRegistry(options.Value, replayRegistry), options,
+            NullLogger<ClickHouseBatchWriter>.Instance);
         TelemetryBatchProcessor processor = new TelemetryBatchProcessor(
             broker, wal, writer, lifetime, options,
             NullLogger<TelemetryBatchProcessor>.Instance);
@@ -99,7 +103,8 @@ public class WalRecoveryIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task SteadyStateCommit_TruncatesWal_OnceAllEventsPersisted()
     {
-        string projectId = $"p-steady-{Guid.NewGuid():N}";
+        await using TestProject project = TestProject.New("p-steady");
+        string projectId = project.Id;
         IOptions<TelemetryEngineOptions> options = BuildOptions();
 
         await using WriteAheadLogger wal = new WriteAheadLogger(options);
@@ -107,7 +112,10 @@ public class WalRecoveryIntegrationTests : IAsyncLifetime
         TelemetryChannelBroker broker = new TelemetryChannelBroker(options);
         IHostApplicationLifetime lifetime = Substitute.For<IHostApplicationLifetime>();
 
-        ClickHouseBatchWriter writer = new ClickHouseBatchWriter(factory, options);
+        DimensionRegistry replayRegistry = new(options.Value);
+        ClickHouseBatchWriter writer = new ClickHouseBatchWriter(
+            factory, replayRegistry, new MeasureRegistry(options.Value, replayRegistry), options,
+            NullLogger<ClickHouseBatchWriter>.Instance);
         TelemetryBatchProcessor processor = new TelemetryBatchProcessor(
             broker, wal, writer, lifetime, options,
             NullLogger<TelemetryBatchProcessor>.Instance);

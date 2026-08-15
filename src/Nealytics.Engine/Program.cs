@@ -15,6 +15,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using Nealytics.Engine.Features.BatchProcessor;
 using Nealytics.Engine.Features.GetActiveUsers;
+using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Features.GetFunnel;
+using Nealytics.Engine.Features.GetSchema;
+using Nealytics.Engine.Features.ValidateTelemetry;
 using Nealytics.Engine.Features.GetEventTimeSeries;
 using Nealytics.Engine.Features.GetProjectTimeline;
 using Nealytics.Engine.Features.GetSessionAnalytics;
@@ -29,10 +33,29 @@ using Octonica.ClickHouseClient;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using Serilog;
+using Serilog.Events;
 using Serilog.Formatting.Json;
 using Serilog.Sinks.OpenTelemetry;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+
+// A deployment's declared schema can live in a JSON file instead of indexed environment variables.
+//
+// Not a second configuration system — it is one more provider feeding the same IConfiguration and
+// the same TelemetryEngine section. It exists because the shape does not scale as environment
+// variables: a dozen dimensions and a dozen measures is seventy-odd TelemetryEngine__Measures__11__
+// lines, which is unreviewable, and in this estate it lived in a compose file that is not in any
+// repository. A file can be committed, diffed and reviewed.
+//
+// Re-adding the environment provider afterwards keeps the precedence everyone expects: the file
+// beats appsettings.json, and an environment variable still beats the file.
+string? schemaFile = builder.Configuration["TelemetryEngine:SchemaFile"];
+
+if (!string.IsNullOrWhiteSpace(schemaFile))
+{
+    builder.Configuration.AddJsonFile(schemaFile, optional: true, reloadOnChange: false);
+    builder.Configuration.AddEnvironmentVariables();
+}
 
 IConfigurationSection configSection = builder.Configuration.GetSection("TelemetryEngine");
 builder.Services.Configure<TelemetryEngineOptions>(configSection);
@@ -42,6 +65,21 @@ if (string.IsNullOrWhiteSpace(engineOpts.JwtSymmetricKey) || Encoding.UTF8.GetBy
 {
     throw new InvalidOperationException("TelemetryEngine:JwtSymmetricKey must be at least 32 bytes.");
 }
+
+// Built eagerly, before anything can take traffic, because an invalid declaration throws here and
+// a refused boot is the only safe answer. The alternative — resolving it lazily on first ingest —
+// would let the service report healthy and then fail one request at a time.
+//
+// The engine ships with this list empty. What is in it comes from the deployment's configuration,
+// which is what makes this repo free of any one customer's vocabulary.
+DimensionRegistry dimensionRegistry = new(engineOpts);
+builder.Services.AddSingleton(dimensionRegistry);
+
+MeasureRegistry measureRegistry = new(engineOpts, dimensionRegistry);
+builder.Services.AddSingleton(measureRegistry);
+
+RollupRegistry rollupRegistry = new(engineOpts, dimensionRegistry, measureRegistry);
+builder.Services.AddSingleton(rollupRegistry);
 
 builder.WebHost.ConfigureKestrel(serverOptions =>
 {
@@ -69,8 +107,32 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 // line in the store. It was the last of the ten services still in that state.
 var nealyticsOtlpEndpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
 
+// Read from configuration rather than hard-coded, because appsettings.json already declares
+// "Microsoft.AspNetCore": "Warning" and it did nothing at all: Serilog owns this pipeline outright
+// (see below) and never looks at Logging:LogLevel, so the setting read as a control that was in
+// force while ASP.NET Core logged four Information lines per request -- ExecutedEndpoint,
+// WritingResultAsJson, SettingStatusCode, RequestFinished.
+//
+// At ingest rates that is not a tidiness problem. A benchmark at 20k req/s produced 80k JSON log
+// lines a second and a 7.7 GB file in minutes, all of it formatted and written on the hot path, and
+// in this estate every one of those lines is also shipped to the collector over OTLP.
+static LogEventLevel NealyticsLevel(string? configured, LogEventLevel fallback) => configured switch
+{
+    "Trace" => LogEventLevel.Verbose,
+    "Debug" => LogEventLevel.Debug,
+    "Information" => LogEventLevel.Information,
+    "Warning" => LogEventLevel.Warning,
+    "Error" => LogEventLevel.Error,
+    "Critical" => LogEventLevel.Fatal,
+    "None" => LogEventLevel.Fatal,
+    _ => fallback,
+};
+
 var nealyticsLogConfig = new LoggerConfiguration()
-    .MinimumLevel.Information()
+    .MinimumLevel.Is(NealyticsLevel(
+        builder.Configuration["Logging:LogLevel:Default"], LogEventLevel.Information))
+    .MinimumLevel.Override("Microsoft.AspNetCore", NealyticsLevel(
+        builder.Configuration["Logging:LogLevel:Microsoft.AspNetCore"], LogEventLevel.Warning))
     .Enrich.FromLogContext()
     .WriteTo.Console(new JsonFormatter());
 
@@ -121,6 +183,14 @@ builder.Services.AddCors(cors =>
     {
         if (string.IsNullOrWhiteSpace(engineOpts.CorsAllowedOrigins))
         {
+            // Said out loud rather than assumed. The default is any origin, which is right for
+            // getting started and wrong for a deployment — and an unset value looks identical to a
+            // deliberate one from outside, so the only way anyone learns which they have is a log
+            // line at boot.
+            Log.Logger.Warning(
+                "TelemetryEngine:CorsAllowedOrigins is not set, so the beacon endpoint accepts a "
+                + "cross-origin POST from anywhere. Set it to the origins that serve your pages.");
+
             policy.AllowAnyOrigin();
         }
         else
@@ -172,6 +242,8 @@ builder.Services.AddSingleton<ClickHouseConnectionFactory>();
 builder.Services.AddSingleton<WriteAheadLogger>();
 builder.Services.AddSingleton<TelemetryChannelBroker>();
 builder.Services.AddSingleton<ApiKeyValidator>();
+builder.Services.AddSingleton<DimensionSanitizer>();
+builder.Services.AddSingleton<MeasureSanitizer>();
 // Widens global_events before the batch processor takes traffic. clickhouse-init.sql only runs
 // on an empty volume, so an existing deployment would otherwise reject every batch naming a
 // column added since it was first created.
@@ -184,6 +256,13 @@ builder.Services.AddScoped<GetSessionAnalyticsQuery>();
 builder.Services.AddScoped<GetEventTimeSeriesQuery>();
 builder.Services.AddScoped<GetActiveUsersQuery>();
 builder.Services.AddScoped<GetTopEventsQuery>();
+builder.Services.AddScoped<GetBreakdownQuery>();
+builder.Services.AddScoped<GetFunnelQuery>();
+builder.Services.AddSingleton<GetEventTypesQuery>();
+builder.Services.AddSingleton<GetColumnPopulationQuery>();
+// The query allowlist. A singleton built from the registry, so groupBy/filter validation and the
+// schema reconciler can never disagree about which dimensions exist.
+builder.Services.AddSingleton(new BreakdownColumns(dimensionRegistry));
 
 // Where telemetry actually goes, and it went nowhere before this.
 //
@@ -270,6 +349,10 @@ app.MapGetSessionAnalytics();
 app.MapGetEventTimeSeries();
 app.MapGetActiveUsers();
 app.MapGetTopEvents();
+app.MapGetBreakdown();
+app.MapGetSchema();
+app.MapGetFunnel();
+app.MapValidateTelemetry();
 if (engineOpts.EnablePrometheusScrape)
 {
     app.MapPrometheusScrapingEndpoint();

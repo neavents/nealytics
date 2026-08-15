@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Storage;
 
 public static class GetActiveUsersEndpoint
 {
@@ -25,15 +26,22 @@ public static class GetActiveUsersEndpoint
             ActiveUsersRequestResult parsed = ActiveUsersRequestFactory.Create(
                 user.FindFirst("project_id")?.Value,
                 user.FindFirst("tenant_id")?.Value,
-                context.Request.Query["limit"].ToString(),
-                context.Request.Query["interval"].ToString(),
-                context.Request.Query["by"].ToString(),
-                context.Request.Query["mode"].ToString(),
-                context.Request.Query["from"].ToString(),
-                context.Request.Query["to"].ToString(),
-                engineOptions.MaxQueryLimit,
-                engineOptions.DefaultSessionQueryRangeHours,
-                DateTime.UtcNow);
+                // Named, not positional. Nine consecutive string? parameters accept any order the
+                // compiler is given, and they were in the wrong one: `to` was landing in the
+                // `traffic` slot, so TrafficFilter rejected a timestamp and this endpoint returned
+                // 400 to every request that set `to`. Nothing caught it, because the unit tests call
+                // this factory directly and therefore pass the arguments correctly by construction.
+                limitRaw: context.Request.Query["limit"].ToString(),
+                intervalRaw: context.Request.Query["interval"].ToString(),
+                byRaw: context.Request.Query["by"].ToString(),
+                modeRaw: context.Request.Query["mode"].ToString(),
+                fromRaw: context.Request.Query["from"].ToString(),
+                toRaw: context.Request.Query["to"].ToString(),
+                tzRaw: context.Request.Query["tz"].ToString(),
+                trafficRaw: context.Request.Query["traffic"].ToString(),
+                maxLimit: engineOptions.MaxQueryLimit,
+                defaultRangeHours: engineOptions.DefaultSessionQueryRangeHours,
+                nowUtc: DateTime.UtcNow);
 
             if (!parsed.Success)
             {
@@ -42,9 +50,17 @@ public static class GetActiveUsersEndpoint
                     : Results.BadRequest(parsed.ErrorMessage);
             }
 
-            ActiveUsersResponse response = await query.ExecuteAsync(parsed.Request, cancellationToken);
-
-            return Results.Ok(response);
+            try
+            {
+                ActiveUsersResponse response = await query.ExecuteAsync(parsed.Request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (Exception exception) when (ClickHouseArgumentFault.IsUnknownTimeZone(exception))
+            {
+                return Results.BadRequest(
+                    "'tz' is not a time zone ClickHouse knows. Use an IANA zone name such as "
+                    + "Europe/Istanbul.");
+            }
         })
         .WithName("GetActiveUsers")
         .Produces<ActiveUsersResponse>(StatusCodes.Status200OK)

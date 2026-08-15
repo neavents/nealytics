@@ -10,8 +10,10 @@ public class ActiveUsersRequestFactoryTests
     private static ActiveUsersRequestResult Create(
         string? projectId = "proj", string? tenantId = "tenant", string? limit = null,
         string? interval = null, string? by = null, string? mode = null,
-        string? from = null, string? to = null, int maxLimit = 1000, int defaultRangeHours = 24)
-        => ActiveUsersRequestFactory.Create(projectId, tenantId, limit, interval, by, mode, from, to, maxLimit, defaultRangeHours, Now);
+        string? from = null, string? to = null, string? tz = null, string? traffic = null,
+        int maxLimit = 1000, int defaultRangeHours = 24)
+        => ActiveUsersRequestFactory.Create(
+            projectId, tenantId, limit, interval, by, mode, from, to, tz, traffic, maxLimit, defaultRangeHours, Now);
 
     [Theory]
     [InlineData(null, "t")]

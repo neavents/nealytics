@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Features.GetEventTimeSeries;
 
 namespace Nealytics.Engine.Tests.Unit;
@@ -12,9 +13,30 @@ public class EventTimeSeriesRequestFactoryTests
     private static EventTimeSeriesRequestResult Create(
         string? projectId = "proj", string? tenantId = "tenant", string? limit = null,
         string? interval = null, string? from = null, string? to = null, string? eventType = null,
-        string? groupBy = null)
+        string? groupBy = null,
+        string? tz = null,
+        string? traffic = null,
+        string[]? filters = null)
         => EventTimeSeriesRequestFactory.Create(
-            projectId, tenantId, limit, interval, from, to, eventType, groupBy, MaxLimit, DefaultRangeHours, Now);
+            projectId, tenantId, limit, interval, from, to, eventType, groupBy, tz, traffic,
+            filters ?? [],
+            TestColumns(), TestMeasures(), MaxLimit, DefaultRangeHours, Now);
+
+    private static Nealytics.Engine.Features.GetBreakdown.BreakdownColumns TestColumns() =>
+        new(new DimensionRegistry(new TelemetryEngineOptions
+        {
+            Dimensions = [new DimensionOptions { Name = "widget_id", Type = "String" }],
+        }));
+
+    private static MeasureRegistry TestMeasures()
+    {
+        TelemetryEngineOptions options = new()
+        {
+            Measures = [new MeasureOptions { Name = "dwell_ms", Type = "UInt32" }],
+        };
+
+        return new MeasureRegistry(options, new DimensionRegistry(options));
+    }
 
     [Theory]
     [InlineData(null, "tenant")]
@@ -125,28 +147,50 @@ public class EventTimeSeriesRequestFactoryTests
     }
 
     [Fact]
-    public void Create_NoGroupBy_DefaultsToNone()
+    public void Create_NoGroupBy_LeavesTheSeriesColumnUnset()
     {
         EventTimeSeriesRequestResult result = Create();
         result.Success.Should().BeTrue();
-        result.Request.GroupBy.Should().Be(TimeSeriesGroupBy.None);
+        result.Request.GroupByColumn.Should().BeNull();
     }
 
     [Theory]
-    [InlineData("event_type", TimeSeriesGroupBy.EventType)]
-    [InlineData("item_id", TimeSeriesGroupBy.ItemId)]
-    [InlineData("session_id", TimeSeriesGroupBy.SessionId)]
-    public void Create_ValidGroupBy_IsParsed(string raw, TimeSeriesGroupBy expected)
+    [InlineData("event_type")]
+    [InlineData("object_id")]
+    [InlineData("session_id")]
+    public void Create_ValidGroupBy_IsParsed(string raw)
     {
         EventTimeSeriesRequestResult result = Create(groupBy: raw);
         result.Success.Should().BeTrue();
-        result.Request.GroupBy.Should().Be(expected);
+        result.Request.GroupByColumn.Should().Be(raw);
+    }
+
+    [Fact]
+    public void Create_GroupByADeclaredDimension_IsAccepted()
+    {
+        EventTimeSeriesRequestResult result = Create(groupBy: "widget_id");
+
+        result.Success.Should().BeTrue("a declared dimension was invisible to this endpoint before");
+        result.Request.GroupByColumn.Should().Be("widget_id");
+    }
+
+    [Fact]
+    public void Create_GroupByAMeasure_Returns400ExplainingTheKindMistake()
+    {
+        EventTimeSeriesRequestResult result = Create(groupBy: "dwell_ms");
+
+        result.Success.Should().BeFalse();
+        result.ErrorStatusCode.Should().Be(400);
+        result.ErrorMessage.Should().Contain("is a declared measure, not a dimension");
     }
 
     [Theory]
-    [InlineData("user_id")]
+    [InlineData("event_id")]
+    [InlineData("metadata_json")]
     [InlineData("EVENT_TYPE")]
     [InlineData("timestamp")]
+    [InlineData("nope")]
+    [InlineData("session_id; DROP TABLE global_events")]
     public void Create_InvalidGroupBy_Returns400(string raw)
     {
         EventTimeSeriesRequestResult result = Create(groupBy: raw);
