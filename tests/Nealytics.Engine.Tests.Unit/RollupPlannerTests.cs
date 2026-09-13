@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Configuration;
 
 namespace Nealytics.Engine.Tests.Unit;
@@ -45,7 +46,7 @@ public class RollupPlannerTests
         BreakdownMetric metric = BreakdownMetric.Events,
         DateTime? from = null,
         DateTime? to = null,
-        BreakdownFilter[]? filters = null,
+        QueryFilter[]? filters = null,
         string? measureColumn = null,
         string? measureFunction = null) => new()
         {
@@ -144,7 +145,7 @@ public class RollupPlannerTests
     public void AFilterTheRollupDoesNotCarry_FallsBackToRaw()
     {
         RollupPlan? plan = RollupPlanner.Select(
-            Request(filters: [new BreakdownFilter { Column = "shelf", Value = "top" }]),
+            Request(filters: [new QueryFilter { Column = "shelf", Value = "top" }]),
             Registry(Daily()));
 
         plan.Should().BeNull();
@@ -272,7 +273,7 @@ public class RollupPlannerTests
     public void TheRoutedFilterComparesTheStoredColumnDirectly()
     {
         RollupRegistry registry = Registry(Daily(dims: "widget_id,shelf"));
-        BreakdownRequest request = Request(filters: [new BreakdownFilter { Column = "shelf", Value = "top" }]);
+        BreakdownRequest request = Request(filters: [new QueryFilter { Column = "shelf", Value = "top" }]);
 
         (string sql, var parameters) = GetBreakdownQuery.BuildQuery(request, RollupPlanner.Select(request, registry));
 

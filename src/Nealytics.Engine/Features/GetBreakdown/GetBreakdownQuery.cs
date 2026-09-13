@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Nealytics.Engine.Infrastructure.Diagnostics;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Storage;
 using Octonica.ClickHouseClient;
 
@@ -18,7 +19,7 @@ using Octonica.ClickHouseClient;
 /// The generic breakdown: count a metric, grouped by any allowed column.
 ///
 /// This is the query that makes the engine reusable. It knows nothing about what it is grouping —
-/// the column name arrives from <see cref="BreakdownColumns"/>, which is built from the
+/// the column name arrives from <see cref="QueryColumns"/>, which is built from the
 /// deployment's declared dimensions, so the same code answers "top menus" here and "top authors"
 /// in a clone.
 /// </summary>
@@ -64,19 +65,8 @@ public sealed partial class GetBreakdownQuery
     internal static (string Sql, IReadOnlyList<KeyValuePair<string, object?>> Parameters) BuildQuery(
         in BreakdownRequest request, RollupPlan? plan)
     {
-        List<KeyValuePair<string, object?>> parameters =
-        [
-            new("projectId", request.ProjectId),
-            new("tenantId", request.TenantId),
-            new("fromTimestamp", request.From),
-            new("toTimestamp", request.To),
-            new("limit", request.Limit),
-        ];
-
-        if (request.TrafficClass is not null)
-        {
-            parameters.Add(new KeyValuePair<string, object?>("trafficClass", request.TrafficClass));
-        }
+        List<KeyValuePair<string, object?>> parameters = ScopeClause.Parameters(request.Scope, 12);
+        parameters.Add(new KeyValuePair<string, object?>("limit", request.Limit));
 
         if (plan is RollupPlan rollup)
         {
@@ -94,43 +84,18 @@ public sealed partial class GetBreakdownQuery
             BreakdownMetric.Users => request.Approximate ? "uniq(user_id)" : "uniqExact(user_id)",
 
             // Both halves are canonical instances resolved from the registry and a closed map, so
-            // neither has ever been caller input. Same property BreakdownColumns relies on.
+            // neither has ever been caller input. Same property QueryColumns relies on.
             BreakdownMetric.Measure => $"{request.MeasureFunction}({request.MeasureColumn})",
 
             _ => throw new ArgumentOutOfRangeException(nameof(request), request.Metric, "Unhandled metric."),
         };
 
         StringBuilder where = new(256);
-        where.Append(" WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String}");
-        where.Append(" AND timestamp >= {fromTimestamp:DateTime64} AND timestamp <= {toTimestamp:DateTime64}");
-        where.Append(TrafficFilter.Clause(request.TrafficClass));
+        ScopeClause.AppendRaw(where, request.Scope);
 
-        if (!string.IsNullOrEmpty(request.EventType))
-        {
-            where.Append(" AND event_type = {eventType:String}");
-            parameters.Add(new KeyValuePair<string, object?>("eventType", request.EventType));
-        }
-
-        // Anonymous rows have a NULL user_id and must not be counted as a user. Without this,
-        // uniqExact over a column that is mostly NULL reports one phantom "user" per group.
         if (request.Metric == BreakdownMetric.Users)
         {
             where.Append(" AND user_id IS NOT NULL");
-        }
-
-        for (int i = 0; i < request.Filters.Count; i++)
-        {
-            BreakdownFilter filter = request.Filters[i];
-            string parameterName = string.Create(
-                CultureInfo.InvariantCulture, $"filter{i.ToString(CultureInfo.InvariantCulture)}");
-
-            where.Append(" AND toString(");
-            where.Append(filter.Column);
-            where.Append(") = {");
-            where.Append(parameterName);
-            where.Append(":String}");
-
-            parameters.Add(new KeyValuePair<string, object?>(parameterName, filter.Value));
         }
 
         string orderBy = request.Order switch
@@ -287,31 +252,7 @@ public sealed partial class GetBreakdownQuery
         List<KeyValuePair<string, object?>> parameters)
     {
         StringBuilder where = new(256);
-        where.Append(" WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String}");
-        where.Append(" AND bucket >= {fromTimestamp:DateTime64} AND bucket < {toTimestamp:DateTime64}");
-
-        if (!string.IsNullOrEmpty(request.EventType))
-        {
-            where.Append(" AND event_type = {eventType:String}");
-            parameters.Add(new KeyValuePair<string, object?>("eventType", request.EventType));
-        }
-
-        for (int i = 0; i < request.Filters.Count; i++)
-        {
-            BreakdownFilter filter = request.Filters[i];
-            string parameterName = string.Create(
-                CultureInfo.InvariantCulture, $"filter{i.ToString(CultureInfo.InvariantCulture)}");
-
-            // No toString() here: the materialized view already normalised every grouping column to
-            // a String, which is also why a rollup key and a raw key are the same string.
-            where.Append(" AND ");
-            where.Append(filter.Column);
-            where.Append(" = {");
-            where.Append(parameterName);
-            where.Append(":String}");
-
-            parameters.Add(new KeyValuePair<string, object?>(parameterName, filter.Value));
-        }
+        ScopeClause.AppendRollup(where, request.Scope, "bucket");
 
         string orderBy = request.Order switch
         {

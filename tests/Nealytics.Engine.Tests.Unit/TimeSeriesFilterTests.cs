@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Features.GetEventTimeSeries;
 using Nealytics.Engine.Infrastructure.Configuration;
 
@@ -22,7 +23,7 @@ public class TimeSeriesFilterTests
 {
     private static readonly DateTime Now = new(2026, 8, 14, 12, 0, 0, DateTimeKind.Utc);
 
-    private static BreakdownColumns Columns() =>
+    private static QueryColumns Columns() =>
         new(new DimensionRegistry(new TelemetryEngineOptions
         {
             Dimensions =

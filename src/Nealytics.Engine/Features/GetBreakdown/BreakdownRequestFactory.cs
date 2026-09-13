@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 
 public readonly struct BreakdownRequestResult
 {
@@ -54,7 +55,7 @@ public static class BreakdownRequestFactory
         string? trafficRaw,
         string? exactRaw,
         string? modeRaw,
-        BreakdownColumns columns,
+        QueryColumns columns,
         MeasureRegistry measures,
         int maxLimit,
         int defaultRangeHours,
@@ -114,7 +115,7 @@ public static class BreakdownRequestFactory
         }
 
         // The injection boundary. What comes back is the allowlist's own instance, never the
-        // caller's string — see BreakdownColumns.TryResolve.
+        // caller's string — see QueryColumns.TryResolve.
         if (string.IsNullOrWhiteSpace(groupByRaw))
         {
             return BreakdownRequestResult.Fail(
@@ -135,23 +136,15 @@ public static class BreakdownRequestFactory
 
         // Shared with /timeseries rather than owned here, so the two endpoints cannot disagree
         // about what a filter means.
-        FilterParser.Result parsedFilters = FilterParser.Parse(filtersRaw, columns, MaxFieldLength);
+        FilterParser.Result parsedFilters = FilterParser.Parse(filtersRaw, columns, measures, MaxFieldLength);
 
-        switch (parsedFilters.Outcome)
+        if (parsedFilters.Outcome != FilterParser.Outcome.Ok)
         {
-            case FilterParser.Outcome.Malformed:
-                return BreakdownRequestResult.Fail(
-                    StatusBadRequest, $"'filter' must be written name:value. Got '{parsedFilters.Offender}'.");
-            case FilterParser.Outcome.UnknownColumn:
-                return BreakdownRequestResult.Fail(
-                    StatusBadRequest, columns.RejectionMessage("filter", parsedFilters.Column));
-            case FilterParser.Outcome.ValueTooLong:
-                return BreakdownRequestResult.Fail(
-                    StatusBadRequest,
-                    $"'filter' value for '{parsedFilters.Column}' must not exceed {MaxFieldLength} characters.");
+            return BreakdownRequestResult.Fail(
+                StatusBadRequest, FilterRejection.Message(parsedFilters, columns, measures, MaxFieldLength));
         }
 
-        IReadOnlyList<BreakdownFilter> filters = parsedFilters.Filters;
+        IReadOnlyList<QueryFilter> filters = parsedFilters.Filters;
 
         string? eventType = string.IsNullOrWhiteSpace(eventTypeRaw) ? null : eventTypeRaw;
         if (eventType is not null && eventType.Length > MaxFieldLength)

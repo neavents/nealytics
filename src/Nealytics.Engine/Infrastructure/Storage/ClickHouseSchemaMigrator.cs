@@ -13,6 +13,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Octonica.ClickHouseClient;
+using Octonica.ClickHouseClient.Exceptions;
 
 /// <summary>
 /// Reconciles the declared dimensions against the live shape of <c>global_events</c>.
@@ -111,6 +112,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
     private readonly DimensionRegistry _registry;
     private readonly MeasureRegistry _measures;
     private readonly RollupRegistry _rollups;
+    private readonly bool _backfillRollups;
     private readonly int _retentionDays;
     private readonly List<EventTypeRetentionOptions> _eventTypeRetention;
     private readonly ILogger<ClickHouseSchemaMigrator> _logger;
@@ -128,6 +130,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         _measures = measures;
         _rollups = rollups;
         _retentionDays = options.Value.RetentionDays;
+        _backfillRollups = options.Value.BackfillRollups;
         _eventTypeRetention = options.Value.EventTypeRetention ?? [];
         ValidateEventTypeRetention(_retentionDays, _eventTypeRetention);
         _logger = logger;
@@ -214,20 +217,26 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
     private static partial void LogRetentionUnreadable(ILogger logger, string database, string table);
 
     [LoggerMessage(EventId = 8120, Level = LogLevel.Information,
-        Message = "Rollup '{Rollup}' created: {Database}.{Table} and its materialized view. It "
-            + "aggregates from this point forward only — rows already in the source table are not "
-            + "backfilled, so a chart answered from it will read low until the range it covers is "
-            + "entirely after this moment, or until you backfill with INSERT INTO ... SELECT.")]
+        Message = "Rollup '{Rollup}' created: {Database}.{Table} and its materialized view, "
+            + "backfilled from {Partitions} partition(s) of the source table.")]
     private static partial void LogRollupCreated(
-        ILogger logger, string rollup, string database, string table);
+        ILogger logger, string rollup, string database, string table, int partitions);
 
     [LoggerMessage(EventId = 8121, Level = LogLevel.Warning,
         Message = "Rollup '{Rollup}' already exists and its stored definition differs from the "
-            + "declared one. Leaving it alone — recreating the view would silently start aggregating "
-            + "a different shape while every existing row kept the old one. Drop "
-            + "{Database}.{View} and {Database}.{Table} deliberately if you meant to change it.")]
+            + "declared one, so no query is routed to it. Drop {Database}.{View} and "
+            + "{Database}.{Table}; the next start recreates and backfills it.")]
     private static partial void LogRollupDrift(
         ILogger logger, string rollup, string database, string view, string table);
+
+    [LoggerMessage(EventId = 8122, Level = LogLevel.Information,
+        Message = "Rollup '{Rollup}' created without backfill because TelemetryEngine:BackfillRollups "
+            + "is off. It aggregates from this point forward only.")]
+    private static partial void LogRollupNotBackfilled(ILogger logger, string rollup);
+
+    [LoggerMessage(EventId = 8123, Level = LogLevel.Information,
+        Message = "Rollup '{Rollup}' view was created by another instance; leaving the backfill to it.")]
+    private static partial void LogRollupCreatedElsewhere(ILogger logger, string rollup);
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -426,21 +435,101 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
             {
                 await ExecuteAsync(
                     pooled, RollupRegistry.BuildTableDdl(rollup), cancellationToken).ConfigureAwait(false);
-                await ExecuteAsync(pooled, desiredView, cancellationToken).ConfigureAwait(false);
 
-                LogRollupCreated(_logger, rollup.Name, Database, rollup.TableName);
+                if (!await TryCreateViewAsync(pooled, desiredView, cancellationToken).ConfigureAwait(false))
+                {
+                    LogRollupCreatedElsewhere(_logger, rollup.Name);
+                    _rollups.MarkRoutable(rollup);
+                    continue;
+                }
+
+                if (!_backfillRollups)
+                {
+                    LogRollupNotBackfilled(_logger, rollup.Name);
+                    _rollups.MarkRoutable(rollup);
+                    continue;
+                }
+
+                int partitions = await BackfillRollupAsync(pooled, rollup, cancellationToken).ConfigureAwait(false);
+                LogRollupCreated(_logger, rollup.Name, Database, rollup.TableName, partitions);
+                _rollups.MarkRoutable(rollup);
                 continue;
             }
 
             if (!DefinitionsAgree(existing, rollup))
             {
+                _rollups.MarkUnroutable(rollup, "stored definition differs from the declared one");
                 LogRollupDrift(_logger, rollup.Name, Database, rollup.ViewName, rollup.TableName);
+                continue;
+            }
+
+            _rollups.MarkRoutable(rollup);
+        }
+    }
+
+    private const int TableAlreadyExistsCode = 57;
+
+    private static async Task<bool> TryCreateViewAsync(
+        PooledClickHouseConnection pooled, string ddl, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ExecuteAsync(pooled, ddl, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (ClickHouseServerException ex) when (ex.ServerErrorCode == TableAlreadyExistsCode)
+        {
+            return false;
+        }
+    }
+
+    private static async Task<int> BackfillRollupAsync(
+        PooledClickHouseConnection pooled, Rollup rollup, CancellationToken cancellationToken)
+    {
+        List<string> partitions = await ReadSourcePartitionsAsync(pooled, cancellationToken).ConfigureAwait(false);
+
+        foreach (string partition in partitions)
+        {
+            string? scope = RollupRegistry.IsPartitionId(partition) ? partition : null;
+            await ExecuteAsync(pooled, RollupRegistry.BuildBackfillSql(rollup, scope), cancellationToken)
+                .ConfigureAwait(false);
+
+            if (scope is null)
+            {
+                return 1;
             }
         }
+
+        return partitions.Count;
+    }
+
+    private static async Task<List<string>> ReadSourcePartitionsAsync(
+        PooledClickHouseConnection pooled, CancellationToken cancellationToken)
+    {
+        await using ClickHouseCommand command = pooled.Connection.CreateCommand(
+            "SELECT DISTINCT partition FROM system.parts "
+            + "WHERE database = {database:String} AND table = {table:String} AND active ORDER BY partition");
+        command.Parameters.Add(new ClickHouseParameter { ParameterName = "database", Value = Database });
+        command.Parameters.Add(new ClickHouseParameter { ParameterName = "table", Value = Table });
+
+        List<string> partitions = [];
+        await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            partitions.Add(reader.GetString(0));
+        }
+
+        return partitions;
     }
 
     internal static bool DefinitionsAgree(string storedCreateQuery, Rollup rollup)
     {
+        if (!storedCreateQuery.Contains(RollupRegistry.TrafficColumn, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
         foreach (RollupColumn dimension in rollup.Dimensions)
         {
             if (!storedCreateQuery.Contains(dimension.Name, StringComparison.Ordinal))

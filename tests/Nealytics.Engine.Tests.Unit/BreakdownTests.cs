@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Configuration;
 
 namespace Nealytics.Engine.Tests.Unit;
@@ -14,13 +15,13 @@ public class BreakdownTests
 {
     private static readonly DateTime Now = new(2026, 8, 3, 12, 0, 0, DateTimeKind.Utc);
 
-    private static BreakdownColumns Columns(params string[] dimensions) =>
+    private static QueryColumns Columns(params string[] dimensions) =>
         new(new DimensionRegistry(new TelemetryEngineOptions
         {
             Dimensions = [.. dimensions.Select(name => new DimensionOptions { Name = name })],
         }));
 
-    private static BreakdownColumns ColumnsWithRetired(string name) =>
+    private static QueryColumns ColumnsWithRetired(string name) =>
         new(new DimensionRegistry(new TelemetryEngineOptions
         {
             Dimensions = [new DimensionOptions { Name = name, Retired = true }],
@@ -52,7 +53,7 @@ public class BreakdownTests
 
     private static BreakdownRequestResult Create(
         string? groupBy,
-        BreakdownColumns? columns = null,
+        QueryColumns? columns = null,
         string? metric = null,
         IReadOnlyList<string>? filters = null,
         string? limit = null,
@@ -168,7 +169,7 @@ public class BreakdownTests
         // The strongest available property: the bytes that reach the SQL builder were in this
         // process before the request existed. "We validated it" is weaker than "it is not the
         // caller's string".
-        BreakdownColumns columns = Columns("widget_id");
+        QueryColumns columns = Columns("widget_id");
         string callerSupplied = new(['w', 'i', 'd', 'g', 'e', 't', '_', 'i', 'd']);
 
         columns.TryResolve(callerSupplied, out string resolved).Should().BeTrue();
@@ -384,7 +385,7 @@ public class BreakdownTests
     [Fact]
     public void WithNothingDeclared_TheAllowlistHasNoDeploymentVocabulary()
     {
-        BreakdownColumns columns = Columns();
+        QueryColumns columns = Columns();
 
         columns.Allowed.Should().NotContain("menu_id");
         columns.Allowed.Should().NotContain("section_id");
@@ -396,7 +397,7 @@ public class BreakdownTests
     public void ADeclaredDimensionIsOfferedByName_WhateverThatNameIs()
     {
         // The same code answers "top menus" here and "top authors" in a clone.
-        BreakdownColumns columns = Columns("author_id", "post_id");
+        QueryColumns columns = Columns("author_id", "post_id");
 
         columns.Allowed.Should().Contain("author_id");
         columns.Allowed.Should().Contain("post_id");

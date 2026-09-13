@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Features.GetEventTimeSeries;
 
 namespace Nealytics.Engine.Tests.Unit;
@@ -22,7 +23,7 @@ public class EventTimeSeriesRequestFactoryTests
             filters ?? [],
             TestColumns(), TestMeasures(), MaxLimit, DefaultRangeHours, Now);
 
-    private static Nealytics.Engine.Features.GetBreakdown.BreakdownColumns TestColumns() =>
+    private static Nealytics.Engine.Infrastructure.Query.QueryColumns TestColumns() =>
         new(new DimensionRegistry(new TelemetryEngineOptions
         {
             Dimensions = [new DimensionOptions { Name = "widget_id", Type = "String" }],

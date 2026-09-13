@@ -4,6 +4,7 @@ using System;
 using System.Globalization;
 using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 
 public readonly struct TopEventsRequestResult
 {
@@ -38,7 +39,7 @@ public static class TopEventsRequestFactory
         string? tenantId,
         string? limitRaw,
         string? dimensionRaw,
-        BreakdownColumns columns,
+        QueryColumns columns,
         MeasureRegistry measures,
         string? fromRaw,
         string? toRaw,

@@ -2,6 +2,7 @@ namespace Nealytics.Engine.Features.GetBreakdown;
 
 using System;
 using System.Collections.Generic;
+using Nealytics.Engine.Infrastructure.Query;
 
 /// <summary>What is being counted.</summary>
 public enum BreakdownMetric
@@ -28,13 +29,6 @@ public enum BreakdownOrder
 
     /// <summary>By key, so a chart's categories keep a stable order between calls.</summary>
     KeyAscending,
-}
-
-/// <summary>One validated <c>name = value</c> filter. The name is a canonical column; the value is parameterised.</summary>
-public readonly struct BreakdownFilter
-{
-    public string Column { get; init; }
-    public string Value { get; init; }
 }
 
 public readonly struct BreakdownRequest
@@ -64,7 +58,7 @@ public readonly struct BreakdownRequest
     public bool Exact { get; init; }
     public string GroupByColumn { get; init; }
     public string? EventType { get; init; }
-    public IReadOnlyList<BreakdownFilter> Filters { get; init; }
+    public IReadOnlyList<QueryFilter> Filters { get; init; }
     public DateTime From { get; init; }
     public DateTime To { get; init; }
     public int Limit { get; init; }
@@ -84,6 +78,17 @@ public readonly struct BreakdownRequest
     /// written; this brings the two endpoints into line rather than inventing a concept.
     /// </summary>
     public bool Approximate { get; init; }
+
+    public QueryScope Scope => new()
+    {
+        ProjectId = ProjectId,
+        TenantId = TenantId,
+        From = From,
+        To = To,
+        TrafficClass = TrafficClass,
+        EventType = EventType,
+        Filters = Filters,
+    };
 }
 
 public sealed class BreakdownRow

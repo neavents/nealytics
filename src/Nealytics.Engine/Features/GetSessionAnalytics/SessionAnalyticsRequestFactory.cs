@@ -1,7 +1,10 @@
 namespace Nealytics.Engine.Features.GetSessionAnalytics;
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
+using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 
 public readonly struct SessionAnalyticsRequestResult
 {
@@ -37,6 +40,21 @@ public static class SessionAnalyticsRequestFactory
         string? limitRaw,
         string? fromRaw,
         string? toRaw,
+        int maxLimit,
+        int defaultRangeHours,
+        DateTime nowUtc) =>
+        Create(projectId, tenantId, limitRaw, fromRaw, toRaw, null, [], null, null, maxLimit, defaultRangeHours, nowUtc);
+
+    public static SessionAnalyticsRequestResult Create(
+        string? projectId,
+        string? tenantId,
+        string? limitRaw,
+        string? fromRaw,
+        string? toRaw,
+        string? trafficRaw,
+        IReadOnlyList<string> filtersRaw,
+        QueryColumns? columns,
+        MeasureRegistry? measures,
         int maxLimit,
         int defaultRangeHours,
         DateTime nowUtc)
@@ -77,13 +95,40 @@ public static class SessionAnalyticsRequestFactory
             return SessionAnalyticsRequestResult.Fail(StatusBadRequest, "'from' must be before or equal to 'to'.");
         }
 
+        if (!TrafficFilter.TryParse(trafficRaw, out string? trafficClass))
+        {
+            return SessionAnalyticsRequestResult.Fail(StatusBadRequest, TrafficFilter.Rejection(trafficRaw));
+        }
+
+        IReadOnlyList<QueryFilter> filters = [];
+
+        if (filtersRaw.Count > 0)
+        {
+            if (columns is null)
+            {
+                return SessionAnalyticsRequestResult.Fail(StatusBadRequest, "'filter' is not accepted here.");
+            }
+
+            FilterParser.Result parsedFilters = FilterParser.Parse(filtersRaw, columns, measures, MaxFieldLength);
+
+            if (parsedFilters.Outcome != FilterParser.Outcome.Ok)
+            {
+                return SessionAnalyticsRequestResult.Fail(
+                    StatusBadRequest, FilterRejection.Message(parsedFilters, columns, measures, MaxFieldLength));
+            }
+
+            filters = parsedFilters.Filters;
+        }
+
         return SessionAnalyticsRequestResult.Ok(new SessionAnalyticsRequest
         {
             ProjectId = projectId,
             TenantId = tenantId,
             From = fromUtc,
             To = toUtc,
-            Limit = limit
+            Limit = limit,
+            TrafficClass = trafficClass,
+            Filters = filters,
         });
     }
 }

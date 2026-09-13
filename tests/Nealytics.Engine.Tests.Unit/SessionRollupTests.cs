@@ -80,7 +80,7 @@ public class SessionRollupTests
         // regroups.
         ddl.Should().Contain("event_date Date");
         ddl.Should().Contain("PARTITION BY toYYYYMM(event_date)");
-        ddl.Should().Contain("ORDER BY (project_id, tenant_id, event_date, session_id, menu_id, locale)");
+        ddl.Should().Contain("ORDER BY (project_id, tenant_id, event_date, session_id, traffic_class, menu_id, locale)");
     }
 
     [Fact]
@@ -124,7 +124,7 @@ public class SessionRollupTests
         string view = RollupRegistry.BuildViewDdl(Sessions());
 
         view.Should().Contain("toDate(timestamp) AS event_date");
-        view.Should().Contain("GROUP BY project_id, tenant_id, event_date, session_id, menu_id, locale");
+        view.Should().Contain("GROUP BY project_id, tenant_id, event_date, session_id, traffic_class, menu_id, locale");
         view.Should().NotContain("toStartOfDay");
         view.Should().NotContain("toStartOfHour");
     }
@@ -156,7 +156,7 @@ public class SessionRollupTests
     {
         string ddl = RollupRegistry.BuildTableDdl(Sessions(dimensions: "", measures: ""));
 
-        ddl.Should().Contain("ORDER BY (project_id, tenant_id, event_date, session_id)");
+        ddl.Should().Contain("ORDER BY (project_id, tenant_id, event_date, session_id, traffic_class)");
     }
 
     [Fact]
@@ -293,7 +293,7 @@ public class SessionRollupRoutingTests
     [Fact]
     public void TheRollupStatementRegroupsBySessionSoMidnightCrossersRecombine()
     {
-        string sql = GetSessionAnalyticsQuery.BuildRollupSql(Registry().Declared[0]);
+        (string sql, _) = GetSessionAnalyticsQuery.BuildQuery(Request(Midnight, NextWeek), Registry().Declared[0]);
 
         // GROUP BY session_id WITHOUT event_date is the whole trick: the session is stored as one
         // row per day, and minMerge/maxMerge put the halves back together. Grouping by both would
@@ -308,7 +308,7 @@ public class SessionRollupRoutingTests
     [Fact]
     public void TheRollupStatementReportsRangeScopedTotalsLikeTheRawOne()
     {
-        string sql = GetSessionAnalyticsQuery.BuildRollupSql(Registry().Declared[0]);
+        (string sql, _) = GetSessionAnalyticsQuery.BuildQuery(Request(Midnight, NextWeek), Registry().Declared[0]);
 
         // The defect that made the dashboard carry a ROW_CAP workaround: totals computed over the
         // page rather than the range. The rollup path must not reintroduce it.
@@ -319,7 +319,7 @@ public class SessionRollupRoutingTests
     [Fact]
     public void TheRangeIsHalfOpenOnTheRollupPath()
     {
-        string sql = GetSessionAnalyticsQuery.BuildRollupSql(Registry().Declared[0]);
+        (string sql, _) = GetSessionAnalyticsQuery.BuildQuery(Request(Midnight, NextWeek), Registry().Declared[0]);
 
         // Matching /breakdown's rollup path exactly. Alignment has already guaranteed both ends sit
         // on a day boundary, so every day this touches is fully inside the request.

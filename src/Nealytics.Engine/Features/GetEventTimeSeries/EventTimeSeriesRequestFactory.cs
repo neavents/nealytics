@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 
 public readonly struct EventTimeSeriesRequestResult
 {
@@ -45,7 +46,7 @@ public static class EventTimeSeriesRequestFactory
         string? tzRaw,
         string? trafficRaw,
         IReadOnlyList<string> filtersRaw,
-        BreakdownColumns columns,
+        QueryColumns columns,
         MeasureRegistry measures,
         int maxLimit,
         int defaultRangeHours,
@@ -138,20 +139,12 @@ public static class EventTimeSeriesRequestFactory
         }
 
         // The same parser /breakdown uses, so a filter means one thing across the engine.
-        FilterParser.Result parsedFilters = FilterParser.Parse(filtersRaw ?? [], columns, MaxFieldLength);
+        FilterParser.Result parsedFilters = FilterParser.Parse(filtersRaw ?? [], columns, measures, MaxFieldLength);
 
-        switch (parsedFilters.Outcome)
+        if (parsedFilters.Outcome != FilterParser.Outcome.Ok)
         {
-            case FilterParser.Outcome.Malformed:
-                return EventTimeSeriesRequestResult.Fail(
-                    StatusBadRequest, $"'filter' must be written name:value. Got '{parsedFilters.Offender}'.");
-            case FilterParser.Outcome.UnknownColumn:
-                return EventTimeSeriesRequestResult.Fail(
-                    StatusBadRequest, columns.RejectionMessage("filter", parsedFilters.Column));
-            case FilterParser.Outcome.ValueTooLong:
-                return EventTimeSeriesRequestResult.Fail(
-                    StatusBadRequest,
-                    $"'filter' value for '{parsedFilters.Column}' must not exceed {MaxFieldLength} characters.");
+            return EventTimeSeriesRequestResult.Fail(
+                StatusBadRequest, FilterRejection.Message(parsedFilters, columns, measures, MaxFieldLength));
         }
 
         return EventTimeSeriesRequestResult.Ok(new EventTimeSeriesRequest

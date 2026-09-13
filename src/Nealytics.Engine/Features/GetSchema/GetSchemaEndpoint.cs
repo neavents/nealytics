@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 
 public static class GetSchemaEndpoint
 {
@@ -14,7 +15,7 @@ public static class GetSchemaEndpoint
     {
         endpoints.MapGet("/api/v1/schema", async (
             HttpContext context,
-            BreakdownColumns columns,
+            QueryColumns columns,
             DimensionRegistry dimensions,
             MeasureRegistry measures,
             RollupRegistry rollups,

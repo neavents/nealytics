@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Infrastructure.Query;
 
 namespace Nealytics.Engine.Tests.Unit;
 
@@ -83,7 +84,7 @@ public class ApproximateCountingTests
         // count is a figure somebody disputes and nobody can reproduce.
         BreakdownRequestResult result = BreakdownRequestFactory.Create(
             "p", "t", "sessions", "event_type", null, [], null, null, null, null, null, null, raw,
-            new BreakdownColumns(new Nealytics.Engine.Infrastructure.Configuration.DimensionRegistry(
+            new QueryColumns(new Nealytics.Engine.Infrastructure.Configuration.DimensionRegistry(
                 new Nealytics.Engine.Infrastructure.Configuration.TelemetryEngineOptions())),
             new Nealytics.Engine.Infrastructure.Configuration.MeasureRegistry(
                 new Nealytics.Engine.Infrastructure.Configuration.TelemetryEngineOptions(),

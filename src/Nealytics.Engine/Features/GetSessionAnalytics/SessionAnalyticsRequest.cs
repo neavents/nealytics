@@ -1,6 +1,8 @@
 namespace Nealytics.Engine.Features.GetSessionAnalytics;
 
 using System;
+using System.Collections.Generic;
+using Nealytics.Engine.Infrastructure.Query;
 
 public readonly struct SessionAnalyticsRequest
 {
@@ -9,4 +11,17 @@ public readonly struct SessionAnalyticsRequest
     public DateTime From { get; init; }
     public DateTime To { get; init; }
     public int Limit { get; init; }
+    public string? TrafficClass { get; init; }
+    public IReadOnlyList<QueryFilter> Filters { get; init; }
+
+    public QueryScope Scope => new()
+    {
+        ProjectId = ProjectId,
+        TenantId = TenantId,
+        From = From,
+        To = To,
+        TrafficClass = TrafficClass,
+        EventType = null,
+        Filters = Filters ?? [],
+    };
 }

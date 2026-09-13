@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 using System.Globalization;
 using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Infrastructure.Diagnostics;
@@ -38,18 +39,7 @@ public sealed partial class GetEventTimeSeriesQuery
         string bucketFunction = TimeSeriesIntervalParser.ToBucketFunction(request.Interval);
         bool grouped = !string.IsNullOrEmpty(request.GroupByColumn);
 
-        List<KeyValuePair<string, object?>> parameters = new List<KeyValuePair<string, object?>>(6)
-        {
-            new KeyValuePair<string, object?>("projectId", request.ProjectId),
-            new KeyValuePair<string, object?>("tenantId", request.TenantId),
-            new KeyValuePair<string, object?>("fromTimestamp", request.From),
-            new KeyValuePair<string, object?>("toTimestamp", request.To)
-        };
-
-        if (request.TrafficClass is not null)
-        {
-            parameters.Add(new KeyValuePair<string, object?>("trafficClass", request.TrafficClass));
-        }
+        List<KeyValuePair<string, object?>> parameters = ScopeClause.Parameters(request.Scope, 10);
 
         if (!string.IsNullOrEmpty(request.TimeZone))
         {
@@ -69,31 +59,8 @@ public sealed partial class GetEventTimeSeriesQuery
         }
 
         sql.Append("count() AS event_count ");
-        sql.Append("FROM nealytics_core.global_events ");
-        sql.Append("WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String} ");
-        sql.Append("AND timestamp >= {fromTimestamp:DateTime64} AND timestamp <= {toTimestamp:DateTime64}");
-        sql.Append(TrafficFilter.Clause(request.TrafficClass));
-
-        // Same shape as /breakdown: toString() so one comparison works for every declared type,
-        // and a bound parameter so the value is never concatenated. The column arrived from the
-        // allowlist, not from the caller.
-        for (int i = 0; i < (request.Filters?.Count ?? 0); i++)
-        {
-            BreakdownFilter filter = request.Filters![i];
-            string parameterName = string.Create(
-                CultureInfo.InvariantCulture, $"filter{i.ToString(CultureInfo.InvariantCulture)}");
-
-            sql.Append(" AND toString(").Append(filter.Column).Append(") = {")
-                .Append(parameterName).Append(":String}");
-
-            parameters.Add(new KeyValuePair<string, object?>(parameterName, filter.Value));
-        }
-
-        if (!string.IsNullOrEmpty(request.EventType))
-        {
-            sql.Append(" AND event_type = {eventType:String}");
-            parameters.Add(new KeyValuePair<string, object?>("eventType", request.EventType));
-        }
+        sql.Append("FROM nealytics_core.global_events");
+        ScopeClause.AppendRaw(sql, request.Scope);
 
         if (grouped)
         {

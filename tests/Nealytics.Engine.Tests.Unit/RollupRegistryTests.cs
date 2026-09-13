@@ -168,7 +168,7 @@ public class RollupRegistryTests
 
         ddl.Should().Contain("ENGINE = AggregatingMergeTree");
         ddl.Should().Contain("PARTITION BY toYYYYMM(bucket)");
-        ddl.Should().Contain("ORDER BY (project_id, tenant_id, bucket, event_type, widget_id, shelf)");
+        ddl.Should().Contain("ORDER BY (project_id, tenant_id, bucket, event_type, traffic_class, widget_id, shelf)");
     }
 
     [Fact]

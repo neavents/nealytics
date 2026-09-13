@@ -4,11 +4,13 @@ using System;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Diagnostics;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Diagnostics;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Storage;
 using Octonica.ClickHouseClient;
 
@@ -27,21 +29,6 @@ public sealed partial class GetSessionAnalyticsQuery
     // dashboard's ROW_CAP workaround exists solely because of that. The totals now come from the
     // same statement as the rows, for the reason /breakdown does it: issued separately, each would
     // see a different set of rows as ingestion continues.
-    private const string SqlCommandText =
-        "WITH sessions AS (" +
-        "SELECT session_id, min(timestamp) AS first_seen, max(timestamp) AS last_seen, count() AS event_count " +
-        "FROM nealytics_core.global_events " +
-        "WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String} " +
-        "AND timestamp >= {fromTimestamp:DateTime64} AND timestamp <= {toTimestamp:DateTime64} " +
-        "GROUP BY session_id) " +
-        "SELECT session_id, first_seen, last_seen, event_count, " +
-        "(SELECT count() FROM sessions) AS total_sessions, " +
-        "(SELECT sum(event_count) FROM sessions) AS total_events, " +
-        "(SELECT avg(dateDiff('millisecond', first_seen, last_seen) / 1000) FROM sessions) AS avg_duration " +
-        "FROM sessions " +
-        "ORDER BY first_seen DESC " +
-        "LIMIT {limit:Int32}";
-
     public GetSessionAnalyticsQuery(
         ClickHouseConnectionFactory connectionFactory,
         RollupRegistry rollups,
@@ -73,14 +60,31 @@ public sealed partial class GetSessionAnalyticsQuery
 
         if (request.From >= request.To
             || request.From.TimeOfDay != TimeSpan.Zero
-            || request.To.TimeOfDay != TimeSpan.Zero)
+            || request.To.TimeOfDay != TimeSpan.Zero
+            || ScopeClause.HasMeasureFilter(request.Filters))
         {
             return null;
         }
 
-        foreach (Rollup candidate in rollups.Declared)
+        foreach (Rollup candidate in rollups.Routable)
         {
-            if (candidate.Grain == RollupGrain.Session && candidate.EventTypes.Count == 0)
+            if (candidate.Grain != RollupGrain.Session || candidate.EventTypes.Count != 0)
+            {
+                continue;
+            }
+
+            bool covered = true;
+
+            foreach (QueryFilter filter in request.Filters ?? [])
+            {
+                if (!candidate.CoversColumn(filter.Column))
+                {
+                    covered = false;
+                    break;
+                }
+            }
+
+            if (covered)
             {
                 return candidate;
             }
@@ -101,21 +105,6 @@ public sealed partial class GetSessionAnalyticsQuery
     /// The range is half open on <c>event_date</c>, matching the rollup path in /breakdown, and
     /// <see cref="SelectRollup"/> has already refused any range whose ends are not on midnight.
     /// </summary>
-    internal static string BuildRollupSql(Rollup rollup) =>
-        "WITH sessions AS (" +
-        "SELECT session_id, minMerge(started_at) AS first_seen, maxMerge(ended_at) AS last_seen, " +
-        "countMerge(events) AS event_count " +
-        "FROM " + RollupRegistry.Database + "." + rollup.TableName + " " +
-        "WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String} " +
-        "AND event_date >= toDate({fromTimestamp:DateTime64}) AND event_date < toDate({toTimestamp:DateTime64}) " +
-        "GROUP BY session_id) " +
-        "SELECT session_id, first_seen, last_seen, event_count, " +
-        "(SELECT count() FROM sessions) AS total_sessions, " +
-        "(SELECT sum(event_count) FROM sessions) AS total_events, " +
-        "(SELECT avg(dateDiff('millisecond', first_seen, last_seen) / 1000) FROM sessions) AS avg_duration " +
-        "FROM sessions " +
-        "ORDER BY first_seen DESC " +
-        "LIMIT {limit:Int32}";
 
     [LoggerMessage(EventId = 3001, Level = LogLevel.Information,
         Message = "Executing session analytics query for Project: {ProjectId} / Tenant: {TenantId}.")]
@@ -127,16 +116,49 @@ public sealed partial class GetSessionAnalyticsQuery
     internal static (string Sql, IReadOnlyList<KeyValuePair<string, object?>> Parameters) BuildQuery(
         in SessionAnalyticsRequest request, Rollup? rollup)
     {
-        List<KeyValuePair<string, object?>> parameters = new List<KeyValuePair<string, object?>>(5)
-        {
-            new KeyValuePair<string, object?>("projectId", request.ProjectId),
-            new KeyValuePair<string, object?>("tenantId", request.TenantId),
-            new KeyValuePair<string, object?>("fromTimestamp", request.From),
-            new KeyValuePair<string, object?>("toTimestamp", request.To),
-            new KeyValuePair<string, object?>("limit", request.Limit)
-        };
+        List<KeyValuePair<string, object?>> parameters = ScopeClause.Parameters(request.Scope, 10);
+        parameters.Add(new KeyValuePair<string, object?>("limit", request.Limit));
 
-        return (rollup is null ? SqlCommandText : BuildRollupSql(rollup), parameters);
+        StringBuilder sql = new(640);
+        sql.Append("WITH sessions AS (SELECT session_id, ");
+
+        if (rollup is null)
+        {
+            sql.Append("min(timestamp) AS first_seen, max(timestamp) AS last_seen, count() AS event_count");
+            sql.Append(" FROM nealytics_core.global_events");
+            ScopeClause.AppendRaw(sql, request.Scope);
+        }
+        else
+        {
+            sql.Append("minMerge(started_at) AS first_seen, maxMerge(ended_at) AS last_seen, countMerge(events) AS event_count");
+            sql.Append(" FROM ").Append(RollupRegistry.Database).Append('.').Append(rollup.TableName);
+            sql.Append(" WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String}");
+            sql.Append(" AND event_date >= toDate({fromTimestamp:DateTime64}) AND event_date < toDate({toTimestamp:DateTime64})");
+            sql.Append(TrafficFilter.Clause(request.TrafficClass));
+            AppendRollupFilters(sql, request.Filters);
+        }
+
+        sql.Append(" GROUP BY session_id)");
+        sql.Append(" SELECT session_id, first_seen, last_seen, event_count,");
+        sql.Append(" (SELECT count() FROM sessions) AS total_sessions,");
+        sql.Append(" (SELECT sum(event_count) FROM sessions) AS total_events,");
+        sql.Append(" (SELECT avg(dateDiff('millisecond', first_seen, last_seen) / 1000) FROM sessions) AS avg_duration");
+        sql.Append(" FROM sessions ORDER BY first_seen DESC LIMIT {limit:Int32}");
+
+        return (sql.ToString(), parameters);
+    }
+
+    private static void AppendRollupFilters(StringBuilder sql, IReadOnlyList<QueryFilter>? filters)
+    {
+        if (filters is null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < filters.Count; i++)
+        {
+            sql.Append(" AND ").Append(filters[i].Column).Append(" = {filter").Append(i).Append(":String}");
+        }
     }
 
     internal static SessionAnalyticsResponse Aggregate(

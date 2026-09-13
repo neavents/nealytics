@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 
 public static class GetBreakdownEndpoint
 {
@@ -17,7 +18,7 @@ public static class GetBreakdownEndpoint
         endpoints.MapGet("/api/v1/analytics/breakdown", async (
             HttpContext context,
             GetBreakdownQuery query,
-            BreakdownColumns columns,
+            QueryColumns columns,
             MeasureRegistry measures,
             IOptions<TelemetryEngineOptions> options,
             CancellationToken cancellationToken) =>

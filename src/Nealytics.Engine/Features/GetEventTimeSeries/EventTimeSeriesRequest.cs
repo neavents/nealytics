@@ -2,7 +2,7 @@ namespace Nealytics.Engine.Features.GetEventTimeSeries;
 
 using System;
 using System.Collections.Generic;
-using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Infrastructure.Query;
 
 public readonly struct EventTimeSeriesRequest
 {
@@ -25,7 +25,18 @@ public readonly struct EventTimeSeriesRequest
     /// allowlist and same injection boundary as /breakdown: the column is the allowlist's own
     /// instance and the value is bound.
     /// </summary>
-    public IReadOnlyList<BreakdownFilter> Filters { get; init; }
+    public IReadOnlyList<QueryFilter> Filters { get; init; }
 
     public int Limit { get; init; }
+
+    public QueryScope Scope => new()
+    {
+        ProjectId = ProjectId,
+        TenantId = TenantId,
+        From = From,
+        To = To,
+        TrafficClass = TrafficClass,
+        EventType = EventType,
+        Filters = Filters,
+    };
 }

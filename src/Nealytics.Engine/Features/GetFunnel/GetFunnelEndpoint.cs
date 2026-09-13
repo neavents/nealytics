@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 
 public static class GetFunnelEndpoint
 {
@@ -18,7 +19,7 @@ public static class GetFunnelEndpoint
         endpoints.MapGet("/api/v1/analytics/funnel", async (
             HttpContext context,
             GetFunnelQuery query,
-            BreakdownColumns columns,
+            QueryColumns columns,
             MeasureRegistry measures,
             IOptions<TelemetryEngineOptions> options,
             CancellationToken cancellationToken) =>

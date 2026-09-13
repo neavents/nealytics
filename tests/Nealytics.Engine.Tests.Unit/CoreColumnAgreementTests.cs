@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using FluentAssertions;
 using Nealytics.Engine.Features.BatchProcessor;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Storage;
@@ -130,7 +131,7 @@ public class CoreColumnAgreementTests
     [Fact]
     public void GroupableColumns_AreAllRealColumns()
     {
-        BreakdownColumns columns = new(new DimensionRegistry(new TelemetryEngineOptions()));
+        QueryColumns columns = new(new DimensionRegistry(new TelemetryEngineOptions()));
 
         columns.Allowed.Should().BeSubsetOf(
             TelemetryColumnLayout.CoreColumns,

@@ -1,6 +1,7 @@
 namespace Nealytics.Engine.Infrastructure.Configuration;
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
@@ -51,6 +52,7 @@ public sealed record Rollup(
 
     public bool CoversColumn(string column) =>
         string.Equals(column, "event_type", StringComparison.Ordinal)
+        || string.Equals(column, RollupRegistry.TrafficColumn, StringComparison.Ordinal)
         || Dimensions.Any(dimension => string.Equals(dimension.Name, column, StringComparison.Ordinal));
 
     public string? MeasureColumn(string measure, string aggregation) =>
@@ -64,6 +66,8 @@ public sealed class RollupRegistry
 {
     public const string Database = "nealytics_core";
     public const string SourceTable = "global_events";
+    public const string TrafficColumn = "traffic_class";
+    private readonly ConcurrentDictionary<string, string> _unroutable = new(StringComparer.Ordinal);
 
     public static readonly FrozenSet<string> SupportedAggregations =
         FrozenSet.ToFrozenSet(["sum", "avg", "min", "max", "count"], StringComparer.OrdinalIgnoreCase);
@@ -233,6 +237,35 @@ public sealed class RollupRegistry
 
     public IReadOnlyList<Rollup> Declared { get; }
 
+    public IEnumerable<Rollup> Routable
+    {
+        get
+        {
+            foreach (Rollup rollup in Declared)
+            {
+                if (!_unroutable.ContainsKey(rollup.Name))
+                {
+                    yield return rollup;
+                }
+            }
+        }
+    }
+
+    public void MarkUnroutable(Rollup rollup, string reason)
+    {
+        ArgumentNullException.ThrowIfNull(rollup);
+        _unroutable[rollup.Name] = reason;
+    }
+
+    public void MarkRoutable(Rollup rollup)
+    {
+        ArgumentNullException.ThrowIfNull(rollup);
+        _unroutable.TryRemove(rollup.Name, out _);
+    }
+
+    public bool IsRoutable(Rollup rollup) =>
+        rollup is not null && !_unroutable.ContainsKey(rollup.Name);
+
     private static string[] Split(string? value) =>
         (value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
@@ -264,7 +297,7 @@ public sealed class RollupRegistry
         StringBuilder sql = new(512);
         sql.Append("CREATE TABLE IF NOT EXISTS ").Append(Database).Append('.').Append(rollup.TableName);
         sql.Append(" (project_id LowCardinality(String), tenant_id String, event_date Date, ");
-        sql.Append("session_id String");
+        sql.Append("session_id String, ").Append(TrafficColumn).Append(" LowCardinality(String)");
 
         foreach (RollupColumn dimension in rollup.Dimensions)
         {
@@ -288,7 +321,7 @@ public sealed class RollupRegistry
         }
 
         sql.Append(") ENGINE = AggregatingMergeTree PARTITION BY toYYYYMM(event_date) ");
-        sql.Append("ORDER BY (project_id, tenant_id, event_date, session_id");
+        sql.Append("ORDER BY (project_id, tenant_id, event_date, session_id, ").Append(TrafficColumn);
 
         foreach (RollupColumn dimension in rollup.Dimensions)
         {
@@ -304,7 +337,7 @@ public sealed class RollupRegistry
         StringBuilder sql = new(512);
         sql.Append("CREATE TABLE IF NOT EXISTS ").Append(Database).Append('.').Append(rollup.TableName);
         sql.Append(" (project_id LowCardinality(String), tenant_id String, bucket DateTime('UTC'), ");
-        sql.Append("event_type LowCardinality(String)");
+        sql.Append("event_type LowCardinality(String), ").Append(TrafficColumn).Append(" LowCardinality(String)");
 
         foreach (RollupColumn dimension in rollup.Dimensions)
         {
@@ -323,7 +356,7 @@ public sealed class RollupRegistry
         }
 
         sql.Append(") ENGINE = AggregatingMergeTree PARTITION BY toYYYYMM(bucket) ");
-        sql.Append("ORDER BY (project_id, tenant_id, bucket, event_type");
+        sql.Append("ORDER BY (project_id, tenant_id, bucket, event_type, ").Append(TrafficColumn);
 
         foreach (RollupColumn dimension in rollup.Dimensions)
         {
@@ -344,9 +377,16 @@ public sealed class RollupRegistry
     private static string BuildSessionViewDdl(Rollup rollup)
     {
         StringBuilder sql = new(768);
-        sql.Append("CREATE MATERIALIZED VIEW IF NOT EXISTS ").Append(Database).Append('.').Append(rollup.ViewName);
+        sql.Append("CREATE MATERIALIZED VIEW ").Append(Database).Append('.').Append(rollup.ViewName);
         sql.Append(" TO ").Append(Database).Append('.').Append(rollup.TableName);
-        sql.Append(" AS SELECT project_id, tenant_id, toDate(timestamp) AS event_date, session_id");
+        sql.Append(" AS ");
+        AppendSessionSelect(sql, rollup, null);
+        return sql.ToString();
+    }
+
+    private static void AppendSessionSelect(StringBuilder sql, Rollup rollup, string? partition)
+    {
+        sql.Append("SELECT project_id, tenant_id, toDate(timestamp) AS event_date, session_id, ").Append(TrafficColumn);
 
         foreach (RollupColumn dimension in rollup.Dimensions)
         {
@@ -370,32 +410,29 @@ public sealed class RollupRegistry
                 .Append(measure.Measure.Name).Append(") AS ").Append(measure.ColumnName);
         }
 
-        sql.Append(" FROM ").Append(Database).Append('.').Append(SourceTable);
-
-        if (rollup.EventTypes.Count > 0)
-        {
-            sql.Append(" WHERE event_type IN (");
-            sql.Append(string.Join(", ", rollup.EventTypes.Order(StringComparer.Ordinal).Select(Quote)));
-            sql.Append(')');
-        }
-
-        sql.Append(" GROUP BY project_id, tenant_id, event_date, session_id");
+        AppendSourceAndScope(sql, rollup, partition);
+        sql.Append(" GROUP BY project_id, tenant_id, event_date, session_id, ").Append(TrafficColumn);
 
         foreach (RollupColumn dimension in rollup.Dimensions)
         {
             sql.Append(", ").Append(dimension.Name);
         }
-
-        return sql.ToString();
     }
 
     private static string BuildBucketViewDdl(Rollup rollup)
     {
         StringBuilder sql = new(768);
-        sql.Append("CREATE MATERIALIZED VIEW IF NOT EXISTS ").Append(Database).Append('.').Append(rollup.ViewName);
+        sql.Append("CREATE MATERIALIZED VIEW ").Append(Database).Append('.').Append(rollup.ViewName);
         sql.Append(" TO ").Append(Database).Append('.').Append(rollup.TableName);
-        sql.Append(" AS SELECT project_id, tenant_id, ");
-        sql.Append(rollup.BucketFunction).Append("(timestamp) AS bucket, event_type");
+        sql.Append(" AS ");
+        AppendBucketSelect(sql, rollup, null);
+        return sql.ToString();
+    }
+
+    private static void AppendBucketSelect(StringBuilder sql, Rollup rollup, string? partition)
+    {
+        sql.Append("SELECT project_id, tenant_id, ");
+        sql.Append(rollup.BucketFunction).Append("(timestamp) AS bucket, event_type, ").Append(TrafficColumn);
 
         foreach (RollupColumn dimension in rollup.Dimensions)
         {
@@ -412,23 +449,75 @@ public sealed class RollupRegistry
                 .Append(measure.Measure.Name).Append(") AS ").Append(measure.ColumnName);
         }
 
-        sql.Append(" FROM ").Append(Database).Append('.').Append(SourceTable);
-
-        if (rollup.EventTypes.Count > 0)
-        {
-            sql.Append(" WHERE event_type IN (");
-            sql.Append(string.Join(", ", rollup.EventTypes.Order(StringComparer.Ordinal).Select(Quote)));
-            sql.Append(')');
-        }
-
-        sql.Append(" GROUP BY project_id, tenant_id, bucket, event_type");
+        AppendSourceAndScope(sql, rollup, partition);
+        sql.Append(" GROUP BY project_id, tenant_id, bucket, event_type, ").Append(TrafficColumn);
 
         foreach (RollupColumn dimension in rollup.Dimensions)
         {
             sql.Append(", ").Append(dimension.Name);
         }
+    }
+
+    private static void AppendSourceAndScope(StringBuilder sql, Rollup rollup, string? partition)
+    {
+        sql.Append(" FROM ").Append(Database).Append('.').Append(SourceTable);
+        bool scoped = false;
+
+        if (partition is not null)
+        {
+            sql.Append(" WHERE toYYYYMM(timestamp) = ").Append(partition);
+            scoped = true;
+        }
+
+        if (rollup.EventTypes.Count > 0)
+        {
+            sql.Append(scoped ? " AND " : " WHERE ");
+            sql.Append("event_type IN (");
+            sql.Append(string.Join(", ", rollup.EventTypes.Order(StringComparer.Ordinal).Select(Quote)));
+            sql.Append(')');
+        }
+    }
+
+    public static string BuildBackfillSql(Rollup rollup, string? partition)
+    {
+        ArgumentNullException.ThrowIfNull(rollup);
+
+        if (partition is not null && !IsPartitionId(partition))
+        {
+            throw new ArgumentException($"'{partition}' is not a toYYYYMM partition id.", nameof(partition));
+        }
+
+        StringBuilder sql = new(768);
+        sql.Append("INSERT INTO ").Append(Database).Append('.').Append(rollup.TableName).Append(' ');
+
+        if (IsSessionGrain(rollup))
+        {
+            AppendSessionSelect(sql, rollup, partition);
+        }
+        else
+        {
+            AppendBucketSelect(sql, rollup, partition);
+        }
 
         return sql.ToString();
+    }
+
+    public static bool IsPartitionId(string value)
+    {
+        if (value.Length != 6)
+        {
+            return false;
+        }
+
+        foreach (char character in value)
+        {
+            if (!char.IsAsciiDigit(character))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     internal static string RollupDimensionType(Dimension dimension) =>

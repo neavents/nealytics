@@ -1,4 +1,4 @@
-namespace Nealytics.Engine.Features.GetBreakdown;
+namespace Nealytics.Engine.Infrastructure.Query;
 
 using System;
 using System.Collections.Generic;
@@ -19,7 +19,7 @@ using Nealytics.Engine.Infrastructure.Configuration;
 /// absent by construction, which is what "the query API stops offering it" means — and it comes
 /// from the same registry the reconciler and ingest read, so the three cannot drift.
 /// </summary>
-public sealed class BreakdownColumns
+public sealed class QueryColumns
 {
     /// <summary>
     /// Core columns worth grouping by. <c>event_id</c> and <c>metadata_json</c> are excluded:
@@ -44,7 +44,7 @@ public sealed class BreakdownColumns
 
     private readonly Dictionary<string, string> _byName;
 
-    public BreakdownColumns(DimensionRegistry registry)
+    public QueryColumns(DimensionRegistry registry)
     {
         ArgumentNullException.ThrowIfNull(registry);
 

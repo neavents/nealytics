@@ -103,6 +103,8 @@ public sealed class TelemetryEngineOptions
 
     public int RetentionDays { get; set; } = 90;
 
+    public bool BackfillRollups { get; set; } = true;
+
     /// <summary>
     /// Event types kept for less time than <see cref="RetentionDays"/>.
     ///

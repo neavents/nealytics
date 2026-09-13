@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Configuration;
 
 namespace Nealytics.Engine.Tests.Unit;
@@ -18,7 +19,7 @@ public class TrafficFilterTests
     private static BreakdownRequestResult Create(string? traffic) =>
         BreakdownRequestFactory.Create(
             "proj", "tenant", "events", "event_type", null, [], null, null, null, null, traffic, null, null,
-            new BreakdownColumns(new DimensionRegistry(new TelemetryEngineOptions())),
+            new QueryColumns(new DimensionRegistry(new TelemetryEngineOptions())),
             new MeasureRegistry(new TelemetryEngineOptions(), new DimensionRegistry(new TelemetryEngineOptions())),
             10_000, 24, Now);
 
@@ -121,7 +122,7 @@ public class ExactCountingTests
     private static BreakdownRequestResult Create(string? exact) =>
         BreakdownRequestFactory.Create(
             "proj", "tenant", "events", "event_type", null, [], null, null, null, null, null, exact, null,
-            new BreakdownColumns(new DimensionRegistry(new TelemetryEngineOptions())),
+            new QueryColumns(new DimensionRegistry(new TelemetryEngineOptions())),
             new MeasureRegistry(new TelemetryEngineOptions(), new DimensionRegistry(new TelemetryEngineOptions())),
             10_000, 24, Now);
 

@@ -25,6 +25,7 @@ using Nealytics.Engine.Features.GetSessionAnalytics;
 using Nealytics.Engine.Features.GetTopEvents;
 using Nealytics.Engine.Features.IngestTelemetry;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Diagnostics;
 using Nealytics.Engine.Infrastructure.Security;
 using Nealytics.Engine.Infrastructure.Serialization;
@@ -262,7 +263,7 @@ builder.Services.AddSingleton<GetEventTypesQuery>();
 builder.Services.AddSingleton<GetColumnPopulationQuery>();
 // The query allowlist. A singleton built from the registry, so groupBy/filter validation and the
 // schema reconciler can never disagree about which dimensions exist.
-builder.Services.AddSingleton(new BreakdownColumns(dimensionRegistry));
+builder.Services.AddSingleton(new QueryColumns(dimensionRegistry));
 
 // Where telemetry actually goes, and it went nowhere before this.
 //

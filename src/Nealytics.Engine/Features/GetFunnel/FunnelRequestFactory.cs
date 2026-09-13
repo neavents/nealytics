@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 
 public readonly struct FunnelRequestResult
 {
@@ -48,7 +49,7 @@ public static class FunnelRequestFactory
         string? fromRaw,
         string? toRaw,
         string? limitRaw,
-        BreakdownColumns columns,
+        QueryColumns columns,
         MeasureRegistry measures,
         int maxLimit,
         int defaultRangeHours,

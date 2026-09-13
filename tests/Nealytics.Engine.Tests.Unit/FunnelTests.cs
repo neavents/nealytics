@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Features.GetFunnel;
 using Nealytics.Engine.Infrastructure.Configuration;
 
@@ -9,7 +10,7 @@ public class FunnelTests
 {
     private static readonly DateTime Now = new(2026, 8, 13, 12, 0, 0, DateTimeKind.Utc);
 
-    private static BreakdownColumns Columns() =>
+    private static QueryColumns Columns() =>
         new(new DimensionRegistry(new TelemetryEngineOptions
         {
             Dimensions = [new DimensionOptions { Name = "locale", Type = "LowCardinality" }],

@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Features.GetTopEvents;
 using Nealytics.Engine.Infrastructure.Configuration;
 
@@ -18,7 +19,7 @@ public class TopEventsRequestFactoryTests
             projectId, tenantId, limit, dimension, TestColumns(), TestMeasures(),
             from, to, traffic, exact, maxLimit, defaultRangeHours, Now);
 
-    private static BreakdownColumns TestColumns() =>
+    private static QueryColumns TestColumns() =>
         new(new DimensionRegistry(new TelemetryEngineOptions
         {
             Dimensions = [new DimensionOptions { Name = "widget_id", Type = "String" }],

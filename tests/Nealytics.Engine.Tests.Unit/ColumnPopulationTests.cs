@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Nealytics.Engine.Features.GetSchema;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Configuration;
 
 namespace Nealytics.Engine.Tests.Unit;
@@ -119,7 +120,7 @@ public class ColumnPopulationTests
     [Fact]
     public void ColumnNamesComeFromTheRegistryAndNeverFromACaller()
     {
-        // The injection boundary is the same one BreakdownColumns carries: the only strings that
+        // The injection boundary is the same one QueryColumns carries: the only strings that
         // reach this SQL are names the registry validated against ^[a-z][a-z0-9_]{0,62}$ at boot.
         // There is no caller input on this path at all -- the endpoint takes no column parameter.
         //

@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Configuration;
 
 namespace Nealytics.Engine.Tests.Unit;
@@ -8,7 +9,7 @@ public class BreakdownMeasureMetricTests
 {
     private static readonly DateTime Now = new(2026, 8, 13, 12, 0, 0, DateTimeKind.Utc);
 
-    private static BreakdownColumns Columns(params string[] dimensions) =>
+    private static QueryColumns Columns(params string[] dimensions) =>
         new(new DimensionRegistry(new TelemetryEngineOptions
         {
             Dimensions = [.. dimensions.Select(name => new DimensionOptions { Name = name })],

@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 
 public static class GetTopEventsEndpoint
 {
@@ -17,7 +18,7 @@ public static class GetTopEventsEndpoint
         endpoints.MapGet("/api/v1/analytics/top", async (
             HttpContext context,
             GetTopEventsQuery query,
-            BreakdownColumns columns,
+            QueryColumns columns,
             MeasureRegistry measures,
             IOptions<TelemetryEngineOptions> options,
             CancellationToken cancellationToken) =>

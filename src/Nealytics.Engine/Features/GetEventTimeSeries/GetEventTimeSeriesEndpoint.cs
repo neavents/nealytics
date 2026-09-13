@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Storage;
 
 public static class GetEventTimeSeriesEndpoint
@@ -19,7 +20,7 @@ public static class GetEventTimeSeriesEndpoint
         endpoints.MapGet("/api/v1/analytics/timeseries", async (
             HttpContext context,
             GetEventTimeSeriesQuery query,
-            BreakdownColumns columns,
+            QueryColumns columns,
             MeasureRegistry measures,
             IOptions<TelemetryEngineOptions> options,
             CancellationToken cancellationToken) =>

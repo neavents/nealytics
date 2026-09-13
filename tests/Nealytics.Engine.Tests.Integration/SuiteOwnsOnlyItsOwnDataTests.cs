@@ -86,9 +86,11 @@ public class SuiteOwnsOnlyItsOwnDataTests
             "if the scan found no files it would pass for the wrong reason");
 
         // Matches TRUNCATE/DROP of the events table however it is spelled or spaced. `DELETE WHERE`
-        // is not matched: a scoped delete is the supported way to clean up.
+        // is not matched: a scoped delete is the supported way to clean up. The one drop a test may
+        // own is of a rollup table it created under its own name, which lives beside the shared
+        // table and not in it.
         Regex destructive = new(
-            @"\b(TRUNCATE\s+TABLE|DROP\s+TABLE)\b",
+            @"\b(TRUNCATE\s+TABLE|DROP\s+TABLE(?!\s+IF\s+EXISTS\s+nealytics_core\.rollup_))\b",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         List<string> offenders = [];

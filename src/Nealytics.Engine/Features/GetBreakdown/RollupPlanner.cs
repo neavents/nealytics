@@ -3,6 +3,7 @@ namespace Nealytics.Engine.Features.GetBreakdown;
 using System;
 using System.Collections.Generic;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 
 public readonly struct RollupPlan
 {
@@ -65,7 +66,7 @@ public static class RollupPlanner
         Rollup? best = null;
         string valueExpression = string.Empty;
 
-        foreach (Rollup candidate in rollups.Declared)
+        foreach (Rollup candidate in rollups.Routable)
         {
             if (!IsAligned(request.From, request.To, candidate.Grain))
             {
@@ -84,9 +85,9 @@ public static class RollupPlanner
 
             bool filtersCovered = true;
 
-            foreach (BreakdownFilter filter in request.Filters)
+            foreach (QueryFilter filter in request.Filters)
             {
-                if (!candidate.CoversColumn(filter.Column))
+                if (filter.IsMeasure || !candidate.CoversColumn(filter.Column))
                 {
                     filtersCovered = false;
                     break;

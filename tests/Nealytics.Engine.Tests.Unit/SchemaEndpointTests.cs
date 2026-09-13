@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Features.GetSchema;
 using Nealytics.Engine.Infrastructure.Configuration;
 
@@ -7,7 +8,7 @@ namespace Nealytics.Engine.Tests.Unit;
 
 public class SchemaEndpointTests
 {
-    private static (BreakdownColumns Columns, DimensionRegistry Dimensions, MeasureRegistry Measures) Build()
+    private static (QueryColumns Columns, DimensionRegistry Dimensions, MeasureRegistry Measures) Build()
     {
         TelemetryEngineOptions options = new()
         {
@@ -28,7 +29,7 @@ public class SchemaEndpointTests
         };
 
         DimensionRegistry dimensions = new(options);
-        return (new BreakdownColumns(dimensions), dimensions, new MeasureRegistry(options, dimensions));
+        return (new QueryColumns(dimensions), dimensions, new MeasureRegistry(options, dimensions));
     }
 
     [Fact]
@@ -54,7 +55,7 @@ public class SchemaEndpointTests
     [Fact]
     public void EveryAdvertisedMetricIsAcceptedByTheBreakdownFactory()
     {
-        (BreakdownColumns columns, _, MeasureRegistry measures) = Build();
+        (QueryColumns columns, _, MeasureRegistry measures) = Build();
 
         string[] advertised =
         [
@@ -77,7 +78,7 @@ public class SchemaEndpointTests
     [Fact]
     public void RetiredMeasureAggregation_IsNotAdvertisedAndIsRefused()
     {
-        (BreakdownColumns columns, _, MeasureRegistry measures) = Build();
+        (QueryColumns columns, _, MeasureRegistry measures) = Build();
 
         BreakdownRequestResult result = BreakdownRequestFactory.Create(
             "proj", "tenant", "avg(old_ms)", "widget_id", null, [], null, null, null, null, null, null, null,
