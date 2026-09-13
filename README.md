@@ -591,8 +591,12 @@ Five core columns arrived with this: `seq` (monotonic per session, order within 
 never by `timestamp`, because client clocks lie), `ingested_at` (server clock, so skew is measurable),
 `traffic_class`, `page_path` and `referrer`.
 
-**`traffic_class` changes what every read returns.** Values are `normal`, `bot` and `internal`, and
-reads now count `normal` only unless you pass `?traffic=all|normal|bot|internal`. Bots were labelled
+**`traffic_class` changes what every read returns.** Values are `normal` (people), `bot` (crawlers,
+previews, link unfurlers) and `internal` (traffic the deployment generates itself: staff, synthetic
+checks, server side counters such as "documents served"), and reads count `normal` only unless you
+pass `?traffic=all|normal|bot|internal`. Every row needs a `sessionId`, so a server side counter
+that is not a visit belongs under `internal`, or every one of its rows is a one event session that
+drags the visit count up and the median visit length down. Bots were labelled
 at the edge from the day `device_class` existed and nothing ever filtered on the label, so every
 number this engine has served included preview crawlers and link unfurlers. Numbers dropping when
 you upgrade is the fix working. Nothing is dropped at ingest, `traffic=all` always gets it back,
