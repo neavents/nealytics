@@ -1,14 +1,16 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG TARGETARCH
 WORKDIR /src
 
 COPY src/Nealytics.Engine/Nealytics.Engine.csproj src/Nealytics.Engine/
-RUN dotnet restore src/Nealytics.Engine/Nealytics.Engine.csproj -r linux-x64
+RUN RID=$([ "$TARGETARCH" = "arm64" ] && echo linux-arm64 || echo linux-x64) && \
+    dotnet restore src/Nealytics.Engine/Nealytics.Engine.csproj -r "$RID"
 
 COPY src/ src/
-# Self contained, so the runtime-deps base image below is all this needs.
-RUN dotnet publish src/Nealytics.Engine/Nealytics.Engine.csproj \
+RUN RID=$([ "$TARGETARCH" = "arm64" ] && echo linux-arm64 || echo linux-x64) && \
+    dotnet publish src/Nealytics.Engine/Nealytics.Engine.csproj \
     -c Release \
-    -r linux-x64 \
+    -r "$RID" \
     --self-contained true \
     -o /app/publish \
     --no-restore
