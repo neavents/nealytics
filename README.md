@@ -278,6 +278,10 @@ Query params (all whitelisted; any other value returns `400`):
 - `by`, `user` (default → `user_id`) or `session` (→ `session_id`).
 - `mode`, `exact` (default → `uniqExact`) or `approx` (→ `uniq`, HyperLogLog; cheaper/approximate for large ranges).
 - `from` / `to` (ISO 8601, defaults to last 24 hours). `from` must be ≤ `to`.
+- `eventType`, count only sessions or users that produced this event.
+- `filter` (repeatable), the same grammar as `/breakdown` (`column:value`, `measure>=number`), so "visitors to this menu per day" is one call.
+- `tz`, an IANA zone; buckets are cut on that zone's midnight.
+- `traffic`, `normal` (default), `bot`, `internal` or `all`.
 - `limit`, max buckets returned (defaults to `MaxQueryLimit`).
 
 Because `user_id` is nullable, distinct counts **skip anonymous (`NULL`) events**, so they never inflate the count. Note: a true rolling 30-day MAU is a single `uniq(user_id)` over `now()-30d`, do **not** sum daily buckets (users overlap).

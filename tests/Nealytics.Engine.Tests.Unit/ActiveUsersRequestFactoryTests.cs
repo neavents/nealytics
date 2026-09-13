@@ -1,5 +1,7 @@
 using FluentAssertions;
 using Nealytics.Engine.Features.GetActiveUsers;
+using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 
 namespace Nealytics.Engine.Tests.Unit;
 
@@ -11,9 +13,48 @@ public class ActiveUsersRequestFactoryTests
         string? projectId = "proj", string? tenantId = "tenant", string? limit = null,
         string? interval = null, string? by = null, string? mode = null,
         string? from = null, string? to = null, string? tz = null, string? traffic = null,
+        string? eventType = null, string[]? filters = null,
         int maxLimit = 1000, int defaultRangeHours = 24)
         => ActiveUsersRequestFactory.Create(
-            projectId, tenantId, limit, interval, by, mode, from, to, tz, traffic, maxLimit, defaultRangeHours, Now);
+            projectId, tenantId, limit, interval, by, mode, from, to, tz, traffic, eventType, filters ?? [],
+            TestColumns(), TestMeasures(), maxLimit, defaultRangeHours, Now);
+
+    private static QueryColumns TestColumns() =>
+        new(new DimensionRegistry(new TelemetryEngineOptions
+        {
+            Dimensions = [new DimensionOptions { Name = "widget_id", Type = "String" }],
+        }));
+
+    private static MeasureRegistry TestMeasures()
+    {
+        TelemetryEngineOptions options = new()
+        {
+            Measures = [new MeasureOptions { Name = "dwell_ms", Type = "UInt32" }],
+        };
+
+        return new MeasureRegistry(options, new DimensionRegistry(options));
+    }
+
+    [Fact]
+    public void EventTypeAndFilters_AreCarriedIntoTheRequest()
+    {
+        var result = Create(eventType: "open", filters: ["widget_id:w1", "dwell_ms>=5"]);
+
+        result.Success.Should().BeTrue();
+        result.Request.EventType.Should().Be("open");
+        result.Request.Filters.Should().HaveCount(2);
+        result.Request.Filters[0].Column.Should().Be("widget_id");
+        result.Request.Filters[1].IsMeasure.Should().BeTrue();
+    }
+
+    [Fact]
+    public void UnknownFilterColumn_Returns400()
+    {
+        var result = Create(filters: ["nope:1"]);
+
+        result.Success.Should().BeFalse();
+        result.ErrorStatusCode.Should().Be(ActiveUsersRequestFactory.StatusBadRequest);
+    }
 
     [Theory]
     [InlineData(null, "t")]

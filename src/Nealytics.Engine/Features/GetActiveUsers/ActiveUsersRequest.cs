@@ -1,6 +1,8 @@
 namespace Nealytics.Engine.Features.GetActiveUsers;
 
 using System;
+using System.Collections.Generic;
+using Nealytics.Engine.Infrastructure.Query;
 
 public readonly struct ActiveUsersRequest
 {
@@ -13,5 +15,18 @@ public readonly struct ActiveUsersRequest
     public ActiveCountMode Mode { get; init; }
     public string? TimeZone { get; init; }
     public string? TrafficClass { get; init; }
+    public string? EventType { get; init; }
+    public IReadOnlyList<QueryFilter> Filters { get; init; }
     public int Limit { get; init; }
+
+    public QueryScope Scope => new()
+    {
+        ProjectId = ProjectId,
+        TenantId = TenantId,
+        From = From,
+        To = To,
+        TrafficClass = TrafficClass,
+        EventType = EventType,
+        Filters = Filters,
+    };
 }

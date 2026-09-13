@@ -1,8 +1,10 @@
 namespace Nealytics.Engine.Features.GetActiveUsers;
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 
 public readonly struct ActiveUsersRequestResult
 {
@@ -42,6 +44,10 @@ public static class ActiveUsersRequestFactory
         string? toRaw,
         string? tzRaw,
         string? trafficRaw,
+        string? eventType,
+        IReadOnlyList<string> filtersRaw,
+        QueryColumns columns,
+        MeasureRegistry measures,
         int maxLimit,
         int defaultRangeHours,
         DateTime nowUtc)
@@ -118,6 +124,20 @@ public static class ActiveUsersRequestFactory
             return ActiveUsersRequestResult.Fail(StatusBadRequest, TrafficFilter.Rejection(trafficRaw));
         }
 
+        string? normalizedEventType = string.IsNullOrWhiteSpace(eventType) ? null : eventType;
+        if (normalizedEventType?.Length > MaxFieldLength)
+        {
+            return ActiveUsersRequestResult.Fail(StatusBadRequest, "Filter values must not exceed 256 characters.");
+        }
+
+        FilterParser.Result parsedFilters = FilterParser.Parse(filtersRaw ?? [], columns, measures, MaxFieldLength);
+
+        if (parsedFilters.Outcome != FilterParser.Outcome.Ok)
+        {
+            return ActiveUsersRequestResult.Fail(
+                StatusBadRequest, FilterRejection.Message(parsedFilters, columns, measures, MaxFieldLength));
+        }
+
         return ActiveUsersRequestResult.Ok(new ActiveUsersRequest
         {
             ProjectId = projectId,
@@ -125,6 +145,8 @@ public static class ActiveUsersRequestFactory
             From = fromUtc,
             To = toUtc,
             TrafficClass = trafficClass,
+            EventType = normalizedEventType,
+            Filters = parsedFilters.Filters,
             Interval = interval,
             Dimension = dimension,
             Mode = mode,

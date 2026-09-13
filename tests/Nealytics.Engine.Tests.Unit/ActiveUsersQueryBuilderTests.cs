@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Nealytics.Engine.Features.GetActiveUsers;
+using Nealytics.Engine.Infrastructure.Query;
 
 namespace Nealytics.Engine.Tests.Unit;
 
@@ -58,6 +59,24 @@ public class ActiveUsersQueryBuilderTests
         parameters[2].Value.Should().Be(request.From);
         parameters[3].Value.Should().Be(request.To);
         parameters[4].Value.Should().Be(42);
+    }
+
+    [Fact]
+    public void BuildQuery_ScopedToAnEventTypeAndColumn_BindsBoth()
+    {
+        ActiveUsersRequest request = Request() with
+        {
+            EventType = "open",
+            Filters = [QueryFilter.Equals("widget_id", "w1")],
+        };
+
+        var (sql, parameters) = GetActiveUsersQuery.BuildQuery(request);
+
+        sql.Should().Contain("event_type = {eventType:String}");
+        sql.Should().Contain("toString(widget_id) = {filter0:String}");
+        sql.Should().NotContain("w1");
+        parameters.Should().Contain(p => p.Key == "eventType" && (string)p.Value! == "open");
+        parameters.Should().Contain(p => p.Key == "filter0" && (string)p.Value! == "w1");
     }
 
     [Fact]

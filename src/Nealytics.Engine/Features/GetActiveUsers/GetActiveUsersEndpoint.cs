@@ -1,6 +1,7 @@
 namespace Nealytics.Engine.Features.GetActiveUsers;
 
 using System;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using Microsoft.AspNetCore.Builder;
@@ -8,6 +9,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Storage;
 
 public static class GetActiveUsersEndpoint
@@ -17,6 +19,8 @@ public static class GetActiveUsersEndpoint
         endpoints.MapGet("/api/v1/analytics/active", async (
             HttpContext context,
             GetActiveUsersQuery query,
+            QueryColumns columns,
+            MeasureRegistry measures,
             IOptions<TelemetryEngineOptions> options,
             CancellationToken cancellationToken) =>
         {
@@ -39,6 +43,10 @@ public static class GetActiveUsersEndpoint
                 toRaw: context.Request.Query["to"].ToString(),
                 tzRaw: context.Request.Query["tz"].ToString(),
                 trafficRaw: context.Request.Query["traffic"].ToString(),
+                eventType: context.Request.Query["eventType"].ToString(),
+                filtersRaw: context.Request.Query["filter"].ToArray().Where(v => v is not null).Select(v => v!).ToArray(),
+                columns: columns,
+                measures: measures,
                 maxLimit: engineOptions.MaxQueryLimit,
                 defaultRangeHours: engineOptions.DefaultSessionQueryRangeHours,
                 nowUtc: DateTime.UtcNow);
