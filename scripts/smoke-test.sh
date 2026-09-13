@@ -215,6 +215,10 @@ check "funnel/segmented"     "/api/v1/analytics/funnel?from=$FROM&to=$TO&step=sm
 check "breakdown/avg-measure"  "/api/v1/analytics/breakdown?from=$FROM&to=$TO&groupBy=event_type&metric=avg(m_uint32)"
 check "breakdown/p95-measure"  "/api/v1/analytics/breakdown?from=$FROM&to=$TO&groupBy=event_type&metric=p95(m_float64)"
 check "breakdown/sum-decimal"  "/api/v1/analytics/breakdown?from=$FROM&to=$TO&groupBy=event_type&metric=sum(m_decimal)"
+check "pivot"                  "/api/v1/analytics/pivot?from=$FROM&to=$TO&groupBy=event_type&metric=events:smoke&metric=sessions&metric=avg(m_uint32):smoke&metric=distinct(d_lowcard)"
+check "pivot/measure-filter"   "/api/v1/analytics/pivot?from=$FROM&to=$TO&groupBy=event_type&metric=events&filter=m_uint32>=0"
+check "distribution/measure"   "/api/v1/analytics/distribution?from=$FROM&to=$TO&of=m_uint32&eventType=smoke&buckets=1,10,100"
+check "distribution/sessions"  "/api/v1/analytics/distribution?from=$FROM&to=$TO&of=session_duration&quantiles=0.5,0.9"
 
 echo
 echo "Smoke test passed: every column type the engine can declare survives a real publish."

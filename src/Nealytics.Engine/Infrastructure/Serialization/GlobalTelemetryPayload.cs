@@ -9,6 +9,8 @@ using Nealytics.Engine.Features.GetEventTimeSeries;
 using Nealytics.Engine.Features.GetActiveUsers;
 using Nealytics.Engine.Features.GetTopEvents;
 using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Features.GetDistribution;
+using Nealytics.Engine.Features.GetPivot;
 using Nealytics.Engine.Features.GetFunnel;
 using Nealytics.Engine.Features.GetSchema;
 using Nealytics.Engine.Features.ValidateTelemetry;
@@ -108,6 +110,17 @@ public sealed class GlobalTelemetryPayload
 [JsonSerializable(typeof(List<FunnelStepResult>))]
 [JsonSerializable(typeof(List<FunnelSegment>))]
 [JsonSerializable(typeof(ValidateTelemetryResponse))]
+[JsonSerializable(typeof(PivotResponse))]
+[JsonSerializable(typeof(PivotRow))]
+[JsonSerializable(typeof(List<PivotRow>))]
+[JsonSerializable(typeof(PivotMetricDescriptor))]
+[JsonSerializable(typeof(List<PivotMetricDescriptor>))]
+[JsonSerializable(typeof(double[]))]
+[JsonSerializable(typeof(DistributionResponse))]
+[JsonSerializable(typeof(DistributionQuantile))]
+[JsonSerializable(typeof(List<DistributionQuantile>))]
+[JsonSerializable(typeof(DistributionBucket))]
+[JsonSerializable(typeof(List<DistributionBucket>))]
 public partial class TelemetryAotContext : JsonSerializerContext
 {
 }

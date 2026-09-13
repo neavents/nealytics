@@ -1,3 +1,4 @@
+using Nealytics.Engine.Infrastructure.Query;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Security.Claims;
@@ -51,6 +52,8 @@ public class EveryEndpointResolvesTests : IClassFixture<NoDatabaseWebFactory>
         "/api/v1/analytics/top?dimension=event_type&limit=5",
         "/api/v1/analytics/breakdown?groupBy=event_type&metric=events",
         "/api/v1/analytics/funnel?step=a&step=b",
+        "/api/v1/analytics/pivot?groupBy=event_type&metric=events&metric=sessions:view",
+        "/api/v1/analytics/distribution?of=session_duration",
         "/api/v1/schema",
     ];
 
@@ -104,7 +107,7 @@ public class EveryEndpointResolvesTests : IClassFixture<NoDatabaseWebFactory>
     [InlineData(typeof(Nealytics.Engine.Features.GetBreakdown.GetBreakdownQuery))]
     [InlineData(typeof(Nealytics.Engine.Features.GetFunnel.GetFunnelQuery))]
     [InlineData(typeof(Nealytics.Engine.Features.GetSchema.GetEventTypesQuery))]
-    [InlineData(typeof(Nealytics.Engine.Features.GetBreakdown.BreakdownColumns))]
+    [InlineData(typeof(Nealytics.Engine.Infrastructure.Query.QueryColumns))]
     [InlineData(typeof(Nealytics.Engine.Features.IngestTelemetry.DimensionSanitizer))]
     [InlineData(typeof(Nealytics.Engine.Features.IngestTelemetry.MeasureSanitizer))]
     [InlineData(typeof(Nealytics.Engine.Infrastructure.Configuration.DimensionRegistry))]
