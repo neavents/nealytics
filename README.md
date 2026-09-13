@@ -167,7 +167,7 @@ writes into a neighbour's data, and nothing objects. To close that:
 - **A pin naming a key that isn't in `AllowedProjectKeys` refuses the boot.** Dead security config
   is worse than none: in a review it reads as a control that is in force.
 
-Both endpoints are rate limited under the `"ingestion"` policy. You can tune the limits via [`RateLimitPermitCount`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs), [`RateLimitPermitCount`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs), and [`RateLimitPermitCount`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs).
+Both endpoints are rate limited under the `"ingestion"` policy. You can tune the limits with `RateLimitPermitCount`, `RateLimitWindowSeconds` and `RateLimitQueueSize` in [`TelemetryEngineOptions.cs`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs).
 
 ---
 
@@ -185,7 +185,7 @@ curl http://localhost:5000/api/v1/telemetry/timeline?limit=50 \
 ```
 
 Query params:
-- `limit` (default 100, max set by [`RateLimitPermitCount`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs))
+- `limit` (default 100, capped by `MaxQueryLimit`)
 - `before` (ISO 8601 timestamp), cursor for backward pagination; returns events strictly older than this value
 - `eventType`, `sessionId`, `objectId`, optional exact match filters (each ≤ 256 chars), applied on top of the tenant scope
 - `metaKey` + `metaValue`, optional metadata filter (both required together, each ≤ 256 chars). Matches events where `JSONExtractString(metadata_json, metaKey) = metaValue`. Note: `metadata_json` is unindexed, so this is a full scan over the time range, prefer narrowing with `before`/filters. Both are passed as parameters (never interpolated).
@@ -238,8 +238,10 @@ curl "http://localhost:5000/api/v1/analytics/sessions?from=2024-01-01T00:00:00Z&
 ```
 
 Query params:
-- `from` / `to` (ISO 8601, defaults to last 24 hours, configurable via [`RateLimitPermitCount`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs))
+- `from` / `to` (ISO 8601, defaults to the last `DefaultSessionQueryRangeHours` hours)
 - `limit` (default 100)
+- `traffic`, `normal` (default), `bot`, `internal` or `all`. Bots used to be counted as visits here.
+- `filter`, repeatable, the same grammar as `/breakdown`. A session counts when any of its events matches.
 
 Response:
 
@@ -410,13 +412,109 @@ rather than suspect. That is what `breakdownBy` is for, and why it takes a decla
 
 ---
 
+### GET `/api/v1/analytics/pivot`
+
+Several metrics per group, each scoped to its own event type, in one read. This is the query a
+leaderboard is actually made of: impressions, opens and average read time per item are three
+questions about the same key, and asking them as three breakdowns costs three scans and a join in
+the client.
+
+```bash
+curl "http://localhost:5000/api/v1/analytics/pivot\
+?groupBy=object_id\
+&metric=events:item_impression&metric=sessions:item_view&metric=avg(dwell_ms):item_dwell&metric=distinct(locale)\
+&orderBy=1&from=2026-06-01T00:00:00Z&to=2026-07-01T00:00:00Z" \
+  -H "Authorization: Bearer <your-jwt>"
+```
+
+Query params:
+- `groupBy`, any core column or declared dimension, as for `/breakdown`.
+- `metric`, repeated, **1 to 12**. Each is `events`, `sessions`, `users`, `distinct(<column>)` or an
+  aggregation over a declared measure such as `avg(dwell_ms)`, optionally scoped to one event type
+  with `:event_type`. `sessions:item_view` is "distinct sessions that opened an item"; `sessions` is
+  every session in scope.
+- `orderBy`, the index of a metric (default `0`) or `key`; `order`, `desc` (default) or `asc`.
+- `filter`, `traffic`, `from` / `to`, `limit`, `mode=approx`, `exact=true` as for `/breakdown`.
+
+```json
+{
+  "groupBy": "object_id",
+  "metrics": [
+    { "spec": "events:item_impression", "grain": "event", "eventType": "item_impression" },
+    { "spec": "sessions:item_view", "grain": "session", "eventType": "item_view" }
+  ],
+  "source": "rollup:daily_by_object",
+  "totals": [48210, 3902],
+  "groupCount": 143,
+  "truncated": true,
+  "rows": [ { "key": "01J...", "values": [4120, 611] } ]
+}
+```
+
+`totals` is each metric over everything in scope, not the sum of the returned rows, so a distinct
+count and an average stay meaningful when the list is cut. A pivot routes to a rollup under the same
+rules as a breakdown, with one more: every metric's event type has to be stored there, and an
+unscoped metric only routes to a rollup that aggregates every event type.
+
+### GET `/api/v1/analytics/distribution`
+
+How a quantity is spread, not just its average. Quantiles and a histogram of a declared measure, of
+session length, or of events per session.
+
+```bash
+curl "http://localhost:5000/api/v1/analytics/distribution\
+?of=dwell_ms&eventType=item_dwell&quantiles=0.5,0.9,0.95&buckets=3000,10000,30000,60000\
+&from=2026-06-01T00:00:00Z&to=2026-07-01T00:00:00Z" \
+  -H "Authorization: Bearer <your-jwt>"
+```
+
+Query params:
+- `of`, a declared measure, `session_duration` (milliseconds between a session's first and last
+  event) or `session_events`.
+- `eventType`, which events' values to read. Only for a measure: a session is every event it holds.
+- `quantiles`, up to 8 values in `[0, 1]`, default `0.5,0.75,0.9,0.95`.
+- `buckets`, up to 32 ascending edges. The response has one bucket more than edges: below the first,
+  between each pair, and from the last upward.
+- `mode=approx` switches from `quantilesExact` to `quantilesTDigest`, which holds a fixed amount of
+  memory whatever the row count.
+- `filter`, `traffic`, `from` / `to` as elsewhere.
+
+```json
+{
+  "of": "session_duration", "unit": "ms", "mode": "exact",
+  "count": 1832, "min": 1004, "max": 1799213, "avg": 94210.6,
+  "quantiles": [ { "q": 0.5, "value": 41230 }, { "q": 0.9, "value": 301220 } ],
+  "buckets": [
+    { "from": null, "to": 10000, "count": 412 },
+    { "from": 10000, "to": 60000, "count": 690 },
+    { "from": 60000, "to": null, "count": 730 }
+  ]
+}
+```
+
+The median is the number to put on a dashboard. A mean session length is dragged around by the one
+tab somebody left open through dinner; the distribution shows that tab as the tail it is.
+
+### Filters
+
+Every read that takes `filter` takes it in the same grammar, repeated as often as needed:
+
+| Form | Meaning |
+|---|---|
+| `filter=column:value` | a core column or declared dimension equals `value`. Split on the first colon only, so `page_path:/a?x=1:2` keeps its value whole. |
+| `filter=measure>=number` | a declared measure compared with `=`, `!=`, `<`, `<=`, `>` or `>=`. `result_count=0` is every search that found nothing. |
+
+Column names are matched against the allowlist and never reach the SQL as caller text; values are
+bound parameters. A request carrying a measure comparison is answered from the raw table, since a
+rollup holds aggregates rather than the rows the comparison is about.
+
 ## Authentication
 
 The write path and read path use completely different auth mechanisms. This is by design.
 
-**Write path (ingestion):** API keys. Comma separated list in [`RateLimitPermitCount`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs). Validated against a `FrozenSet<string>` for O(1) exact match lookups. No substring matching, no wildcards. Pass the key via `X-Project-Key` header or `?k=` query param.
+**Write path (ingestion):** API keys. Comma separated list in `AllowedProjectKeys`. Validated against a `FrozenSet<string>` for O(1) exact match lookups. No substring matching, no wildcards. Pass the key via `X-Project-Key` header or `?k=` query param.
 
-**Read path (queries):** JWT Bearer tokens. The engine validates the signature using the symmetric key in [`RateLimitPermitCount`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs) and extracts `project_id` and `tenant_id` from the token claims. These claims become mandatory WHERE filters on every query. There's no way to read another project's data even if you have a valid token.
+**Read path (queries):** JWT Bearer tokens. The engine validates the signature using the symmetric key in `JwtSymmetricKey` and extracts `project_id` and `tenant_id` from the token claims. These claims become mandatory WHERE filters on every query. There's no way to read another project's data even if you have a valid token.
 
 The engine does not have a login endpoint, a user database, or any identity management. You bring your own auth service, mint JWTs with the right claims, and hand them to your frontend. Nealytics stays focused on analytics.
 
@@ -442,7 +540,7 @@ Everything below is the deep dive. How things actually work under the hood.
 
 Every setting is an environment variable prefixed with `TelemetryEngine__`. You can also set them in [`appsettings.json`](src/Nealytics.Engine/appsettings.json) under the `TelemetryEngine` section. Environment variables take precedence.
 
-Full source: [`RateLimitPermitCount`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs)
+Full source: [`TelemetryEngineOptions.cs`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs)
 
 ### Declared schema
 
@@ -500,6 +598,7 @@ which is the only way to answer someone disputing a figure.
 | `Rollups__N__EventTypes` | _(all)_ | Comma separated. Empty means every event type. |
 | `Rollups__N__Dimensions` | _(none)_ | Comma separated declared dimensions to group by. |
 | `Rollups__N__Measures` | _(none)_ | Comma separated `measure:aggregation`, e.g. `dwell_ms:sum,dwell_ms:avg`. Percentiles are refused, they stay on the raw table. |
+| `BackfillRollups` | `true` | Aggregate the existing raw rows into a rollup when it is created. |
 
 #### Session rollups
 
@@ -563,26 +662,24 @@ A rollup answers a request only when all of these hold, and falls back to raw ot
   will never answer a request that spans all of them, because it would undercount.
 - For a measure metric, that exact `measure:aggregation` pair is stored. Percentiles never route.
 
-When several rollups match, the one with the fewest grouping columns wins. A rollup **aggregates from the moment it is created**, existing
-rows are not backfilled, which the startup log says explicitly. Changing a rollup's shape is not
-done by editing it: the engine leaves an existing rollup alone and warns, because recreating the
-view would start aggregating a new shape while every stored row kept the old one.
+When several rollups match, the one with the fewest grouping columns wins.
+
+**A new rollup is backfilled.** When the engine creates a rollup it also aggregates every row already
+in the source table into it, one partition at a time, before it serves traffic. Without that a
+day-aligned 30 day window would route to a rollup three days old and read low for 27 of those days
+while looking healthy. Set `BackfillRollups` to `false` to skip it on a deployment whose raw table is
+too large to sweep at boot; the rollup then aggregates forward only, and the log says so.
+
+**Every rollup is keyed on `traffic_class`.** Reads exclude bots by default, and a rollup that did
+not store the class could only have answered `traffic=all`. Existing rollups created before this
+key existed no longer match their declared shape, which the next point covers.
+
+**A rollup whose stored shape differs from its declaration is never routed to.** The engine leaves
+it alone, logs the drift and answers from raw until it is dropped. Drop the view and the table
+deliberately, and the next start recreates and backfills it; recreating it under your feet would
+aggregate a new shape while every stored row kept the old one.
 
 Past a handful of entries, declare them in a file instead, `TelemetryEngine__SchemaFile=/etc/nealytics/schema.json`,
-whose root is a `TelemetryEngine` section. It is the same configuration system, one more provider,
-so an environment variable still overrides anything in it. See
-[from, to)`.
-- The `groupBy` column and every `filter` column are stored in that rollup.
-- The request names an event type the rollup aggregated. A rollup restricted to some event types
-  will never answer a request that spans all of them, because it would undercount.
-- For a measure metric, that exact `measure:aggregation` pair is stored. Percentiles never route.
-
-When several rollups match, the one with the fewest grouping columns wins. A rollup **aggregates from the moment it is created** — existing
-rows are not backfilled, which the startup log says explicitly. Changing a rollup's shape is not
-done by editing it: the engine leaves an existing rollup alone and warns, because recreating the
-view would start aggregating a new shape while every stored row kept the old one.
-
-Past a handful of entries, declare them in a file instead — `TelemetryEngine__SchemaFile=/etc/nealytics/schema.json`,
 whose root is a `TelemetryEngine` section. It is the same configuration system, one more provider,
 so an environment variable still overrides anything in it. See
 [`neavents-schema.example.json`](neavents-schema.example.json).
@@ -907,6 +1004,44 @@ The [`Dockerfile`](Dockerfile) uses a multi stage build:
 The container runs as a non root `nealytics` user. The WAL directory (`/app/logs/`) is pre created
 with the right ownership.
 
+### Container image
+
+Every push to `main` publishes `ghcr.io/neavents/nealytics:main` and `:sha-<commit>`; every release
+tag publishes `ghcr.io/neavents/nealytics:<tag>` and `:latest`. Both are multi arch, `linux/amd64`
+and `linux/arm64`, built from the same [`Dockerfile`](Dockerfile) and only after the unit,
+integration and smoke suites have passed on that commit.
+
+```bash
+docker run --rm -p 5000:5000 \
+  -e TelemetryEngine__ClickHouseConnectionString="Host=clickhouse;Port=9000;Database=nealytics_core;" \
+  -e TelemetryEngine__JwtSymmetricKey="replace_this_please_with_32_bytes_or_more" \
+  -e TelemetryEngine__AllowedProjectKeys="myapp:mykey123" \
+  -v nealytics-wal:/app/logs \
+  ghcr.io/neavents/nealytics:latest
+```
+
+### Running it on Kubernetes
+
+Three things decide whether the engine is durable there, and none of them is a probe:
+
+- **`/app/logs` needs a volume.** It is the write ahead log. On an ephemeral filesystem a pod
+  restart loses every event accepted since the last batch commit, and the `202` those events got
+  was a promise the engine can no longer keep. One `ReadWriteOnce` claim per replica, so run it as a
+  `StatefulSet` with a `volumeClaimTemplate` when there is more than one replica; a `Deployment`
+  sharing one claim would have two processes appending to one file.
+- **Recreate, not rolling, when the WAL claim is `ReadWriteOnce`.** The new pod cannot mount the
+  volume the old one still holds; a rolling update stalls on `Pending` and looks like a crash.
+- **Start the engine after ClickHouse answers.** The schema reconciler runs at boot; if ClickHouse
+  is unreachable the engine logs it and serves anyway, without the declared columns. An
+  `initContainer` that waits on `http://<clickhouse>:8123/ping` closes that window without putting
+  a dependency into the readiness probe, which would take every replica out of rotation when the
+  database blinks.
+
+Use `/health` for liveness and readiness and `/ready` for alerting. Give ClickHouse its own
+`config.d` with `max_server_memory_usage_to_ram_ratio` set for the pod's limit and a TTL on the
+`system.*_log` tables; an unconstrained `query_log` is the usual way a small analytics node fills its
+disk.
+
 ### Why it is not compiled ahead of time
 
 Short version: it was, and it silently threw away every event.
@@ -958,6 +1093,15 @@ src/Nealytics.Engine/
       GetFunnelEndpoint.cs                # GET /api/v1/analytics/funnel
       GetFunnelQuery.cs                   # windowFunnel over toDateTime(timestamp), ordered by seq
       FunnelRequestFactory.cs             # Step/grain/window parsing (pure, testable)
+    GetPivot/
+      GetPivotEndpoint.cs                 # GET /api/v1/analytics/pivot
+      GetPivotQuery.cs                    # N scoped aggregates per key, raw or -MergeIf over a rollup
+      PivotRequestFactory.cs              # metric spec parsing (pure, testable)
+      PivotRollupPlanner.cs               # which rollup can answer every metric at once
+    GetDistribution/
+      GetDistributionEndpoint.cs          # GET /api/v1/analytics/distribution
+      GetDistributionQuery.cs             # quantiles + histogram of a measure or a session property
+      DistributionRequestFactory.cs       # subject/quantile/edge parsing (pure, testable)
     GetSchema/
       GetSchemaEndpoint.cs                # GET /api/v1/schema, what THIS deployment collects
       GetEventTypesQuery.cs               # Cached event-type census, degrades to unavailable
@@ -1002,6 +1146,10 @@ src/Nealytics.Engine/
   Infrastructure/
     Configuration/
       TelemetryEngineOptions.cs           # All settings, env configurable
+    Query/
+      QueryColumns.cs                     # The groupBy/filter allowlist: core columns + active dimensions
+      FilterParser.cs                     # column:value and measure<op>number, one grammar for every read
+      ScopeClause.cs                      # tenant/time/traffic/eventType/filter WHERE for raw and rollup reads
     Diagnostics/
       TelemetryDiagnostics.cs             # Metrics and tracing
     Security/
