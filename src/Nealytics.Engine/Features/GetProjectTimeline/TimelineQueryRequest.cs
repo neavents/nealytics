@@ -8,6 +8,7 @@ public readonly struct TimelineQueryRequest
     public string TenantId { get; init; }
     public int Limit { get; init; }
     public DateTime? Before { get; init; }
+    public DateTime NotBefore { get; init; }
     public string? EventType { get; init; }
     public string? SessionId { get; init; }
     public string? ObjectId { get; init; }

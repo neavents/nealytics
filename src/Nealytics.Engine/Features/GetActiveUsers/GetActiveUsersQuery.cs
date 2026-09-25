@@ -17,13 +17,16 @@ using Octonica.ClickHouseClient;
 public sealed partial class GetActiveUsersQuery
 {
     private readonly ClickHouseConnectionFactory _connectionFactory;
+    private readonly QueryGuard _guard;
     private readonly ILogger<GetActiveUsersQuery> _logger;
 
     public GetActiveUsersQuery(
         ClickHouseConnectionFactory connectionFactory,
+        QueryGuard guard,
         ILogger<GetActiveUsersQuery> logger)
     {
         _connectionFactory = connectionFactory;
+        _guard = guard;
         _logger = logger;
     }
 
@@ -86,7 +89,7 @@ public sealed partial class GetActiveUsersQuery
                 await _connectionFactory.AcquireAsync(cancellationToken);
 
             await using ClickHouseCommand command = lease.Connection.CreateCommand();
-            command.CommandText = sqlCommandText;
+            command.CommandText = _guard.Limit(sqlCommandText);
 
             foreach (KeyValuePair<string, object?> parameter in parameters)
             {

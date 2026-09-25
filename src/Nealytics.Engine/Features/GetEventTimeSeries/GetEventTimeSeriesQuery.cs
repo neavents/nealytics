@@ -19,13 +19,16 @@ using Octonica.ClickHouseClient;
 public sealed partial class GetEventTimeSeriesQuery
 {
     private readonly ClickHouseConnectionFactory _connectionFactory;
+    private readonly QueryGuard _guard;
     private readonly ILogger<GetEventTimeSeriesQuery> _logger;
 
     public GetEventTimeSeriesQuery(
         ClickHouseConnectionFactory connectionFactory,
+        QueryGuard guard,
         ILogger<GetEventTimeSeriesQuery> logger)
     {
         _connectionFactory = connectionFactory;
+        _guard = guard;
         _logger = logger;
     }
 
@@ -98,7 +101,7 @@ public sealed partial class GetEventTimeSeriesQuery
                 await _connectionFactory.AcquireAsync(cancellationToken);
 
             await using ClickHouseCommand command = lease.Connection.CreateCommand();
-            command.CommandText = sqlCommandText;
+            command.CommandText = _guard.Limit(sqlCommandText);
 
             foreach (KeyValuePair<string, object?> parameter in parameters)
             {

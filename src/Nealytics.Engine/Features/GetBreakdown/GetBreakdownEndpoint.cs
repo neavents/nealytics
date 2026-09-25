@@ -21,6 +21,7 @@ public static class GetBreakdownEndpoint
             QueryColumns columns,
             MeasureRegistry measures,
             IOptions<TelemetryEngineOptions> options,
+            QueryGuard guard,
             CancellationToken cancellationToken) =>
         {
             ClaimsPrincipal user = context.User;
@@ -52,6 +53,11 @@ public static class GetBreakdownEndpoint
                 return parsed.ErrorStatusCode == BreakdownRequestFactory.StatusForbidden
                     ? Results.Forbid()
                     : Results.BadRequest(parsed.ErrorMessage);
+            }
+
+            if (!guard.Admits(parsed.Request.From, parsed.Request.To))
+            {
+                return guard.RejectRange(parsed.Request.From, parsed.Request.To);
             }
 
             BreakdownResponse response = await query.ExecuteAsync(parsed.Request, cancellationToken);

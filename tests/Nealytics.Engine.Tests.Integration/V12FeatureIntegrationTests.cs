@@ -182,7 +182,7 @@ public class V12FeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
         await Task.Delay(4000);
 
         JsonElement body = await Get(projectId, tenantId,
-            "/api/v1/analytics/timeseries?from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&interval=day&groupBy=event_type");
+            "/api/v1/analytics/timeseries?" + ClickHouseTestSupport.RecentRange + "&interval=day&groupBy=event_type");
 
         JsonElement points = body.GetProperty("points");
         Dictionary<string, long> bySeries = new Dictionary<string, long>();
@@ -207,7 +207,7 @@ public class V12FeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
         await Task.Delay(4000);
 
         JsonElement body = await Get(projectId, tenantId,
-            "/api/v1/analytics/timeseries?from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&interval=day");
+            "/api/v1/analytics/timeseries?" + ClickHouseTestSupport.RecentRange + "&interval=day");
 
         JsonElement first = body.GetProperty("points")[0];
         (first.TryGetProperty("series", out JsonElement series) == false || series.ValueKind == JsonValueKind.Null)
@@ -258,7 +258,7 @@ public class V12FeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
         await Task.Delay(4000);
 
         JsonElement body = await Get(projectId, tenantId,
-            "/api/v1/analytics/top?dimension=event_type&from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&limit=10");
+            "/api/v1/analytics/top?dimension=event_type&" + ClickHouseTestSupport.RecentRange + "&limit=10");
 
         JsonElement items = body.GetProperty("items");
         items.GetArrayLength().Should().Be(3);
@@ -281,7 +281,7 @@ public class V12FeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
         await Task.Delay(4000);
 
         JsonElement body = await Get(projectId, tenantId,
-            "/api/v1/analytics/top?dimension=object_id&from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z");
+            "/api/v1/analytics/top?dimension=object_id&" + ClickHouseTestSupport.RecentRange);
 
         JsonElement items = body.GetProperty("items");
         items.GetArrayLength().Should().Be(1, "the NULL object_id row must be excluded");
@@ -302,7 +302,7 @@ public class V12FeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
         await Task.Delay(4000);
 
         JsonElement body = await Get(projectId, tenantA,
-            "/api/v1/analytics/top?from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z");
+            "/api/v1/analytics/top?" + ClickHouseTestSupport.RecentRange);
 
         foreach (JsonElement item in body.GetProperty("items").EnumerateArray())
         {

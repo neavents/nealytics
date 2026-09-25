@@ -100,7 +100,7 @@ public class FeatureQueryIntegrationTests : IntegrationTestBase, IAsyncLifetime
         string jwt = GetJwt(projectId, tenantId);
         Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {jwt}");
         HttpResponseMessage response = await Client.GetAsync(
-            "/api/v1/analytics/timeseries?from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&interval=day");
+            "/api/v1/analytics/timeseries?" + ClickHouseTestSupport.RecentRange + "&interval=day");
         Client.DefaultRequestHeaders.Remove("Authorization");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -128,7 +128,7 @@ public class FeatureQueryIntegrationTests : IntegrationTestBase, IAsyncLifetime
         string jwt = GetJwt(projectId, tenantId);
         Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {jwt}");
         HttpResponseMessage response = await Client.GetAsync(
-            "/api/v1/analytics/timeseries?from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&interval=hour&eventType=login");
+            "/api/v1/analytics/timeseries?" + ClickHouseTestSupport.RecentRange + "&interval=hour&eventType=login");
         Client.DefaultRequestHeaders.Remove("Authorization");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);

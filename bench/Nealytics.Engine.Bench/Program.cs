@@ -219,6 +219,13 @@ async Task<bool> SendOneAsync(HttpClient c, BenchOptions opt, string tenant, lon
     }
 }
 
+static string Window(int offsetSeconds)
+{
+    DateTime to = DateTime.UtcNow.Date.AddDays(1).AddSeconds(offsetSeconds);
+    DateTime from = to.AddDays(-90);
+    return string.Create(CultureInfo.InvariantCulture, $"from={from:yyyy-MM-ddTHH:mm:ssZ}&to={to:yyyy-MM-ddTHH:mm:ssZ}");
+}
+
 // The read URLs live in one place because the preflight source check below has to interrogate the
 // exact query the benchmark then runs. Two copies would drift, and a preflight that verifies a
 // different query than the hot loop measures is worse than no preflight at all.
@@ -231,13 +238,13 @@ async Task<bool> SendOneAsync(HttpClient c, BenchOptions opt, string tenant, lon
 static string ReadUrl(string mode) => mode switch
 {
     "timeline" => "/api/v1/telemetry/timeline?limit=100",
-    "timeseries" => "/api/v1/analytics/timeseries?from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&interval=day",
-    "active" => "/api/v1/analytics/active?interval=day&by=user&from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z",
-    "top" => "/api/v1/analytics/top?from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z",
-    "breakdown" => "/api/v1/analytics/breakdown?groupBy=product_id&metric=events&eventType=bench&from=2026-01-01T00:00:01Z&to=2026-12-31T00:00:01Z&limit=100",
-    "breakdown-rollup" => "/api/v1/analytics/breakdown?groupBy=product_id&metric=events&eventType=bench&from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&limit=100",
-    "breakdown-measure" => "/api/v1/analytics/breakdown?groupBy=product_id&metric=sum(amount)&eventType=bench&from=2026-01-01T00:00:01Z&to=2026-12-31T00:00:01Z&limit=100",
-    "breakdown-measure-rollup" => "/api/v1/analytics/breakdown?groupBy=product_id&metric=sum(amount)&eventType=bench&from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&limit=100",
+    "timeseries" => $"/api/v1/analytics/timeseries?{Window(0)}&interval=day",
+    "active" => $"/api/v1/analytics/active?interval=day&by=user&{Window(0)}",
+    "top" => $"/api/v1/analytics/top?{Window(0)}",
+    "breakdown" => $"/api/v1/analytics/breakdown?groupBy=product_id&metric=events&eventType=bench&{Window(1)}&limit=100",
+    "breakdown-rollup" => $"/api/v1/analytics/breakdown?groupBy=product_id&metric=events&eventType=bench&{Window(0)}&limit=100",
+    "breakdown-measure" => $"/api/v1/analytics/breakdown?groupBy=product_id&metric=sum(amount)&eventType=bench&{Window(1)}&limit=100",
+    "breakdown-measure-rollup" => $"/api/v1/analytics/breakdown?groupBy=product_id&metric=sum(amount)&eventType=bench&{Window(0)}&limit=100",
     _ => throw new InvalidOperationException($"Unknown mode '{mode}'.")
 };
 
@@ -247,8 +254,8 @@ static string ReadUrl(string mode) => mode switch
 static string? ExpectedSource(string mode) => mode switch
 {
     "breakdown" or "breakdown-measure" => "raw",
-    "breakdown-rollup" => "rollup:",
-    "breakdown-measure-rollup" => "rollup:",
+    "breakdown-rollup" => $"rollup:",
+    "breakdown-measure-rollup" => $"rollup:",
     _ => null
 };
 

@@ -49,7 +49,7 @@ public class PivotAndDistributionIntegrationTests : IntegrationTestBase, IAsyncL
         return JsonSerializer.Deserialize<JsonElement>(body);
     }
 
-    private const string Range = "&from=2020-01-01T00:00:00Z&to=2099-01-01T00:00:00Z";
+    private static readonly string Range = "&" + ClickHouseTestSupport.RecentRange;
 
     private static async Task SettleAsync() => await Task.Delay(2500);
 

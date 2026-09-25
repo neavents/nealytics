@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Storage;
 using Octonica.ClickHouseClient;
 
@@ -19,6 +20,7 @@ public sealed class GetColumnPopulationQuery
     private static readonly TimeSpan CacheLifetime = TimeSpan.FromMinutes(5);
 
     private readonly ClickHouseConnectionFactory _connectionFactory;
+    private readonly QueryGuard _guard;
     private readonly DimensionRegistry _dimensions;
     private readonly MeasureRegistry _measures;
 
@@ -27,10 +29,12 @@ public sealed class GetColumnPopulationQuery
 
     public GetColumnPopulationQuery(
         ClickHouseConnectionFactory connectionFactory,
+        QueryGuard guard,
         DimensionRegistry dimensions,
         MeasureRegistry measures)
     {
         _connectionFactory = connectionFactory;
+        _guard = guard;
         _dimensions = dimensions;
         _measures = measures;
     }
@@ -91,7 +95,7 @@ public sealed class GetColumnPopulationQuery
             await _connectionFactory.AcquireAsync(cancellationToken);
 
         await using ClickHouseCommand command = lease.Connection.CreateCommand();
-        command.CommandText = sql;
+        command.CommandText = _guard.Limit(sql);
         command.Parameters.Add(new ClickHouseParameter { ParameterName = "projectId", Value = projectId });
         command.Parameters.Add(new ClickHouseParameter { ParameterName = "tenantId", Value = tenantId });
         command.Parameters.Add(new ClickHouseParameter

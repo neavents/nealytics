@@ -136,7 +136,7 @@ public class MoreFeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
         await Task.Delay(4000);
 
         JsonElement bodyA = await GetJson(
-            "/api/v1/analytics/timeseries?from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&interval=day", "p-tsiso", tenantA);
+            "/api/v1/analytics/timeseries?" + ClickHouseTestSupport.RecentRange + "&interval=day", "p-tsiso", tenantA);
         bodyA.GetProperty("totalCount").GetInt64().Should().Be(2, "tenant A only sees its own events");
     }
 
@@ -150,7 +150,7 @@ public class MoreFeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
         await Task.Delay(4000);
 
         JsonElement bodyA = await GetJson(
-            "/api/v1/analytics/sessions?from=2020-01-01T00:00:00Z&to=2030-01-01T00:00:00Z", "p-siso", tenantA);
+            "/api/v1/analytics/sessions?" + ClickHouseTestSupport.RecentRange, "p-siso", tenantA);
         bodyA.GetProperty("uniqueSessionCount").GetInt32().Should().Be(1, "tenant A only sees its own session");
     }
 
@@ -163,7 +163,7 @@ public class MoreFeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
         await Task.Delay(4000);
 
         JsonElement body = await GetJson(
-            "/api/v1/analytics/timeseries?from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&interval=minute", "p-min", tenantId);
+            "/api/v1/analytics/timeseries?" + ClickHouseTestSupport.RecentRange + "&interval=minute", "p-min", tenantId);
         body.GetProperty("interval").GetString().Should().Be("minute");
         body.GetProperty("totalCount").GetInt64().Should().Be(2);
         body.GetProperty("points").GetArrayLength().Should().BeGreaterThanOrEqualTo(1);

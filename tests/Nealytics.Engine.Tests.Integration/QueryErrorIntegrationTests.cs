@@ -1,3 +1,4 @@
+using Nealytics.Engine.Infrastructure.Query;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -42,7 +43,7 @@ public class QueryErrorIntegrationTests
         TelemetryEngineOptions emptySchema = new();
         DimensionRegistry dimensions = new(emptySchema);
         GetProjectTimelineQuery query = new GetProjectTimelineQuery(
-            factory, dimensions, new MeasureRegistry(emptySchema, dimensions),
+            factory, new QueryGuard(new TelemetryEngineOptions()), dimensions, new MeasureRegistry(emptySchema, dimensions),
             NullLogger<GetProjectTimelineQuery>.Instance);
         TimelineQueryRequest request = new TimelineQueryRequest { ProjectId = "p", TenantId = "t", Limit = 10 };
 
@@ -56,7 +57,7 @@ public class QueryErrorIntegrationTests
     {
         await using ClickHouseConnectionFactory factory = UnreachableFactory();
         GetSessionAnalyticsQuery query = new GetSessionAnalyticsQuery(
-            factory, NoRollups(), NullLogger<GetSessionAnalyticsQuery>.Instance);
+            factory, new QueryGuard(new TelemetryEngineOptions()), NoRollups(), NullLogger<GetSessionAnalyticsQuery>.Instance);
         SessionAnalyticsRequest request = new SessionAnalyticsRequest
         {
             ProjectId = "p",
@@ -75,7 +76,7 @@ public class QueryErrorIntegrationTests
     public async Task TimeSeriesQuery_WhenClickHouseUnreachable_PropagatesException()
     {
         await using ClickHouseConnectionFactory factory = UnreachableFactory();
-        GetEventTimeSeriesQuery query = new GetEventTimeSeriesQuery(factory, NullLogger<GetEventTimeSeriesQuery>.Instance);
+        GetEventTimeSeriesQuery query = new GetEventTimeSeriesQuery(factory, new QueryGuard(new TelemetryEngineOptions()), NullLogger<GetEventTimeSeriesQuery>.Instance);
         EventTimeSeriesRequest request = new EventTimeSeriesRequest
         {
             ProjectId = "p",

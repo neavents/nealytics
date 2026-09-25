@@ -21,6 +21,7 @@ public static class GetSessionAnalyticsEndpoint
             QueryColumns columns,
             MeasureRegistry measures,
             IOptions<TelemetryEngineOptions> options,
+            QueryGuard guard,
             CancellationToken cancellationToken) =>
         {
             ClaimsPrincipal user = context.User;
@@ -45,6 +46,11 @@ public static class GetSessionAnalyticsEndpoint
                 return parsed.ErrorStatusCode == SessionAnalyticsRequestFactory.StatusForbidden
                     ? Results.Forbid()
                     : Results.BadRequest(parsed.ErrorMessage);
+            }
+
+            if (!guard.Admits(parsed.Request.From, parsed.Request.To))
+            {
+                return guard.RejectRange(parsed.Request.From, parsed.Request.To);
             }
 
             SessionAnalyticsResponse response = await query.ExecuteAsync(parsed.Request, cancellationToken);

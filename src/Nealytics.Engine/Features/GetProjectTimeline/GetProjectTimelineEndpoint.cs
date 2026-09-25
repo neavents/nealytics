@@ -1,5 +1,6 @@
 namespace Nealytics.Engine.Features.GetProjectTimeline;
 
+using System;
 using System.Security.Claims;
 using System.Threading;
 using Microsoft.AspNetCore.Builder;
@@ -7,6 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 
 public static class GetProjectTimelineEndpoint
 {
@@ -15,6 +17,7 @@ public static class GetProjectTimelineEndpoint
         endpoints.MapGet("/api/v1/telemetry/timeline", async (
             HttpContext context,
             GetProjectTimelineQuery query,
+            QueryGuard guard,
             IOptions<TelemetryEngineOptions> options,
             CancellationToken cancellationToken) =>
         {
@@ -30,7 +33,9 @@ public static class GetProjectTimelineEndpoint
                 context.Request.Query["objectId"].ToString(),
                 context.Request.Query["metaKey"].ToString(),
                 context.Request.Query["metaValue"].ToString(),
-                options.Value.MaxQueryLimit);
+                options.Value.MaxQueryLimit,
+                guard.MaxRange,
+                DateTime.UtcNow);
 
             if (!parsed.Success)
             {

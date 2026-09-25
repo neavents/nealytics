@@ -26,15 +26,18 @@ using Octonica.ClickHouseClient;
 public sealed partial class GetBreakdownQuery
 {
     private readonly ClickHouseConnectionFactory _connectionFactory;
+    private readonly QueryGuard _guard;
     private readonly RollupRegistry _rollups;
     private readonly ILogger<GetBreakdownQuery> _logger;
 
     public GetBreakdownQuery(
         ClickHouseConnectionFactory connectionFactory,
+        QueryGuard guard,
         RollupRegistry rollups,
         ILogger<GetBreakdownQuery> logger)
     {
         _connectionFactory = connectionFactory;
+        _guard = guard;
         _rollups = rollups;
         _logger = logger;
     }
@@ -156,7 +159,7 @@ public sealed partial class GetBreakdownQuery
                 await _connectionFactory.AcquireAsync(cancellationToken);
 
             await using ClickHouseCommand command = lease.Connection.CreateCommand();
-            command.CommandText = sqlCommandText;
+            command.CommandText = _guard.Limit(sqlCommandText);
 
             foreach (KeyValuePair<string, object?> parameter in parameters)
             {

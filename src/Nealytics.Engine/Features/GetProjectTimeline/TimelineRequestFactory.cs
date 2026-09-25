@@ -39,7 +39,9 @@ public static class TimelineRequestFactory
         string? objectId,
         string? metaKey,
         string? metaValue,
-        int maxLimit)
+        int maxLimit,
+        TimeSpan maxRange,
+        DateTime nowUtc)
     {
         if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(tenantId))
         {
@@ -61,7 +63,7 @@ public static class TimelineRequestFactory
         if (!string.IsNullOrEmpty(beforeRaw)
             && DateTime.TryParse(beforeRaw, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTime parsedCursor))
         {
-            cursor = parsedCursor;
+            cursor = parsedCursor.Kind == DateTimeKind.Local ? parsedCursor.ToUniversalTime() : parsedCursor;
         }
 
         string? normalizedEventType = Normalize(eventType);
@@ -87,6 +89,7 @@ public static class TimelineRequestFactory
             TenantId = tenantId,
             Limit = limit,
             Before = cursor,
+            NotBefore = (cursor ?? nowUtc) - maxRange,
             EventType = normalizedEventType,
             SessionId = normalizedSessionId,
             ObjectId = normalizedObjectId,

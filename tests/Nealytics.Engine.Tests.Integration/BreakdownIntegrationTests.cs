@@ -66,7 +66,7 @@ public class BreakdownIntegrationTests : IntegrationTestBase, IAsyncLifetime
     }
 
     private static string Range() =>
-        "&from=2020-01-01T00:00:00Z&to=2099-01-01T00:00:00Z";
+        "&" + ClickHouseTestSupport.RecentRange;
 
     private static async Task SettleAsync() => await Task.Delay(2500);
 

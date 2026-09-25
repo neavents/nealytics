@@ -144,6 +144,8 @@ public sealed class TelemetryEngineOptions
     public int MaxInsertRetries { get; set; } = 5;
     public int RetryBackoffCeilingMs { get; set; } = 30_000;
     public int DefaultSessionQueryRangeHours { get; set; } = 24;
+    public int MaxQueryRangeDays { get; set; } = 92;
+    public int QueryExecutionTimeoutSeconds { get; set; } = 30;
     public int ConnectionPoolSize { get; set; } = 16;
 
     /// <summary>

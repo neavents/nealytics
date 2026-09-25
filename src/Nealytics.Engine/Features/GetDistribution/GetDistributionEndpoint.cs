@@ -21,6 +21,7 @@ public static class GetDistributionEndpoint
             QueryColumns columns,
             MeasureRegistry measures,
             IOptions<TelemetryEngineOptions> options,
+            QueryGuard guard,
             CancellationToken cancellationToken) =>
         {
             ClaimsPrincipal user = context.User;
@@ -48,6 +49,11 @@ public static class GetDistributionEndpoint
                 return parsed.ErrorStatusCode == DistributionRequestFactory.StatusForbidden
                     ? Results.Forbid()
                     : Results.BadRequest(parsed.ErrorMessage);
+            }
+
+            if (!guard.Admits(parsed.Request.From, parsed.Request.To))
+            {
+                return guard.RejectRange(parsed.Request.From, parsed.Request.To);
             }
 
             DistributionResponse response = await query.ExecuteAsync(parsed.Request, cancellationToken);

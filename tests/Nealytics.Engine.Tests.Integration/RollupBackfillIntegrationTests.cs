@@ -132,7 +132,7 @@ public class RollupBackfillIntegrationTests : IAsyncLifetime
             Order = BreakdownOrder.ValueDescending,
         };
 
-        GetBreakdownQuery query = new(factory, registry, NullLogger<GetBreakdownQuery>.Instance);
+        GetBreakdownQuery query = new(factory, new QueryGuard(new TelemetryEngineOptions()), registry, NullLogger<GetBreakdownQuery>.Instance);
         BreakdownResponse routed = await query.ExecuteAsync(request, CancellationToken.None);
 
         routed.Source.Should().Be("rollup:" + _name);
@@ -192,7 +192,7 @@ public class RollupBackfillIntegrationTests : IAsyncLifetime
             Descending = true,
         };
 
-        GetPivotQuery query = new(factory, registry, NullLogger<GetPivotQuery>.Instance);
+        GetPivotQuery query = new(factory, new QueryGuard(new TelemetryEngineOptions()), registry, NullLogger<GetPivotQuery>.Instance);
         PivotResponse routed = await query.ExecuteAsync(request, CancellationToken.None);
         registry.MarkUnroutable(registry.Declared[0], "test");
         PivotResponse raw = await query.ExecuteAsync(request, CancellationToken.None);

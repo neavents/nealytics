@@ -84,6 +84,9 @@ builder.Services.AddSingleton(measureRegistry);
 RollupRegistry rollupRegistry = new(engineOpts, dimensionRegistry, measureRegistry);
 builder.Services.AddSingleton(rollupRegistry);
 
+QueryGuard queryGuard = new(engineOpts);
+builder.Services.AddSingleton(queryGuard);
+
 builder.WebHost.ConfigureKestrel(serverOptions =>
 {
     serverOptions.Limits.MaxRequestBodySize = engineOpts.MaxRequestBodyBytes;
@@ -342,6 +345,7 @@ if (engineOpts.EnableRequestDecompression)
     app.UseRequestDecompression();
 }
 
+app.UseMiddleware<QueryTimeoutMiddleware>();
 app.UseCors();
 app.UseRateLimiter();
 app.UseAuthentication();

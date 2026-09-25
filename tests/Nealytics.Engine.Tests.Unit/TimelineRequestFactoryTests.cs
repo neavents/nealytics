@@ -6,12 +6,13 @@ namespace Nealytics.Engine.Tests.Unit;
 public class TimelineRequestFactoryTests
 {
     private const int MaxLimit = 1000;
+    private static readonly DateTime Now = new(2026, 9, 25, 12, 0, 0, DateTimeKind.Utc);
 
     private static TimelineRequestResult Create(
         string? projectId = "proj", string? tenantId = "tenant", string? limit = null,
         string? before = null, string? eventType = null, string? sessionId = null, string? objectId = null,
         string? metaKey = null, string? metaValue = null)
-        => TimelineRequestFactory.Create(projectId, tenantId, limit, before, eventType, sessionId, objectId, metaKey, metaValue, MaxLimit);
+        => TimelineRequestFactory.Create(projectId, tenantId, limit, before, eventType, sessionId, objectId, metaKey, metaValue, MaxLimit, TimeSpan.FromDays(92), Now);
 
     [Theory]
     [InlineData(null, "tenant")]

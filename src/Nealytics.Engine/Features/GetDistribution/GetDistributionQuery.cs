@@ -18,11 +18,14 @@ using Octonica.ClickHouseClient;
 public sealed partial class GetDistributionQuery
 {
     private readonly ClickHouseConnectionFactory _connectionFactory;
+    private readonly QueryGuard _guard;
     private readonly ILogger<GetDistributionQuery> _logger;
 
-    public GetDistributionQuery(ClickHouseConnectionFactory connectionFactory, ILogger<GetDistributionQuery> logger)
+    public GetDistributionQuery(
+        ClickHouseConnectionFactory connectionFactory, QueryGuard guard, ILogger<GetDistributionQuery> logger)
     {
         _connectionFactory = connectionFactory;
+        _guard = guard;
         _logger = logger;
     }
 
@@ -137,7 +140,7 @@ public sealed partial class GetDistributionQuery
 
             await using PooledClickHouseConnection lease = await _connectionFactory.AcquireAsync(cancellationToken);
             await using ClickHouseCommand command = lease.Connection.CreateCommand();
-            command.CommandText = sqlCommandText;
+            command.CommandText = _guard.Limit(sqlCommandText);
 
             foreach (KeyValuePair<string, object?> parameter in parameters)
             {

@@ -12,12 +12,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Nealytics.Engine.Infrastructure.Diagnostics;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Storage;
 using Octonica.ClickHouseClient;
 
 public sealed partial class GetProjectTimelineQuery
 {
     private readonly ClickHouseConnectionFactory _connectionFactory;
+    private readonly QueryGuard _guard;
     private readonly ILogger<GetProjectTimelineQuery> _logger;
     private readonly string[] _dimensionColumns;
     private readonly string[] _measureColumns;
@@ -25,11 +27,13 @@ public sealed partial class GetProjectTimelineQuery
 
     public GetProjectTimelineQuery(
         ClickHouseConnectionFactory connectionFactory,
+        QueryGuard guard,
         DimensionRegistry dimensions,
         MeasureRegistry measures,
         ILogger<GetProjectTimelineQuery> logger)
     {
         _connectionFactory = connectionFactory;
+        _guard = guard;
         _logger = logger;
         _dimensionColumns = [.. dimensions.Active.Select(d => d.Name)];
         _measureColumns = [.. measures.Active.Select(m => m.Name)];
@@ -46,10 +50,11 @@ public sealed partial class GetProjectTimelineQuery
         in TimelineQueryRequest request,
         IReadOnlyList<string>? declaredColumns = null)
     {
-        List<KeyValuePair<string, object?>> parameters = new List<KeyValuePair<string, object?>>(7)
+        List<KeyValuePair<string, object?>> parameters = new List<KeyValuePair<string, object?>>(10)
         {
             new KeyValuePair<string, object?>("projectId", request.ProjectId),
-            new KeyValuePair<string, object?>("tenantId", request.TenantId)
+            new KeyValuePair<string, object?>("tenantId", request.TenantId),
+            new KeyValuePair<string, object?>("notBefore", request.NotBefore)
         };
 
         StringBuilder sql = new StringBuilder(
@@ -66,7 +71,8 @@ public sealed partial class GetProjectTimelineQuery
 
         sql.Append(
             " FROM nealytics_core.global_events " +
-            "WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String}");
+            "WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String} " +
+            "AND timestamp >= {notBefore:DateTime64}");
 
         if (request.Before.HasValue)
         {
@@ -126,7 +132,7 @@ public sealed partial class GetProjectTimelineQuery
                 await _connectionFactory.AcquireAsync(cancellationToken);
 
             await using ClickHouseCommand command = lease.Connection.CreateCommand();
-            command.CommandText = sqlCommandText;
+            command.CommandText = _guard.Limit(sqlCommandText);
 
             foreach (KeyValuePair<string, object?> parameter in parameters)
             {

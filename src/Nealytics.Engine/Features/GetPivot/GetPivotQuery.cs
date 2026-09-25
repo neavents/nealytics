@@ -18,13 +18,18 @@ using Octonica.ClickHouseClient;
 public sealed partial class GetPivotQuery
 {
     private readonly ClickHouseConnectionFactory _connectionFactory;
+    private readonly QueryGuard _guard;
     private readonly RollupRegistry _rollups;
     private readonly ILogger<GetPivotQuery> _logger;
 
     public GetPivotQuery(
-        ClickHouseConnectionFactory connectionFactory, RollupRegistry rollups, ILogger<GetPivotQuery> logger)
+        ClickHouseConnectionFactory connectionFactory,
+        QueryGuard guard,
+        RollupRegistry rollups,
+        ILogger<GetPivotQuery> logger)
     {
         _connectionFactory = connectionFactory;
+        _guard = guard;
         _rollups = rollups;
         _logger = logger;
     }
@@ -184,7 +189,7 @@ public sealed partial class GetPivotQuery
 
             await using PooledClickHouseConnection lease = await _connectionFactory.AcquireAsync(cancellationToken);
             await using ClickHouseCommand command = lease.Connection.CreateCommand();
-            command.CommandText = sqlCommandText;
+            command.CommandText = _guard.Limit(sqlCommandText);
 
             foreach (KeyValuePair<string, object?> parameter in parameters)
             {

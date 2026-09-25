@@ -23,11 +23,13 @@ public class TimelineQueryBuilderTests
         sql.Should().NotContain("session_id =");
         sql.Should().NotContain("object_id =");
         sql.Should().NotContain("timestamp <");
+        sql.Should().Contain("AND timestamp >= {notBefore:DateTime64}");
 
-        parameters.Should().HaveCount(3);
+        parameters.Should().HaveCount(4);
         parameters.Should().ContainSingle(p => p.Key == "projectId" && (string)p.Value! == "proj");
         parameters.Should().ContainSingle(p => p.Key == "tenantId" && (string)p.Value! == "tenant");
         parameters.Should().ContainSingle(p => p.Key == "limit" && (int)p.Value! == 50);
+        parameters.Should().ContainSingle(p => p.Key == "notBefore");
     }
 
     [Fact]
@@ -70,7 +72,7 @@ public class TimelineQueryBuilderTests
         parameters.Should().ContainSingle(p => p.Key == "eventType" && (string)p.Value! == "click");
         parameters.Should().ContainSingle(p => p.Key == "sessionId" && (string)p.Value! == "sess-1");
         parameters.Should().ContainSingle(p => p.Key == "objectId" && (string)p.Value! == "/home");
-        parameters.Should().HaveCount(6);
+        parameters.Should().HaveCount(7);
     }
 
     [Theory]
@@ -93,7 +95,7 @@ public class TimelineQueryBuilderTests
         sql.Should().NotContain("event_type =");
         sql.Should().NotContain("session_id =");
         sql.Should().NotContain("object_id =");
-        parameters.Should().HaveCount(3);
+        parameters.Should().HaveCount(4);
     }
 
     [Fact]

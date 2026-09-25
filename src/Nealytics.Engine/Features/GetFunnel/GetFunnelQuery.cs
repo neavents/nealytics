@@ -10,19 +10,23 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Nealytics.Engine.Infrastructure.Diagnostics;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Storage;
 using Octonica.ClickHouseClient;
 
 public sealed partial class GetFunnelQuery
 {
     private readonly ClickHouseConnectionFactory _connectionFactory;
+    private readonly QueryGuard _guard;
     private readonly ILogger<GetFunnelQuery> _logger;
 
     public GetFunnelQuery(
         ClickHouseConnectionFactory connectionFactory,
+        QueryGuard guard,
         ILogger<GetFunnelQuery> logger)
     {
         _connectionFactory = connectionFactory;
+        _guard = guard;
         _logger = logger;
     }
 
@@ -160,7 +164,7 @@ public sealed partial class GetFunnelQuery
                 await _connectionFactory.AcquireAsync(cancellationToken);
 
             await using ClickHouseCommand command = lease.Connection.CreateCommand();
-            command.CommandText = sqlCommandText;
+            command.CommandText = _guard.Limit(sqlCommandText);
 
             foreach (KeyValuePair<string, object?> parameter in parameters)
             {

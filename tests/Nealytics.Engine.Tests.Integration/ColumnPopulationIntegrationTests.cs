@@ -1,3 +1,4 @@
+using Nealytics.Engine.Infrastructure.Query;
 using FluentAssertions;
 using Nealytics.Engine.Features.GetSchema;
 using Nealytics.Engine.Infrastructure.Configuration;
@@ -109,6 +110,7 @@ public class ColumnPopulationIntegrationTests : IAsyncLifetime
 
         return new GetColumnPopulationQuery(
             new ClickHouseConnectionFactory(Microsoft.Extensions.Options.Options.Create(options)),
+            new QueryGuard(options),
             dimensions,
             new MeasureRegistry(options, dimensions));
     }

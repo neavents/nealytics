@@ -96,7 +96,7 @@ public class SeededE2ETests : IntegrationTestBase, IAsyncLifetime
 
         // ── Query session analytics ──
         var sessResp = await Client.GetAsync(
-            "/api/v1/analytics/sessions?from=2020-01-01T00:00:00Z&to=2030-01-01T00:00:00Z");
+            "/api/v1/analytics/sessions?" + ClickHouseTestSupport.RecentRange);
         sessResp.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var sessions = await sessResp.Content.ReadFromJsonAsync<JsonElement>();

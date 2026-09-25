@@ -9,6 +9,15 @@ public static class ClickHouseTestSupport
         Environment.GetEnvironmentVariable("TelemetryEngine__ClickHouseConnectionString")
         ?? "Host=127.0.0.1;Port=9000;Database=nealytics_core;User=default;Password=;";
 
+    public static string RecentRange
+    {
+        get
+        {
+            DateTime to = DateTime.UtcNow.Date.AddDays(2);
+            return FormattableString.Invariant($"from={to.AddDays(-82):yyyy-MM-ddTHH:mm:ssZ}&to={to:yyyy-MM-ddTHH:mm:ssZ}");
+        }
+    }
+
     public static async Task<long> CountAsync(string projectId)
     {
         await using ClickHouseConnection connection = new ClickHouseConnection(ConnectionString);

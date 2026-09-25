@@ -53,7 +53,7 @@ public class ColumnPopulationTests
     private static string Sql()
     {
         (DimensionRegistry dimensions, MeasureRegistry measures) = Build();
-        return new GetColumnPopulationQuery(null!, dimensions, measures).BuildSql();
+        return new GetColumnPopulationQuery(null!, new QueryGuard(new TelemetryEngineOptions()), dimensions, measures).BuildSql();
     }
 
     [Fact]
@@ -140,7 +140,7 @@ public class ColumnPopulationTests
         DimensionRegistry dimensions = new(empty);
         MeasureRegistry measures = new(empty, dimensions);
 
-        new GetColumnPopulationQuery(null!, dimensions, measures).BuildSql().Should().BeEmpty();
+        new GetColumnPopulationQuery(null!, new QueryGuard(new TelemetryEngineOptions()), dimensions, measures).BuildSql().Should().BeEmpty();
     }
 
     [Fact]
