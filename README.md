@@ -188,6 +188,7 @@ Query params:
 - `limit` (default 100, capped by `MaxQueryLimit`)
 - `before` (ISO 8601 timestamp), cursor for backward pagination; returns events strictly older than this value
 - `eventType`, `sessionId`, `objectId`, optional exact match filters (each ≤ 256 chars), applied on top of the tenant scope
+- Reads reach back at most `MaxQueryRangeDays` from `before` (or from now).
 - `metaKey` + `metaValue`, optional metadata filter (both required together, each ≤ 256 chars). Matches events where `JSONExtractString(metadata_json, metaKey) = metaValue`. Note: `metadata_json` is unindexed, so this is a full scan over the time range, prefer narrowing with `before`/filters. Both are passed as parameters (never interpolated).
 
 ```bash
@@ -210,8 +211,11 @@ Query params:
 - `eventType`, optional exact match filter
 - `groupBy`, optional split into per series counts: any core column or declared dimension (validated against the same allowlist `/analytics/breakdown` uses; any other value returns `400`). When set, each point gains a `series` field and the query groups by `(bucket, series)`. `LIMIT` caps total `bucket×series` rows, so avoid very high cardinality dimensions (`session_id`); prefer `event_type`/`object_id`.
 - `limit`, max number of buckets returned (defaults to `MaxQueryLimit`)
+- `metric`, optional, one metric in the `/pivot` grammar (`avg(load_ms)`, `p95(load_ms):page_load`,
+  `sum(amount)`, `sessions`, `distinct(country)`). Each point then carries `value`, the metric over that
+  bucket, beside `count`. `value` is `null` for a bucket whose events carry no value for the measure.
 
-Response (ungrouped `series` is omitted):
+Response (ungrouped `series` is omitted; `value` is `null` without `metric`):
 
 ```json
 {
@@ -222,8 +226,8 @@ Response (ungrouped `series` is omitted):
   "to": "2024-06-08T00:00:00Z",
   "totalCount": 4210,
   "points": [
-    { "bucket": "2024-06-01T00:00:00Z", "series": "purchase", "count": 512 },
-    { "bucket": "2024-06-01T00:00:00Z", "series": "view", "count": 631 }
+    { "bucket": "2024-06-01T00:00:00Z", "series": "purchase", "count": 512, "value": null },
+    { "bucket": "2024-06-01T00:00:00Z", "series": "view", "count": 631, "value": null }
   ]
 }
 ```
@@ -499,6 +503,89 @@ Query params:
 The median is the number to put on a dashboard. A mean session length is dragged around by the one
 tab somebody left open through dinner; the distribution shows that tab as the tail it is.
 
+### GET `/api/v1/analytics/compare`
+
+One metric over two windows of time, with the change between them: this week against last week, or
+against the same week a year ago.
+
+```bash
+curl "http://localhost:5000/api/v1/analytics/compare\
+?metric=sessions:view&groupBy=country&from=2026-06-08T00:00:00&to=2026-06-15T00:00:00&tz=Europe/Istanbul" \
+  -H "Authorization: Bearer <your-jwt>"
+```
+
+Query params:
+- `metric`, exactly one, in the `/pivot` grammar.
+- `groupBy`, optional; without it the response carries only `totals`.
+- `from` / `to`, the current window, read as `[from, to)`. A timestamp without an offset is read in
+  `tz` when one is given, otherwise as UTC.
+- `previousFrom` / `previousTo`, both or neither. When absent the previous window is the one of equal
+  length that ends where the current one starts, measured on the wall clock of `tz`, so a week that
+  crosses a daylight saving change is compared with the week before it rather than with 167 hours.
+- `orderBy`, `current` (default), `previous`, `change` or `key`; `order`, `desc` or `asc`.
+- `filter`, `traffic`, `limit`, `mode=approx`, `exact=true` as for `/pivot`.
+
+```json
+{
+  "metric": "sessions:view", "grain": "session", "eventType": "view", "groupBy": "country",
+  "timeZone": "Europe/Istanbul",
+  "current": { "from": "2026-06-07T21:00:00Z", "to": "2026-06-14T21:00:00Z" },
+  "previous": { "from": "2026-05-31T21:00:00Z", "to": "2026-06-07T21:00:00Z" },
+  "source": "raw",
+  "totals": { "current": 420, "previous": 350, "change": 70, "relativeChange": 0.2 },
+  "groupCount": 12, "truncated": false,
+  "rows": [ { "key": "TR", "value": { "current": 300, "previous": 300, "change": 0, "relativeChange": 0 } } ]
+}
+```
+
+`relativeChange` is `null` when the previous value is zero, and every value is `null` when a measure
+had nothing to aggregate. Both windows are one scan: the metric is computed twice with a window
+condition each, and the WHERE clause reads only the two windows. When both windows sit on a
+rollup's bucket boundaries the comparison is answered from the rollup, under the `/pivot` rules.
+
+### POST `/api/v1/analytics/unseen`
+
+Which of a set of object ids had no events in a window. The caller supplies the candidates, typically
+its own catalogue, since the engine only knows the ids that did get events.
+
+```bash
+curl -X POST http://localhost:5000/api/v1/analytics/unseen \
+  -H "Authorization: Bearer <your-jwt>" -H "Content-Type: application/json" \
+  -d '{"ids":["a","b","c"],"from":"2026-06-01T00:00:00Z","to":"2026-06-08T00:00:00Z",
+       "eventType":"view","impressionEventType":"impression"}'
+```
+
+Body:
+- `ids`, 1 to 5,000 object ids of at most 256 characters; duplicates are ignored.
+- `eventType`, the engagement that counts as seen. Absent means any event.
+- `impressionEventType`, optional. Ids that had impressions but no engagement are reported apart.
+  Without `eventType`, any event other than an impression is the engagement.
+- `from` / `to`, `filter` (an array), `traffic` as for the GET reads.
+
+```json
+{
+  "from": "2026-06-01T00:00:00Z", "to": "2026-06-08T00:00:00Z",
+  "eventType": "view", "impressionEventType": "impression", "source": "raw",
+  "candidates": 3, "seen": 1, "unseen": ["c"], "impressionOnly": ["b"]
+}
+```
+
+The ids travel as an external table beside the query, not as text, and the anti join runs in
+ClickHouse: the scan is narrowed by the tenant, the window, the event types and `object_id IN` the
+candidate set, and answered from a rollup keyed on `object_id` when the window is aligned.
+
+### Limits on every read
+
+Every read is held to `MaxQueryRangeDays` (default 92) between `from` and `to`, and a wider range is
+a `400` problem response before anything is queried. Every statement also runs under ClickHouse's
+`max_execution_time` of `QueryExecutionTimeoutSeconds` (default 30); a read that runs past it is
+stopped by the server and answered with a `422` problem response.
+
+```json
+{ "title": "Query range too wide",
+  "status": 400, "detail": "The range from ... spans 120 days. At most 92 days are accepted; narrow 'from' and 'to'." }
+```
+
 ### Filters
 
 Every read that takes `filter` takes it in the same grammar, repeated as often as needed:
@@ -763,6 +850,8 @@ curl -XPOST localhost:5000/api/v1/telemetry/validate -H 'X-Project-Key: myapp:my
 |---|---|---|
 | `MaxQueryLimit` | `10000` | Max `limit` parameter value for read endpoints |
 | `DefaultSessionQueryRangeHours` | `24` | Default time range when `from`/`to` are not specified on sessions, active users, top N, and time series endpoints |
+| `MaxQueryRangeDays` | `92` | Widest `from`/`to` range any read accepts; the timeline reaches back no further than this |
+| `QueryExecutionTimeoutSeconds` | `30` | ClickHouse `max_execution_time` applied to every read statement |
 | `EnablePrometheusScrape` | `false` | Expose the engine metrics at `GET /metrics` for Prometheus scraping (unauthenticated, keep on an internal network). |
 
 ---
