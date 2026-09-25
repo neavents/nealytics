@@ -2,6 +2,7 @@ namespace Nealytics.Engine.Features.GetEventTimeSeries;
 
 using System;
 using System.Collections.Generic;
+using Nealytics.Engine.Features.GetPivot;
 using Nealytics.Engine.Infrastructure.Query;
 
 public readonly struct EventTimeSeriesRequest
@@ -28,6 +29,8 @@ public readonly struct EventTimeSeriesRequest
     public IReadOnlyList<QueryFilter> Filters { get; init; }
 
     public int Limit { get; init; }
+
+    public PivotMetric? Metric { get; init; }
 
     public QueryScope Scope => new()
     {

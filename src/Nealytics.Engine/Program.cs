@@ -16,6 +16,7 @@ using Microsoft.IdentityModel.Tokens;
 using Nealytics.Engine.Features.BatchProcessor;
 using Nealytics.Engine.Features.GetActiveUsers;
 using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Features.GetComparison;
 using Nealytics.Engine.Features.GetDistribution;
 using Nealytics.Engine.Features.GetPivot;
 using Nealytics.Engine.Features.GetFunnel;
@@ -25,6 +26,7 @@ using Nealytics.Engine.Features.GetEventTimeSeries;
 using Nealytics.Engine.Features.GetProjectTimeline;
 using Nealytics.Engine.Features.GetSessionAnalytics;
 using Nealytics.Engine.Features.GetTopEvents;
+using Nealytics.Engine.Features.GetUnseenObjects;
 using Nealytics.Engine.Features.IngestTelemetry;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Query;
@@ -266,6 +268,8 @@ builder.Services.AddScoped<GetBreakdownQuery>();
 builder.Services.AddScoped<GetFunnelQuery>();
 builder.Services.AddScoped<GetPivotQuery>();
 builder.Services.AddScoped<GetDistributionQuery>();
+builder.Services.AddScoped<GetComparisonQuery>();
+builder.Services.AddScoped<GetUnseenObjectsQuery>();
 builder.Services.AddSingleton<GetEventTypesQuery>();
 builder.Services.AddSingleton<GetColumnPopulationQuery>();
 // The query allowlist. A singleton built from the registry, so groupBy/filter validation and the
@@ -363,6 +367,8 @@ app.MapGetSchema();
 app.MapGetFunnel();
 app.MapGetPivot();
 app.MapGetDistribution();
+app.MapGetComparison();
+app.MapGetUnseenObjects();
 app.MapValidateTelemetry();
 if (engineOpts.EnablePrometheusScrape)
 {

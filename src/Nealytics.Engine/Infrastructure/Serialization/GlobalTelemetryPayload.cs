@@ -9,10 +9,12 @@ using Nealytics.Engine.Features.GetEventTimeSeries;
 using Nealytics.Engine.Features.GetActiveUsers;
 using Nealytics.Engine.Features.GetTopEvents;
 using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Features.GetComparison;
 using Nealytics.Engine.Features.GetDistribution;
 using Nealytics.Engine.Features.GetPivot;
 using Nealytics.Engine.Features.GetFunnel;
 using Nealytics.Engine.Features.GetSchema;
+using Nealytics.Engine.Features.GetUnseenObjects;
 using Nealytics.Engine.Features.ValidateTelemetry;
 
 public sealed class GlobalTelemetryPayload
@@ -121,6 +123,15 @@ public sealed class GlobalTelemetryPayload
 [JsonSerializable(typeof(List<DistributionQuantile>))]
 [JsonSerializable(typeof(DistributionBucket))]
 [JsonSerializable(typeof(List<DistributionBucket>))]
+[JsonSerializable(typeof(ComparisonResponse))]
+[JsonSerializable(typeof(ComparisonWindow))]
+[JsonSerializable(typeof(ComparisonValue))]
+[JsonSerializable(typeof(ComparisonRow))]
+[JsonSerializable(typeof(List<ComparisonRow>))]
+[JsonSerializable(typeof(UnseenObjectsBody))]
+[JsonSerializable(typeof(UnseenObjectsResponse))]
+[JsonSerializable(typeof(string[]))]
+[JsonSerializable(typeof(List<string>))]
 public partial class TelemetryAotContext : JsonSerializerContext
 {
 }

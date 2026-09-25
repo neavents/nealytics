@@ -54,6 +54,8 @@ public class EveryEndpointResolvesTests : IClassFixture<NoDatabaseWebFactory>
         "/api/v1/analytics/funnel?step=a&step=b",
         "/api/v1/analytics/pivot?groupBy=event_type&metric=events&metric=sessions:view",
         "/api/v1/analytics/distribution?of=session_duration",
+        "/api/v1/analytics/compare?metric=events&groupBy=event_type",
+        "/api/v1/analytics/timeseries?interval=day&metric=sessions",
         "/api/v1/schema",
     ];
 
@@ -109,6 +111,8 @@ public class EveryEndpointResolvesTests : IClassFixture<NoDatabaseWebFactory>
     [InlineData(typeof(Nealytics.Engine.Features.GetSchema.GetEventTypesQuery))]
     [InlineData(typeof(Nealytics.Engine.Features.GetPivot.GetPivotQuery))]
     [InlineData(typeof(Nealytics.Engine.Features.GetDistribution.GetDistributionQuery))]
+    [InlineData(typeof(Nealytics.Engine.Features.GetComparison.GetComparisonQuery))]
+    [InlineData(typeof(Nealytics.Engine.Features.GetUnseenObjects.GetUnseenObjectsQuery))]
     [InlineData(typeof(Nealytics.Engine.Infrastructure.Query.QueryGuard))]
     [InlineData(typeof(Nealytics.Engine.Infrastructure.Query.QueryColumns))]
     [InlineData(typeof(Nealytics.Engine.Features.IngestTelemetry.DimensionSanitizer))]

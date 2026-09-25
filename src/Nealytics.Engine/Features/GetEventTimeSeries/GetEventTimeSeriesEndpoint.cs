@@ -43,6 +43,7 @@ public static class GetEventTimeSeriesEndpoint
                 // Repeatable, like /breakdown's. ToArray, not ToString: a second filter must add a
                 // condition, not overwrite the first and silently widen the result.
                 context.Request.Query["filter"].ToArray().Where(v => v is not null).Select(v => v!).ToArray(),
+                context.Request.Query["metric"].ToString(),
                 columns,
                 measures,
                 engineOptions.MaxQueryLimit,

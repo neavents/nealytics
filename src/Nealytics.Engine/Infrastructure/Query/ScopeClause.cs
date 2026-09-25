@@ -53,25 +53,26 @@ public static class ScopeClause
         return parameters;
     }
 
+    public const string Tenant = " WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String}";
+
     public static void AppendRaw(StringBuilder sql, in QueryScope scope)
     {
-        sql.Append(" WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String}");
+        sql.Append(Tenant);
         sql.Append(" AND timestamp >= {fromTimestamp:DateTime64} AND timestamp <= {toTimestamp:DateTime64}");
-        sql.Append(TrafficFilter.Clause(scope.TrafficClass));
-
-        if (!string.IsNullOrEmpty(scope.EventType))
-        {
-            sql.Append(" AND event_type = {eventType:String}");
-        }
-
-        AppendFilters(sql, scope.Filters, normalise: true);
+        AppendConstraints(sql, scope, normalise: true);
     }
 
     public static void AppendRollup(StringBuilder sql, in QueryScope scope, string bucketColumn)
     {
-        sql.Append(" WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String}");
+        sql.Append(Tenant);
         sql.Append(" AND ").Append(bucketColumn).Append(" >= {fromTimestamp:DateTime64} AND ")
             .Append(bucketColumn).Append(" < {toTimestamp:DateTime64}");
+        AppendConstraints(sql, scope, normalise: false);
+    }
+
+    public static void AppendConstraints(StringBuilder sql, in QueryScope scope, bool normalise)
+    {
+        ArgumentNullException.ThrowIfNull(sql);
         sql.Append(TrafficFilter.Clause(scope.TrafficClass));
 
         if (!string.IsNullOrEmpty(scope.EventType))
@@ -79,7 +80,7 @@ public static class ScopeClause
             sql.Append(" AND event_type = {eventType:String}");
         }
 
-        AppendFilters(sql, scope.Filters, normalise: false);
+        AppendFilters(sql, scope.Filters, normalise);
     }
 
     public static bool HasMeasureFilter(IReadOnlyList<QueryFilter>? filters)

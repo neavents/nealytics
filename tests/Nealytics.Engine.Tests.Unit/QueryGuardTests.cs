@@ -141,6 +141,7 @@ public class QueryGuardTests : IClassFixture<NoDatabaseWebFactory>
         "/api/v1/analytics/funnel?step=a&step=b",
         "/api/v1/analytics/pivot?groupBy=event_type&metric=events",
         "/api/v1/analytics/distribution?of=session_duration",
+        "/api/v1/analytics/compare?metric=events",
     ];
 
     [Theory]
@@ -159,6 +160,24 @@ public class QueryGuardTests : IClassFixture<NoDatabaseWebFactory>
         body.RootElement.GetProperty("status").GetInt32().Should().Be(400);
         body.RootElement.GetProperty("title").GetString().Should().Be("Query range too wide");
         body.RootElement.GetProperty("detail").GetString().Should().Contain("At most 92 days");
+    }
+
+    [Fact]
+    public async Task TheCandidateReadRefusesAWideRangeToo()
+    {
+        HttpRequestMessage request = new(HttpMethod.Post, "/api/v1/analytics/unseen")
+        {
+            Content = new StringContent(
+                "{\"ids\":[\"a\"],\"from\":\"2026-01-01T00:00:00Z\",\"to\":\"2026-06-01T00:00:00Z\"}",
+                Encoding.UTF8,
+                "application/json"),
+        };
+        request.Headers.Add("Authorization", $"Bearer {Jwt()}");
+
+        HttpResponseMessage response = await _client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
     }
 
     [Fact]

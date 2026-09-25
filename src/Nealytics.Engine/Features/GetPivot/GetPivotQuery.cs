@@ -68,8 +68,8 @@ public sealed partial class GetPivotQuery
             }
 
             aggregates.Append(plan is PivotRollupPlan rollup
-                ? RollupExpression(request.Metrics[i], rollup.StateColumns[i], i)
-                : RawExpression(request, request.Metrics[i], i));
+                ? PivotAggregates.Rollup(request.Metrics[i], rollup.StateColumns[i], Condition(request.Metrics[i], i))
+                : PivotAggregates.Raw(request.Metrics[i], Condition(request.Metrics[i], i), request.Approximate, request.Exact));
             aggregates.Append(" AS m").Append(i);
         }
 
@@ -115,60 +115,8 @@ public sealed partial class GetPivotQuery
     private static string EventTypeParameter(int index) =>
         string.Create(CultureInfo.InvariantCulture, $"metric{index}EventType");
 
-    private static string Condition(int index) =>
-        "event_type = {" + EventTypeParameter(index) + ":String}";
-
-    private static string RawExpression(in PivotRequest request, in PivotMetric metric, int index)
-    {
-        bool scoped = metric.EventType is not null;
-        string condition = scoped ? Condition(index) : string.Empty;
-
-        switch (metric.Kind)
-        {
-            case PivotMetricKind.Events:
-                if (request.Exact)
-                {
-                    return scoped ? $"uniqExactIf(event_id, {condition})" : "uniqExact(event_id)";
-                }
-
-                return scoped ? $"countIf({condition})" : "count()";
-            case PivotMetricKind.Sessions:
-                return Distinct("session_id", request.Approximate, condition);
-            case PivotMetricKind.Users:
-                return Distinct("user_id", request.Approximate, condition);
-            case PivotMetricKind.Distinct:
-                return Distinct(metric.Column!, request.Approximate, condition);
-            case PivotMetricKind.Measure:
-                string suffix = scoped ? "If" : string.Empty;
-                string parameters = metric.AggregationParameters is null ? string.Empty : "(" + metric.AggregationParameters + ")";
-                string arguments = scoped ? metric.Column + ", " + condition : metric.Column!;
-                return metric.AggregationName + suffix + parameters + "(" + arguments + ")";
-            default:
-                throw new ArgumentOutOfRangeException(nameof(metric), metric.Kind, "Unhandled metric kind.");
-        }
-    }
-
-    private static string RollupExpression(in PivotMetric metric, string stateColumn, int index)
-    {
-        string function = metric.Kind switch
-        {
-            PivotMetricKind.Events => "count",
-            PivotMetricKind.Sessions => "uniqExact",
-            PivotMetricKind.Users => "uniqExact",
-            PivotMetricKind.Measure => metric.CanonicalAggregation!,
-            _ => throw new ArgumentOutOfRangeException(nameof(metric), metric.Kind, "Not routable."),
-        };
-
-        return metric.EventType is null
-            ? $"{function}Merge({stateColumn})"
-            : $"{function}MergeIf({stateColumn}, {Condition(index)})";
-    }
-
-    private static string Distinct(string column, bool approximate, string condition)
-    {
-        string function = approximate ? "uniq" : "uniqExact";
-        return condition.Length == 0 ? $"{function}({column})" : $"{function}If({column}, {condition})";
-    }
+    private static string Condition(in PivotMetric metric, int index) =>
+        metric.EventType is null ? string.Empty : "event_type = {" + EventTypeParameter(index) + ":String}";
 
     public async Task<PivotResponse> ExecuteAsync(PivotRequest request, CancellationToken cancellationToken)
     {

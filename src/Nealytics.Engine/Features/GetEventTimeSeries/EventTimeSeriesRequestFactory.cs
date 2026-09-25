@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using Nealytics.Engine.Features.GetBreakdown;
+using Nealytics.Engine.Features.GetPivot;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Query;
 
@@ -46,6 +47,28 @@ public static class EventTimeSeriesRequestFactory
         string? tzRaw,
         string? trafficRaw,
         IReadOnlyList<string> filtersRaw,
+        QueryColumns columns,
+        MeasureRegistry measures,
+        int maxLimit,
+        int defaultRangeHours,
+        DateTime nowUtc) =>
+        Create(
+            projectId, tenantId, limitRaw, intervalRaw, fromRaw, toRaw, eventType, groupByRaw, tzRaw, trafficRaw,
+            filtersRaw, null, columns, measures, maxLimit, defaultRangeHours, nowUtc);
+
+    public static EventTimeSeriesRequestResult Create(
+        string? projectId,
+        string? tenantId,
+        string? limitRaw,
+        string? intervalRaw,
+        string? fromRaw,
+        string? toRaw,
+        string? eventType,
+        string? groupByRaw,
+        string? tzRaw,
+        string? trafficRaw,
+        IReadOnlyList<string> filtersRaw,
+        string? metricRaw,
         QueryColumns columns,
         MeasureRegistry measures,
         int maxLimit,
@@ -147,8 +170,26 @@ public static class EventTimeSeriesRequestFactory
                 StatusBadRequest, FilterRejection.Message(parsedFilters, columns, measures, MaxFieldLength));
         }
 
+        PivotMetric? metric = null;
+
+        if (!string.IsNullOrEmpty(metricRaw))
+        {
+            if (metricRaw.Length > MaxFieldLength)
+            {
+                return EventTimeSeriesRequestResult.Fail(StatusBadRequest, "'metric' must not exceed 256 characters.");
+            }
+
+            if (!PivotRequestFactory.TryParseMetric(metricRaw, columns, measures, out PivotMetric parsedMetric, out string? metricError))
+            {
+                return EventTimeSeriesRequestResult.Fail(StatusBadRequest, metricError);
+            }
+
+            metric = parsedMetric;
+        }
+
         return EventTimeSeriesRequestResult.Ok(new EventTimeSeriesRequest
         {
+            Metric = metric,
             Filters = parsedFilters.Filters,
             ProjectId = projectId,
             TenantId = tenantId,
