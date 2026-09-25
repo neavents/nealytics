@@ -6,11 +6,14 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
+using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Features.GetComparison;
 using Nealytics.Engine.Features.GetEventTimeSeries;
+using Nealytics.Engine.Features.GetPivot;
 using Nealytics.Engine.Features.GetUnseenObjects;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Query;
+using Nealytics.Engine.Infrastructure.Serialization;
 using Nealytics.Engine.Infrastructure.Storage;
 using Octonica.ClickHouseClient;
 
@@ -428,5 +431,49 @@ public class CompareSeriesUnseenIntegrationTests : IntegrationTestBase, IAsyncLi
 
         context.Response.StatusCode.Should().Be(422);
         context.Response.ContentType.Should().Be("application/problem+json");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task APivotMeasureOverAGroupWithNoValuesSerialisesAsZero(bool routed)
+    {
+        if (!routed)
+        {
+            _rollups.MarkUnroutable(_rollups.Declared[0], "test");
+        }
+
+        PivotRequestResult parsed = PivotRequestFactory.Create(
+            _project, _tenant, "object_id",
+            routed ? ["avg(probe_ms):view", "events:impression"] : ["avg(probe_ms):view", "p95(probe_ms)", "events:impression"], [],
+            Iso(PreviousFrom), Iso(Today), null, "key", null, null, null, null, _columns, _measures, 100, 24, DateTime.UtcNow);
+        parsed.Success.Should().BeTrue(parsed.ErrorMessage);
+
+        PivotResponse response = await new GetPivotQuery(_connections, Guard(), _rollups, NullLogger<GetPivotQuery>.Instance)
+            .ExecuteAsync(parsed.Request, CancellationToken.None);
+        string json = JsonSerializer.Serialize(response, TelemetryAotContext.Default.PivotResponse);
+
+        response.Source.Should().Be(routed ? "rollup:" + _rollup : "raw");
+        json.Should().NotContain("NaN").And.NotContain("Infinity");
+        response.Rows.Single(r => r.Key == "d").Values.Should().Equal(routed ? [0, 1] : [0, 0, 1]);
+        response.Rows.Single(r => r.Key == "c").Values[0].Should().Be(0);
+        response.Rows.Single(r => r.Key == "a").Values[0].Should().Be(420);
+    }
+
+    [Fact]
+    public async Task ABreakdownMeasureOverAGroupWithNoValuesSerialisesAsZero()
+    {
+        BreakdownRequestResult parsed = BreakdownRequestFactory.Create(
+            _project, _tenant, "avg(probe_ms)", "object_id", null, [], Iso(PreviousFrom), Iso(Today),
+            null, null, null, null, null, _columns, _measures, 100, 24, DateTime.UtcNow);
+        parsed.Success.Should().BeTrue(parsed.ErrorMessage);
+
+        BreakdownResponse response = await new GetBreakdownQuery(_connections, Guard(), _rollups, NullLogger<GetBreakdownQuery>.Instance)
+            .ExecuteAsync(parsed.Request, CancellationToken.None);
+        string json = JsonSerializer.Serialize(response, TelemetryAotContext.Default.BreakdownResponse);
+
+        json.Should().NotContain("NaN").And.NotContain("Infinity");
+        response.Rows.Single(r => r.Key == "d").Value.Should().Be(0);
+        response.Rows.Single(r => r.Key == "a").Value.Should().Be(420);
     }
 }
