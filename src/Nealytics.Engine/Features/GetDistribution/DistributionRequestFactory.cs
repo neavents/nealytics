@@ -48,6 +48,27 @@ public static class DistributionRequestFactory
         QueryColumns columns,
         MeasureRegistry measures,
         int defaultRangeHours,
+        DateTime nowUtc) =>
+        Create(
+            projectId, tenantId, ofRaw, eventTypeRaw, filtersRaw, fromRaw, toRaw, quantilesRaw, bucketsRaw, trafficRaw,
+            modeRaw, null, columns, measures, defaultRangeHours, nowUtc);
+
+    public static DistributionRequestResult Create(
+        string? projectId,
+        string? tenantId,
+        string? ofRaw,
+        string? eventTypeRaw,
+        IReadOnlyList<string> filtersRaw,
+        string? fromRaw,
+        string? toRaw,
+        string? quantilesRaw,
+        string? bucketsRaw,
+        string? trafficRaw,
+        string? modeRaw,
+        string? emptyRaw,
+        QueryColumns columns,
+        MeasureRegistry measures,
+        int defaultRangeHours,
         DateTime nowUtc)
     {
         ArgumentNullException.ThrowIfNull(filtersRaw);
@@ -124,6 +145,11 @@ public static class DistributionRequestFactory
             return DistributionRequestResult.Fail(StatusBadRequest, TrafficFilter.Rejection(trafficRaw));
         }
 
+        if (!EmptyCells.TryParse(emptyRaw, out bool emptyAsNull))
+        {
+            return DistributionRequestResult.Fail(StatusBadRequest, EmptyCells.Rejection(emptyRaw));
+        }
+
         if (!TryParseNumbers(quantilesRaw, MaxQuantiles, out List<double> quantiles))
         {
             return DistributionRequestResult.Fail(
@@ -160,6 +186,7 @@ public static class DistributionRequestFactory
             Quantiles = quantiles,
             Edges = edges,
             Approximate = string.Equals(modeRaw, "approx", StringComparison.Ordinal),
+            EmptyAsNull = emptyAsNull,
         });
     }
 

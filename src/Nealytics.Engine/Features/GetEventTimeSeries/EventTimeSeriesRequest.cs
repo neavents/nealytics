@@ -32,6 +32,8 @@ public readonly struct EventTimeSeriesRequest
 
     public PivotMetric? Metric { get; init; }
 
+    public bool EmptyAsNull { get; init; }
+
     public QueryScope Scope => new()
     {
         ProjectId = ProjectId,

@@ -59,6 +59,7 @@ public sealed partial class GetPivotQuery
         }
 
         StringBuilder aggregates = new(256);
+        string?[]? presence = request.EmptyAsNull ? new string?[request.Metrics.Count] : null;
 
         for (int i = 0; i < request.Metrics.Count; i++)
         {
@@ -67,10 +68,18 @@ public sealed partial class GetPivotQuery
                 aggregates.Append(", ");
             }
 
+            string condition = Condition(request.Metrics[i], i);
             aggregates.Append(plan is PivotRollupPlan rollup
-                ? PivotAggregates.Rollup(request.Metrics[i], rollup.StateColumns[i], Condition(request.Metrics[i], i))
-                : PivotAggregates.Raw(request.Metrics[i], Condition(request.Metrics[i], i), request.Approximate, request.Exact));
+                ? PivotAggregates.Rollup(request.Metrics[i], rollup.StateColumns[i], condition)
+                : PivotAggregates.Raw(request.Metrics[i], condition, request.Approximate, request.Exact));
             aggregates.Append(" AS m").Append(i);
+
+            if (presence is not null
+                && PivotAggregates.Presence(request.Metrics[i], condition, plan is not null) is string rows)
+            {
+                aggregates.Append(", ").Append(rows).Append(" AS n").Append(i);
+                presence[i] = "n" + i.ToString(CultureInfo.InvariantCulture);
+            }
         }
 
         StringBuilder where = new(256);
@@ -96,12 +105,15 @@ public sealed partial class GetPivotQuery
 
         for (int i = 0; i < request.Metrics.Count; i++)
         {
-            sql.Append(", m").Append(i);
+            sql.Append(", ");
+            AppendCell(sql, request.Metrics[i], i, presence);
         }
 
         for (int i = 0; i < request.Metrics.Count; i++)
         {
-            sql.Append(", (SELECT m").Append(i).Append(" FROM totals) AS t").Append(i);
+            sql.Append(", (SELECT ");
+            AppendCell(sql, request.Metrics[i], i, presence);
+            sql.Append(" FROM totals) AS t").Append(i);
         }
 
         sql.Append(", (SELECT count() FROM grouped) AS group_count FROM grouped ORDER BY ");
@@ -110,6 +122,17 @@ public sealed partial class GetPivotQuery
         sql.Append(", key ASC LIMIT {limit:Int32}");
 
         return (sql.ToString(), parameters);
+    }
+
+    private static void AppendCell(StringBuilder sql, in PivotMetric metric, int index, string?[]? presence)
+    {
+        if (presence is null)
+        {
+            sql.Append('m').Append(index);
+            return;
+        }
+
+        sql.Append(PivotAggregates.OrNull(metric, "m" + index.ToString(CultureInfo.InvariantCulture), presence[index]));
     }
 
     private static string EventTypeParameter(int index) =>
@@ -148,21 +171,23 @@ public sealed partial class GetPivotQuery
 
             int metricCount = request.Metrics.Count;
             List<PivotRow> rows = new(request.Limit);
-            double[] totals = new double[metricCount];
+            double? empty = request.EmptyAsNull ? null : 0;
+            double?[] totals = new double?[metricCount];
+            Array.Fill(totals, empty);
             long groupCount = 0;
 
             while (await reader.ReadAsync(cancellationToken))
             {
-                double[] values = new double[metricCount];
+                double?[] values = new double?[metricCount];
 
                 for (int i = 0; i < metricCount; i++)
                 {
-                    values[i] = ReadNumber(reader, 1 + i);
+                    values[i] = ReadNumber(reader, 1 + i, empty);
                 }
 
                 for (int i = 0; i < metricCount; i++)
                 {
-                    totals[i] = ReadNumber(reader, 1 + metricCount + i);
+                    totals[i] = ReadNumber(reader, 1 + metricCount + i, empty);
                 }
 
                 groupCount = Convert.ToInt64(reader.GetValue(1 + metricCount * 2), CultureInfo.InvariantCulture);
@@ -206,6 +231,6 @@ public sealed partial class GetPivotQuery
         }
     }
 
-    private static double ReadNumber(DbDataReader reader, int ordinal) =>
-        reader.IsDBNull(ordinal) ? 0 : Convert.ToDouble(reader.GetValue(ordinal), CultureInfo.InvariantCulture);
+    private static double? ReadNumber(DbDataReader reader, int ordinal, double? empty) =>
+        reader.IsDBNull(ordinal) ? empty : Convert.ToDouble(reader.GetValue(ordinal), CultureInfo.InvariantCulture);
 }

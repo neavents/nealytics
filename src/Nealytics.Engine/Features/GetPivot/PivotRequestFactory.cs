@@ -47,6 +47,30 @@ public static class PivotRequestFactory
         MeasureRegistry measures,
         int maxLimit,
         int defaultRangeHours,
+        DateTime nowUtc) =>
+        Create(
+            projectId, tenantId, groupByRaw, metricsRaw, filtersRaw, fromRaw, toRaw, limitRaw, orderByRaw, orderRaw,
+            trafficRaw, modeRaw, exactRaw, null, columns, measures, maxLimit, defaultRangeHours, nowUtc);
+
+    public static PivotRequestResult Create(
+        string? projectId,
+        string? tenantId,
+        string? groupByRaw,
+        IReadOnlyList<string> metricsRaw,
+        IReadOnlyList<string> filtersRaw,
+        string? fromRaw,
+        string? toRaw,
+        string? limitRaw,
+        string? orderByRaw,
+        string? orderRaw,
+        string? trafficRaw,
+        string? modeRaw,
+        string? exactRaw,
+        string? emptyRaw,
+        QueryColumns columns,
+        MeasureRegistry measures,
+        int maxLimit,
+        int defaultRangeHours,
         DateTime nowUtc)
     {
         ArgumentNullException.ThrowIfNull(metricsRaw);
@@ -121,6 +145,11 @@ public static class PivotRequestFactory
             return PivotRequestResult.Fail(StatusBadRequest, TrafficFilter.Rejection(trafficRaw));
         }
 
+        if (!EmptyCells.TryParse(emptyRaw, out bool emptyAsNull))
+        {
+            return PivotRequestResult.Fail(StatusBadRequest, EmptyCells.Rejection(emptyRaw));
+        }
+
         bool orderByKey = false;
         int orderByMetric = 0;
 
@@ -171,6 +200,7 @@ public static class PivotRequestFactory
             Descending = descending,
             Approximate = string.Equals(modeRaw, "approx", StringComparison.Ordinal),
             Exact = RequestParsing.IsFlag(exactRaw),
+            EmptyAsNull = emptyAsNull,
         });
     }
 

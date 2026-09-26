@@ -39,6 +39,7 @@ public static class GetDistributionEndpoint
                 context.Request.Query["buckets"].ToString(),
                 context.Request.Query["traffic"].ToString(),
                 context.Request.Query["mode"].ToString(),
+                context.Request.Query["empty"].ToString(),
                 columns,
                 measures,
                 engineOptions.DefaultSessionQueryRangeHours,

@@ -2,6 +2,7 @@ namespace Nealytics.Engine.Features.GetBreakdown;
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 using Nealytics.Engine.Infrastructure.Query;
 
 /// <summary>What is being counted.</summary>
@@ -79,6 +80,8 @@ public readonly struct BreakdownRequest
     /// </summary>
     public bool Approximate { get; init; }
 
+    public bool EmptyAsNull { get; init; }
+
     public QueryScope Scope => new()
     {
         ProjectId = ProjectId,
@@ -96,7 +99,8 @@ public sealed class BreakdownRow
     /// <summary>The dimension value. Empty string when the column was NULL for those rows.</summary>
     public string Key { get; set; } = string.Empty;
 
-    public double Value { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public double? Value { get; set; } = 0;
 
     /// <summary>
     /// This row's share of <see cref="BreakdownResponse.Total"/>, 0..1.
@@ -104,7 +108,8 @@ public sealed class BreakdownRow
     /// Computed against the total across ALL groups, not the sum of the returned rows, so a capped
     /// response's shares still add up to less than one — which is the honest reading.
     /// </summary>
-    public double Share { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public double? Share { get; set; } = 0;
 }
 
 public sealed class BreakdownResponse
@@ -132,7 +137,8 @@ public sealed class BreakdownResponse
 
 
     /// <summary>The metric across every group in range, including groups not returned.</summary>
-    public double Total { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public double? Total { get; init; } = 0;
 
     /// <summary>How many distinct groups exist in range, whether or not they were returned.</summary>
     public long GroupCount { get; init; }

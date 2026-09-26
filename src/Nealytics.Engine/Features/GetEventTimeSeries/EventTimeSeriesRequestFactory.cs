@@ -73,6 +73,29 @@ public static class EventTimeSeriesRequestFactory
         MeasureRegistry measures,
         int maxLimit,
         int defaultRangeHours,
+        DateTime nowUtc) =>
+        Create(
+            projectId, tenantId, limitRaw, intervalRaw, fromRaw, toRaw, eventType, groupByRaw, tzRaw, trafficRaw,
+            filtersRaw, metricRaw, null, columns, measures, maxLimit, defaultRangeHours, nowUtc);
+
+    public static EventTimeSeriesRequestResult Create(
+        string? projectId,
+        string? tenantId,
+        string? limitRaw,
+        string? intervalRaw,
+        string? fromRaw,
+        string? toRaw,
+        string? eventType,
+        string? groupByRaw,
+        string? tzRaw,
+        string? trafficRaw,
+        IReadOnlyList<string> filtersRaw,
+        string? metricRaw,
+        string? emptyRaw,
+        QueryColumns columns,
+        MeasureRegistry measures,
+        int maxLimit,
+        int defaultRangeHours,
         DateTime nowUtc)
     {
         if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(tenantId))
@@ -161,6 +184,11 @@ public static class EventTimeSeriesRequestFactory
             return EventTimeSeriesRequestResult.Fail(StatusBadRequest, TrafficFilter.Rejection(trafficRaw));
         }
 
+        if (!EmptyCells.TryParse(emptyRaw, out bool emptyAsNull))
+        {
+            return EventTimeSeriesRequestResult.Fail(StatusBadRequest, EmptyCells.Rejection(emptyRaw));
+        }
+
         // The same parser /breakdown uses, so a filter means one thing across the engine.
         FilterParser.Result parsedFilters = FilterParser.Parse(filtersRaw ?? [], columns, measures, MaxFieldLength);
 
@@ -190,6 +218,7 @@ public static class EventTimeSeriesRequestFactory
         return EventTimeSeriesRequestResult.Ok(new EventTimeSeriesRequest
         {
             Metric = metric,
+            EmptyAsNull = emptyAsNull,
             Filters = parsedFilters.Filters,
             ProjectId = projectId,
             TenantId = tenantId,

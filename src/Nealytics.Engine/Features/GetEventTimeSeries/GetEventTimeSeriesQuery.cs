@@ -74,7 +74,14 @@ public sealed partial class GetEventTimeSeriesQuery
                 condition = "event_type = {metricEventType:String}";
             }
 
-            sql.Append(", ").Append(PivotAggregates.Raw(metric, condition, approximate: false, exact: false)).Append(" AS value");
+            string value = PivotAggregates.Raw(metric, condition, approximate: false, exact: false);
+
+            if (request.EmptyAsNull)
+            {
+                value = PivotAggregates.OrNull(metric, value, PivotAggregates.Presence(metric, condition, rollup: false));
+            }
+
+            sql.Append(", ").Append(value).Append(" AS value");
         }
 
         sql.Append(" FROM nealytics_core.global_events");

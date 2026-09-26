@@ -83,11 +83,14 @@ public sealed partial class GetComparisonQuery
         string current = Window(timeColumn, "fromTimestamp", "toTimestamp");
         string previous = Window(timeColumn, "previousFrom", "previousTo");
 
-        string aggregates = plan is PivotRollupPlan rollup
-            ? PivotAggregates.Rollup(request.Metric, rollup.StateColumns[0], current) + " AS c, "
-                + PivotAggregates.Rollup(request.Metric, rollup.StateColumns[0], previous) + " AS p"
-            : PivotAggregates.Raw(request.Metric, current, request.Approximate, request.Exact) + " AS c, "
-                + PivotAggregates.Raw(request.Metric, previous, request.Approximate, request.Exact) + " AS p";
+        string currentValue = plan is PivotRollupPlan rollup
+            ? PivotAggregates.Rollup(request.Metric, rollup.StateColumns[0], current)
+            : PivotAggregates.Raw(request.Metric, current, request.Approximate, request.Exact);
+        string previousValue = plan is PivotRollupPlan same
+            ? PivotAggregates.Rollup(request.Metric, same.StateColumns[0], previous)
+            : PivotAggregates.Raw(request.Metric, previous, request.Approximate, request.Exact);
+        string? currentRows = request.EmptyAsNull ? PivotAggregates.Presence(request.Metric, current, plan is not null) : null;
+        string? previousRows = request.EmptyAsNull ? PivotAggregates.Presence(request.Metric, previous, plan is not null) : null;
 
         StringBuilder where = new(384);
         where.Append(ScopeClause.Tenant).Append(" AND (").Append(current).Append(" OR ").Append(previous).Append(')');
@@ -100,8 +103,37 @@ public sealed partial class GetComparisonQuery
 
         if (request.GroupByColumn is null)
         {
-            sql.Append("SELECT ").Append(aggregates).Append(" FROM ").Append(source).Append(where);
+            sql.Append("SELECT ");
+
+            if (request.EmptyAsNull)
+            {
+                sql.Append(PivotAggregates.OrNull(request.Metric, currentValue, currentRows)).Append(" AS c, ")
+                    .Append(PivotAggregates.OrNull(request.Metric, previousValue, previousRows)).Append(" AS p");
+            }
+            else
+            {
+                sql.Append(currentValue).Append(" AS c, ").Append(previousValue).Append(" AS p");
+            }
+
+            sql.Append(" FROM ").Append(source).Append(where);
             return (sql.ToString(), parameters);
+        }
+
+        StringBuilder aggregates = new(256);
+        aggregates.Append(currentValue).Append(" AS c, ").Append(previousValue).Append(" AS p");
+
+        if (currentRows is not null && previousRows is not null)
+        {
+            aggregates.Append(", ").Append(currentRows).Append(" AS nc, ").Append(previousRows).Append(" AS np");
+        }
+
+        string c = "c";
+        string p = "p";
+
+        if (request.EmptyAsNull)
+        {
+            c = PivotAggregates.OrNull(request.Metric, c, currentRows is null ? null : "nc");
+            p = PivotAggregates.OrNull(request.Metric, p, previousRows is null ? null : "np");
         }
 
         parameters.Add(new KeyValuePair<string, object?>("limit", request.Limit));
@@ -110,7 +142,8 @@ public sealed partial class GetComparisonQuery
         sql.Append(plan is null ? "ifNull(toString(" + request.GroupByColumn + "), '')" : request.GroupByColumn);
         sql.Append(" AS key, ").Append(aggregates).Append(" FROM ").Append(source).Append(where).Append(" GROUP BY key),");
         sql.Append(" totals AS (SELECT ").Append(aggregates).Append(" FROM ").Append(source).Append(where).Append(')');
-        sql.Append(" SELECT key, c, p, (SELECT c FROM totals) AS tc, (SELECT p FROM totals) AS tp,");
+        sql.Append(" SELECT key, ").Append(c).Append(", ").Append(p)
+            .Append(", (SELECT ").Append(c).Append(" FROM totals) AS tc, (SELECT ").Append(p).Append(" FROM totals) AS tp,");
         sql.Append(" (SELECT count() FROM grouped) AS group_count FROM grouped ORDER BY ");
         sql.Append(request.Order switch
         {
@@ -158,7 +191,7 @@ public sealed partial class GetComparisonQuery
 
             bool grouped = request.GroupByColumn is not null;
             List<ComparisonRow> rows = grouped ? new List<ComparisonRow>(request.Limit) : [];
-            double empty = request.Metric.Kind == PivotMetricKind.Measure ? double.NaN : 0;
+            double empty = request.EmptyAsNull || request.Metric.Kind == PivotMetricKind.Measure ? double.NaN : 0;
             ComparisonValue totals = ComparisonValue.Of(empty, empty);
             long groupCount = 0;
 

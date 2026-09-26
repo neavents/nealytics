@@ -46,6 +46,7 @@ public static class GetComparisonEndpoint
                     Limit = parameters["limit"].ToString(),
                     OrderBy = parameters["orderBy"].ToString(),
                     Order = parameters["order"].ToString(),
+                    Empty = parameters["empty"].ToString(),
                 },
                 columns,
                 measures,

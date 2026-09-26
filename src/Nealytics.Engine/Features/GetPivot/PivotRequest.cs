@@ -47,6 +47,7 @@ public readonly struct PivotRequest
     public bool Descending { get; init; }
     public bool Approximate { get; init; }
     public bool Exact { get; init; }
+    public bool EmptyAsNull { get; init; }
 
     public QueryScope Scope => new()
     {
@@ -70,7 +71,7 @@ public sealed class PivotMetricDescriptor
 public sealed class PivotRow
 {
     public string Key { get; set; } = string.Empty;
-    public double[] Values { get; set; } = [];
+    public double?[] Values { get; set; } = [];
 }
 
 public sealed class PivotResponse
@@ -80,7 +81,7 @@ public sealed class PivotResponse
     public DateTime From { get; init; }
     public DateTime To { get; init; }
     public string Source { get; init; } = "raw";
-    public double[] Totals { get; init; } = [];
+    public double?[] Totals { get; init; } = [];
     public long GroupCount { get; init; }
     public bool Truncated { get; init; }
     public IReadOnlyList<PivotRow> Rows { get; init; } = Array.Empty<PivotRow>();

@@ -41,6 +41,7 @@ public static class GetPivotEndpoint
                 context.Request.Query["traffic"].ToString(),
                 context.Request.Query["mode"].ToString(),
                 context.Request.Query["exact"].ToString(),
+                context.Request.Query["empty"].ToString(),
                 columns,
                 measures,
                 engineOptions.MaxQueryLimit,

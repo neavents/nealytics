@@ -52,6 +52,36 @@ public static class PivotAggregates
             : $"{function}MergeIf({stateColumn}, {condition})";
     }
 
+    public static string? Presence(in PivotMetric metric, string condition, bool rollup)
+    {
+        ArgumentNullException.ThrowIfNull(condition);
+
+        if (metric.Kind is not (PivotMetricKind.Sessions or PivotMetricKind.Users or PivotMetricKind.Distinct))
+        {
+            return null;
+        }
+
+        if (rollup)
+        {
+            return condition.Length == 0 ? "countMerge(events)" : $"countMergeIf(events, {condition})";
+        }
+
+        return condition.Length == 0 ? "count()" : $"countIf({condition})";
+    }
+
+    public static string OrNull(in PivotMetric metric, string value, string? presence)
+    {
+        if (presence is not null)
+        {
+            return $"if({presence} = 0, NULL, {value})";
+        }
+
+        return metric.Kind == PivotMetricKind.Events
+            || string.Equals(metric.AggregationName, "count", StringComparison.Ordinal)
+            ? $"nullIf({value}, 0)"
+            : value;
+    }
+
     public static string Both(string left, string right) =>
         left.Length == 0 ? right : right.Length == 0 ? left : left + " AND " + right;
 

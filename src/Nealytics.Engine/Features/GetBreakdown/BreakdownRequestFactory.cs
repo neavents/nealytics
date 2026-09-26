@@ -59,6 +59,30 @@ public static class BreakdownRequestFactory
         MeasureRegistry measures,
         int maxLimit,
         int defaultRangeHours,
+        DateTime nowUtc) =>
+        Create(
+            projectId, tenantId, metricRaw, groupByRaw, eventTypeRaw, filtersRaw, fromRaw, toRaw, limitRaw, orderByRaw,
+            trafficRaw, exactRaw, modeRaw, null, columns, measures, maxLimit, defaultRangeHours, nowUtc);
+
+    public static BreakdownRequestResult Create(
+        string? projectId,
+        string? tenantId,
+        string? metricRaw,
+        string? groupByRaw,
+        string? eventTypeRaw,
+        IReadOnlyList<string> filtersRaw,
+        string? fromRaw,
+        string? toRaw,
+        string? limitRaw,
+        string? orderByRaw,
+        string? trafficRaw,
+        string? exactRaw,
+        string? modeRaw,
+        string? emptyRaw,
+        QueryColumns columns,
+        MeasureRegistry measures,
+        int maxLimit,
+        int defaultRangeHours,
         DateTime nowUtc)
     {
         if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(tenantId))
@@ -199,6 +223,11 @@ public static class BreakdownRequestFactory
             return BreakdownRequestResult.Fail(StatusBadRequest, TrafficFilter.Rejection(trafficRaw));
         }
 
+        if (!EmptyCells.TryParse(emptyRaw, out bool emptyAsNull))
+        {
+            return BreakdownRequestResult.Fail(StatusBadRequest, EmptyCells.Rejection(emptyRaw));
+        }
+
         return BreakdownRequestResult.Ok(new BreakdownRequest
         {
             ProjectId = projectId,
@@ -219,6 +248,7 @@ public static class BreakdownRequestFactory
             To = toUtc,
             Limit = limit,
             Order = order,
+            EmptyAsNull = emptyAsNull,
         });
     }
 

@@ -214,6 +214,8 @@ Query params:
 - `metric`, optional, one metric in the `/pivot` grammar (`avg(load_ms)`, `p95(load_ms):page_load`,
   `sum(amount)`, `sessions`, `distinct(country)`). Each point then carries `value`, the metric over that
   bucket, beside `count`. `value` is `null` for a bucket whose events carry no value for the measure.
+- `empty`, `zero` (default) or `null`, as for `/pivot`. With `null`, a count, session, user or distinct
+  `metric` reports `value` as `null` for a bucket with no event matching it, instead of `0`.
 
 Response (ungrouped `series` is omitted; `value` is `null` without `metric`):
 
@@ -358,6 +360,9 @@ Two more parameters worth knowing:
 - `exact=true`, counts `uniqExact(event_id)` instead of rows. The table is a `ReplacingMergeTree`
   and no query uses `FINAL`, so a WAL replay after a restart can leave an event present twice until
   a background merge collapses it. Slower and exact, versus fast and eventually right.
+- `empty`, `zero` (default) or `null`, as for `/pivot`. With `null`, a measure with no value to
+  aggregate in a group reports `value` and `share` as `null` instead of `0`, and `total` is `null`
+  when no group had one.
 
 The response reports `grain` (`event` / `session` / `user`), `source` (`raw` or `rollup:<name>`) and
 `truncated`, so a number always says what it counted and where it came from.
@@ -443,6 +448,11 @@ Query params:
   every session in scope.
 - `orderBy`, the index of a metric (default `0`) or `key`; `order`, `desc` (default) or `asc`.
 - `filter`, `traffic`, `from` / `to`, `limit`, `mode=approx`, `exact=true` as for `/breakdown`.
+- `empty`, `zero` (default) or `null`: how a cell nothing contributed to is reported. With `null` it
+  is `null` instead of `0`, in `rows` and in `totals`. A cell is empty when an `events`, `sessions`,
+  `users` or `distinct(...)` metric matched no row in the group, or when a measure had no value to
+  aggregate there. A real zero stays `0`: a sum of zeros, or `users` over rows that are all
+  anonymous. The order of the rows does not change. Any other value returns `400`.
 
 ```json
 {
@@ -486,6 +496,8 @@ Query params:
 - `mode=approx` switches from `quantilesExact` to `quantilesTDigest`, which holds a fixed amount of
   memory whatever the row count.
 - `filter`, `traffic`, `from` / `to` as elsewhere.
+- `empty`, `zero` (default) or `null`, as for `/pivot`. With `null` and no value in range, `min`,
+  `max`, `avg` and every quantile's `value` are `null` instead of `0`. Bucket counts stay counts.
 
 ```json
 {
@@ -523,7 +535,9 @@ Query params:
   length that ends where the current one starts, measured on the wall clock of `tz`, so a week that
   crosses a daylight saving change is compared with the week before it rather than with 167 hours.
 - `orderBy`, `current` (default), `previous`, `change` or `key`; `order`, `desc` or `asc`.
-- `filter`, `traffic`, `limit`, `mode=approx`, `exact=true` as for `/pivot`.
+- `filter`, `traffic`, `limit`, `mode=approx`, `exact=true`, `empty` as for `/pivot`. With
+  `empty=null`, a window with no row matching a count, session, user or distinct metric reports
+  `null` instead of `0`, and so do the `change` and `relativeChange` computed from it.
 
 ```json
 {
@@ -1247,6 +1261,7 @@ src/Nealytics.Engine/
       QueryColumns.cs                     # The groupBy/filter allowlist: core columns + active dimensions
       FilterParser.cs                     # column:value and measure<op>number, one grammar for every read
       ScopeClause.cs                      # tenant/time/traffic/eventType/filter WHERE for raw and rollup reads
+      EmptyCells.cs                       # empty=zero|null, how a cell nothing contributed to is reported
     Diagnostics/
       TelemetryDiagnostics.cs             # Metrics and tracing
     Security/

@@ -121,14 +121,28 @@ public sealed partial class GetBreakdownQuery
         sql.Append(" AS value FROM nealytics_core.global_events");
         sql.Append(where);
         sql.Append(" GROUP BY key)");
-        sql.Append(" SELECT key, value,");
-        sql.Append(" (SELECT sum(value) FROM grouped) AS grand_total,");
+        AppendSelection(sql, request);
         sql.Append(" (SELECT count() FROM grouped) AS group_count");
         sql.Append(" FROM grouped ORDER BY ");
         sql.Append(orderBy);
         sql.Append(" LIMIT {limit:Int32}");
 
         return (sql.ToString(), parameters);
+    }
+
+    private static void AppendSelection(StringBuilder sql, in BreakdownRequest request)
+    {
+        if (request.EmptyAsNull
+            && request.Metric == BreakdownMetric.Measure
+            && string.Equals(request.MeasureFunction, "count", StringComparison.Ordinal))
+        {
+            sql.Append(" SELECT key, nullIf(value, 0),");
+            sql.Append(" (SELECT nullIf(sum(value), 0) FROM grouped) AS grand_total,");
+            return;
+        }
+
+        sql.Append(" SELECT key, value,");
+        sql.Append(" (SELECT sum(value) FROM grouped) AS grand_total,");
     }
 
     public async Task<BreakdownResponse> ExecuteAsync(
@@ -173,21 +187,25 @@ public sealed partial class GetBreakdownQuery
             await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
             List<BreakdownRow> rows = new(request.Limit);
-            double total = 0;
+            double? empty = request.EmptyAsNull ? null : 0;
+            double? total = empty;
             long groupCount = 0;
 
             while (await reader.ReadAsync(cancellationToken))
             {
+                double? value = reader.IsDBNull(1)
+                    ? empty
+                    : Convert.ToDouble(reader.GetValue(1), CultureInfo.InvariantCulture);
+
                 rows.Add(new BreakdownRow
                 {
                     Key = reader.IsDBNull(0) ? string.Empty : reader.GetString(0),
-                    Value = reader.IsDBNull(1)
-                        ? 0
-                        : Convert.ToDouble(reader.GetValue(1), CultureInfo.InvariantCulture),
+                    Value = value,
+                    Share = value.HasValue ? 0 : null,
                 });
 
                 total = reader.IsDBNull(2)
-                    ? 0
+                    ? empty
                     : Convert.ToDouble(reader.GetValue(2), CultureInfo.InvariantCulture);
                 groupCount = Convert.ToInt64(reader.GetValue(3), CultureInfo.InvariantCulture);
             }
@@ -198,7 +216,7 @@ public sealed partial class GetBreakdownQuery
             {
                 for (int i = 0; i < rows.Count; i++)
                 {
-                    rows[i].Share = (double)rows[i].Value / total;
+                    rows[i].Share = rows[i].Value / total;
                 }
             }
 
@@ -283,8 +301,7 @@ public sealed partial class GetBreakdownQuery
         }
 
         sql.Append(')');
-        sql.Append(" SELECT key, value,");
-        sql.Append(" (SELECT sum(value) FROM grouped) AS grand_total,");
+        AppendSelection(sql, request);
         sql.Append(" (SELECT count() FROM grouped) AS group_count");
         sql.Append(" FROM grouped ORDER BY ");
         sql.Append(orderBy);

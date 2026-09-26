@@ -150,9 +150,9 @@ public sealed partial class GetDistributionQuery
             await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
             long count = 0;
-            double min = 0;
-            double max = 0;
-            double avg = 0;
+            double? min = 0;
+            double? max = 0;
+            double? avg = 0;
             List<DistributionQuantile> quantiles = new(request.Quantiles.Count);
             List<DistributionBucket> buckets = new(request.Edges.Count + 1);
 
@@ -164,13 +164,21 @@ public sealed partial class GetDistributionQuery
                 avg = ReadNumber(reader, 3);
 
                 double[] values = count == 0 ? [] : ReadArray(reader, 4);
+                double? empty = request.EmptyAsNull && count == 0 ? null : 0;
+
+                if (empty is null)
+                {
+                    min = null;
+                    max = null;
+                    avg = null;
+                }
 
                 for (int i = 0; i < request.Quantiles.Count; i++)
                 {
                     quantiles.Add(new DistributionQuantile
                     {
                         Q = request.Quantiles[i],
-                        Value = i < values.Length && double.IsFinite(values[i]) ? values[i] : 0,
+                        Value = i < values.Length && double.IsFinite(values[i]) ? values[i] : empty,
                     });
                 }
 

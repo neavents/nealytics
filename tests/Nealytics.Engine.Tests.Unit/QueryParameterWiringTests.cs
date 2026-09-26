@@ -64,7 +64,7 @@ public class QueryParameterWiringTests : IClassFixture<NoDatabaseWebFactory>
         {
             "breakdown",
             $"/api/v1/analytics/breakdown?metric=events&groupBy=event_type&eventType=view&{Range}"
-            + "&limit=100&orderBy=value_desc&traffic=normal&exact=true"
+            + "&limit=100&orderBy=value_desc&traffic=normal&exact=true&empty=null"
         },
         {
             "top",
@@ -73,7 +73,22 @@ public class QueryParameterWiringTests : IClassFixture<NoDatabaseWebFactory>
         {
             "timeseries",
             $"/api/v1/analytics/timeseries?limit=100&interval=day&{Range}&eventType=view"
-            + "&groupBy=event_type&tz=Europe/Istanbul&traffic=normal"
+            + "&groupBy=event_type&tz=Europe/Istanbul&traffic=normal&metric=sessions:view&empty=null"
+        },
+        {
+            "pivot",
+            $"/api/v1/analytics/pivot?groupBy=event_type&metric=events:view&metric=sessions&{Range}"
+            + "&limit=100&orderBy=1&order=asc&traffic=normal&mode=approx&exact=true&empty=null"
+        },
+        {
+            "compare",
+            $"/api/v1/analytics/compare?metric=sessions:view&groupBy=event_type&{Range}&tz=Europe/Istanbul"
+            + "&traffic=normal&orderBy=change&order=asc&limit=100&mode=approx&empty=null"
+        },
+        {
+            "distribution",
+            $"/api/v1/analytics/distribution?of=session_duration&quantiles=0.5,0.9&buckets=1000,5000&{Range}"
+            + "&traffic=normal&mode=approx&empty=null"
         },
         {
             "sessions",
@@ -142,6 +157,11 @@ public class QueryParameterWiringTests : IClassFixture<NoDatabaseWebFactory>
     [InlineData("/api/v1/analytics/active?tz=Europe%2FIstanbul%20%21")]
     [InlineData("/api/v1/analytics/breakdown?groupBy=no_such_column")]
     [InlineData("/api/v1/analytics/top?dimension=no_such_column")]
+    [InlineData("/api/v1/analytics/breakdown?metric=events&groupBy=event_type&empty=nil")]
+    [InlineData("/api/v1/analytics/timeseries?metric=events&empty=nil")]
+    [InlineData("/api/v1/analytics/pivot?groupBy=event_type&metric=events&empty=nil")]
+    [InlineData("/api/v1/analytics/compare?metric=events&empty=nil")]
+    [InlineData("/api/v1/analytics/distribution?of=session_duration&empty=nil")]
     public async Task GenuinelyBadValuesAreStillRejected(string url)
     {
         HttpResponseMessage? response = await GetAsync(url);

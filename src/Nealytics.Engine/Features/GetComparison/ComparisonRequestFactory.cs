@@ -38,6 +38,7 @@ public readonly struct ComparisonQueryParameters
     public string? Limit { get; init; }
     public string? OrderBy { get; init; }
     public string? Order { get; init; }
+    public string? Empty { get; init; }
 }
 
 public static class ComparisonRequestFactory
@@ -175,6 +176,11 @@ public static class ComparisonRequestFactory
             return ComparisonRequestResult.Fail(StatusBadRequest, TrafficFilter.Rejection(raw.Traffic));
         }
 
+        if (!EmptyCells.TryParse(raw.Empty, out bool emptyAsNull))
+        {
+            return ComparisonRequestResult.Fail(StatusBadRequest, EmptyCells.Rejection(raw.Empty));
+        }
+
         ComparisonOrder order = ComparisonOrder.Current;
 
         switch (raw.OrderBy)
@@ -229,6 +235,7 @@ public static class ComparisonRequestFactory
             Descending = descending,
             Approximate = string.Equals(raw.Mode, "approx", StringComparison.Ordinal),
             Exact = RequestParsing.IsFlag(raw.Exact),
+            EmptyAsNull = emptyAsNull,
         });
     }
 }

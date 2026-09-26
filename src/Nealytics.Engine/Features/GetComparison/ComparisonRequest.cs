@@ -32,6 +32,7 @@ public readonly struct ComparisonRequest
     public bool Descending { get; init; }
     public bool Approximate { get; init; }
     public bool Exact { get; init; }
+    public bool EmptyAsNull { get; init; }
 
     public QueryScope Scope => new()
     {

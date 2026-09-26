@@ -2,6 +2,7 @@ namespace Nealytics.Engine.Features.GetDistribution;
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 using Nealytics.Engine.Infrastructure.Query;
 
 public enum DistributionSubject
@@ -26,6 +27,7 @@ public readonly struct DistributionRequest
     public IReadOnlyList<double> Quantiles { get; init; }
     public IReadOnlyList<double> Edges { get; init; }
     public bool Approximate { get; init; }
+    public bool EmptyAsNull { get; init; }
 
     public QueryScope Scope => new()
     {
@@ -42,7 +44,9 @@ public readonly struct DistributionRequest
 public sealed class DistributionQuantile
 {
     public double Q { get; init; }
-    public double Value { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public double? Value { get; init; } = 0;
 }
 
 public sealed class DistributionBucket
@@ -61,9 +65,15 @@ public sealed class DistributionResponse
     public DateTime To { get; init; }
     public string Mode { get; init; } = "exact";
     public long Count { get; init; }
-    public double Min { get; init; }
-    public double Max { get; init; }
-    public double Avg { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public double? Min { get; init; } = 0;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public double? Max { get; init; } = 0;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public double? Avg { get; init; } = 0;
     public IReadOnlyList<DistributionQuantile> Quantiles { get; init; } = Array.Empty<DistributionQuantile>();
     public IReadOnlyList<DistributionBucket> Buckets { get; init; } = Array.Empty<DistributionBucket>();
 }

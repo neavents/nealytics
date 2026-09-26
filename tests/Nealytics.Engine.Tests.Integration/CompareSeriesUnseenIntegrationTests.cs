@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Features.GetComparison;
+using Nealytics.Engine.Features.GetDistribution;
 using Nealytics.Engine.Features.GetEventTimeSeries;
 using Nealytics.Engine.Features.GetPivot;
 using Nealytics.Engine.Features.GetUnseenObjects;
@@ -27,6 +28,7 @@ public class CompareSeriesUnseenIntegrationTests : IntegrationTestBase, IAsyncLi
     private readonly string _project = $"p-reads-{Guid.NewGuid():N}";
     private readonly string _tenant = $"t-{Guid.NewGuid():N}";
     private readonly string _foreign = $"t-{Guid.NewGuid():N}";
+    private readonly string _sparse = $"t-{Guid.NewGuid():N}";
     private readonly string _rollup = $"cmp_{Guid.NewGuid():N}"[..20];
 
     private static readonly DateTime Today = DateTime.UtcNow.Date;
@@ -47,7 +49,7 @@ public class CompareSeriesUnseenIntegrationTests : IntegrationTestBase, IAsyncLi
         {
             ClickHouseConnectionString = ClickHouseTestSupport.ConnectionString,
             ConnectionPoolSize = 2,
-            Measures = [new MeasureOptions { Name = Measure, Type = "UInt32", Aggregations = "sum,avg,p95" }],
+            Measures = [new MeasureOptions { Name = Measure, Type = "UInt32", Aggregations = "sum,avg,p95,count" }],
             Rollups =
             [
                 new RollupOptions { Name = _rollup, Grain = "day", EventTypes = "", Dimensions = "object_id", Measures = Measure + ":avg" },
@@ -108,7 +110,10 @@ public class CompareSeriesUnseenIntegrationTests : IntegrationTestBase, IAsyncLi
             Row(_tenant, "s5", "view", "a", Today.AddDays(-2), 9, 800),
             Row(_tenant, "s6", "view", "c", Today.AddDays(-5), 9, null),
             Row(_tenant, "bot", "view", "f", current, 13, 5000, "bot"),
-            Row(_foreign, "x1", "view", "e", current, 9, 9000));
+            Row(_foreign, "x1", "view", "e", current, 9, 9000),
+            Row(_sparse, "z1", "view", "z", current, 9, 0),
+            Row(_sparse, "y1", "view", "y", current, 10, null),
+            Row(_sparse, "x1", "impression", "x", Today.AddDays(-4), 11, null));
 
         await ClickHouseTestSupport.ExecuteAsync(
             "INSERT INTO nealytics_core.global_events "
@@ -475,5 +480,177 @@ public class CompareSeriesUnseenIntegrationTests : IntegrationTestBase, IAsyncLi
         json.Should().NotContain("NaN").And.NotContain("Infinity");
         response.Rows.Single(r => r.Key == "d").Value.Should().Be(0);
         response.Rows.Single(r => r.Key == "a").Value.Should().Be(420);
+    }
+
+    private PivotRequest SparsePivot(string? empty, string[] metrics) =>
+        PivotRequestFactory.Create(
+            _project, _sparse, "object_id", metrics, [], Iso(PreviousFrom), Iso(Today), null, null, null, null, null, null, empty,
+            _columns, _measures, 100, 24, DateTime.UtcNow).Request;
+
+    [Fact]
+    public async Task APivotCellWithNoMatchingRowsIsNullOnRequest_AndAGenuineZeroStaysZero()
+    {
+        string[] metrics = ["sum(probe_ms):view", "events:view", "users:view", "avg(probe_ms):view", "count(probe_ms):view"];
+        GetPivotQuery query = new(_connections, Guard(), _rollups, NullLogger<GetPivotQuery>.Instance);
+
+        PivotResponse zeros = await query.ExecuteAsync(SparsePivot(null, metrics), CancellationToken.None);
+        PivotResponse nulls = await query.ExecuteAsync(SparsePivot("null", metrics), CancellationToken.None);
+
+        zeros.Source.Should().Be("raw");
+        zeros.Rows.Select(r => r.Key).Should().Equal(nulls.Rows.Select(r => r.Key));
+        zeros.Rows.Single(r => r.Key == "z").Values.Should().Equal(0, 1, 0, 0, 1);
+        zeros.Rows.Single(r => r.Key == "y").Values.Should().Equal(0, 1, 0, 0, 0);
+        zeros.Rows.Single(r => r.Key == "x").Values.Should().Equal(0, 0, 0, 0, 0);
+        nulls.Rows.Single(r => r.Key == "z").Values.Should().Equal(0, 1, 0, 0, 1);
+        nulls.Rows.Single(r => r.Key == "y").Values.Should().Equal(null, 1, 0, null, null);
+        nulls.Rows.Single(r => r.Key == "x").Values.Should().Equal(null, null, null, null, null);
+        nulls.Totals.Should().Equal(0, 2, 0, 0, 1);
+
+        string json = JsonSerializer.Serialize(nulls, TelemetryAotContext.Default.PivotResponse);
+        json.Should().Contain("{\"key\":\"x\",\"values\":[null,null,null,null,null]}");
+        JsonSerializer.Serialize(zeros, TelemetryAotContext.Default.PivotResponse)
+            .Should().Contain("{\"key\":\"x\",\"values\":[0,0,0,0,0]}");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task APivotCellIsNullOnRequestFromARollupAsFromRaw(bool routed)
+    {
+        if (!routed)
+        {
+            _rollups.MarkUnroutable(_rollups.Declared[0], "test");
+        }
+
+        PivotResponse response = await new GetPivotQuery(_connections, Guard(), _rollups, NullLogger<GetPivotQuery>.Instance)
+            .ExecuteAsync(SparsePivot("null", ["events:view", "sessions:view", "avg(probe_ms):view"]), CancellationToken.None);
+
+        response.Source.Should().Be(routed ? "rollup:" + _rollup : "raw");
+        response.Rows.Single(r => r.Key == "z").Values.Should().Equal(1, 1, 0);
+        response.Rows.Single(r => r.Key == "y").Values.Should().Equal(1, 1, null);
+        response.Rows.Single(r => r.Key == "x").Values.Should().Equal(new double?[] { null, null, null });
+        response.Totals.Should().Equal(2, 2, 0);
+    }
+
+    [Fact]
+    public async Task ABreakdownMeasureWithNothingToAggregateIsNullOnRequest()
+    {
+        GetBreakdownQuery query = new(_connections, Guard(), _rollups, NullLogger<GetBreakdownQuery>.Instance);
+
+        BreakdownRequest Request(string metric, string? empty) => BreakdownRequestFactory.Create(
+            _project, _sparse, metric, "object_id", null, [], Iso(PreviousFrom), Iso(Today),
+            null, "key_asc", null, null, null, empty, _columns, _measures, 100, 24, DateTime.UtcNow).Request;
+
+        BreakdownResponse counted = await query.ExecuteAsync(Request("count(probe_ms)", "null"), CancellationToken.None);
+        counted.Rows.Select(r => (r.Key, r.Value, r.Share)).Should().Equal(
+            ("x", (double?)null, (double?)null), ("y", null, null), ("z", 1, 1));
+        counted.Total.Should().Be(1);
+
+        BreakdownResponse summed = await query.ExecuteAsync(Request("sum(probe_ms)", "null"), CancellationToken.None);
+        summed.Rows.Select(r => (r.Key, r.Value)).Should().Equal(("x", (double?)null), ("y", null), ("z", 0));
+        summed.Total.Should().Be(0);
+
+        BreakdownResponse zeros = await query.ExecuteAsync(Request("count(probe_ms)", null), CancellationToken.None);
+        zeros.Rows.Select(r => (r.Key, r.Value, r.Share)).Should().Equal(
+            ("x", (double?)0, (double?)0), ("y", 0, 0), ("z", 1, 1));
+    }
+
+    [Fact]
+    public async Task AComparisonWindowWithNoRowsIsNullOnRequest_WhileRowsWithoutUsersStayZero()
+    {
+        ComparisonRequest Request(string metric, string? groupBy, string? empty) => ComparisonRequestFactory.Create(
+            new ComparisonQueryParameters
+            {
+                ProjectId = _project,
+                TenantId = _sparse,
+                Metrics = [metric],
+                GroupBy = groupBy,
+                Filters = [],
+                From = Iso(CurrentFrom),
+                To = Iso(Today),
+                Empty = empty,
+            },
+            _columns, _measures, 100, 24, DateTime.UtcNow).Request;
+
+        ComparisonResponse grouped = await ComparisonQuery().ExecuteAsync(Request("sessions:view", "object_id", "null"), CancellationToken.None);
+        grouped.Rows.Select(r => (r.Key, r.Value.Current, r.Value.Previous, r.Value.Change)).Should().Equal(
+            ("y", (double?)1, (double?)null, (double?)null), ("z", 1, null, null));
+        grouped.Totals.Current.Should().Be(2);
+        grouped.Totals.Previous.Should().BeNull();
+
+        ComparisonResponse defaulted = await ComparisonQuery().ExecuteAsync(Request("sessions:view", "object_id", null), CancellationToken.None);
+        defaulted.Rows.Select(r => (r.Key, r.Value.Current, r.Value.Previous)).Should().Equal(
+            ("y", (double?)1, (double?)0), ("z", 1, 0));
+        defaulted.Totals.Previous.Should().Be(0);
+
+        ComparisonResponse users = await ComparisonQuery().ExecuteAsync(Request("users:view", null, "null"), CancellationToken.None);
+        users.Totals.Current.Should().Be(0);
+        users.Totals.Previous.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CompareOverHttpHonoursEmptyAndRefusesAnUnknownValue()
+    {
+        async Task<HttpResponseMessage> Get(string query)
+        {
+            using HttpRequestMessage request = new(HttpMethod.Get,
+                $"/api/v1/analytics/compare?metric=events:view&from={Iso(CurrentFrom)}&to={Iso(Today)}" + query);
+            request.Headers.Add("Authorization", $"Bearer {GetJwt(_project, _sparse)}");
+            return await Client.SendAsync(request);
+        }
+
+        HttpResponseMessage nulls = await Get("&empty=null");
+        string text = await nulls.Content.ReadAsStringAsync();
+        nulls.StatusCode.Should().Be(HttpStatusCode.OK, text);
+        JsonElement totals = JsonSerializer.Deserialize<JsonElement>(text).GetProperty("totals");
+        totals.GetProperty("current").GetDouble().Should().Be(2);
+        totals.GetProperty("previous").ValueKind.Should().Be(JsonValueKind.Null);
+
+        HttpResponseMessage zeros = await Get("&empty=zero");
+        zeros.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonSerializer.Deserialize<JsonElement>(await zeros.Content.ReadAsStringAsync())
+            .GetProperty("totals").GetProperty("previous").GetDouble().Should().Be(0);
+
+        HttpResponseMessage refused = await Get("&empty=nothing");
+        refused.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await refused.Content.ReadAsStringAsync()).Should().Contain("'empty' must be zero or null. Got 'nothing'.");
+    }
+
+    [Fact]
+    public async Task ASeriesBucketWithoutAMatchingRowIsNullOnRequest()
+    {
+        GetEventTimeSeriesQuery query = new(_connections, Guard(), NullLogger<GetEventTimeSeriesQuery>.Instance);
+
+        EventTimeSeriesRequest Request(string metric, string? empty) => EventTimeSeriesRequestFactory.Create(
+            _project, _sparse, null, "day", Iso(PreviousFrom), Iso(Today), null, null, null, null,
+            [], metric, empty, _columns, _measures, 100, 24, DateTime.UtcNow).Request;
+
+        (await query.ExecuteAsync(Request("events:view", "null"), CancellationToken.None)).Points
+            .Select(p => (p.Bucket, p.Count, p.Value)).Should().Equal(
+                (Today.AddDays(-4), 1L, (double?)null), (Today.AddDays(-3), 2L, (double?)2));
+        (await query.ExecuteAsync(Request("users:view", "null"), CancellationToken.None)).Points
+            .Select(p => p.Value).Should().Equal(new double?[] { null, 0 });
+        (await query.ExecuteAsync(Request("events:view", null), CancellationToken.None)).Points
+            .Select(p => p.Value).Should().Equal(0, 2);
+    }
+
+    [Fact]
+    public async Task ADistributionOfNothingIsNullOnRequest()
+    {
+        GetDistributionQuery query = new(_connections, Guard(), NullLogger<GetDistributionQuery>.Instance);
+
+        DistributionRequest Request(string? empty) => DistributionRequestFactory.Create(
+            _project, _sparse, Measure, "purchase", [], Iso(PreviousFrom), Iso(Today), "0.5", "10", null, null, empty,
+            _columns, _measures, 24, DateTime.UtcNow).Request;
+
+        DistributionResponse nulls = await query.ExecuteAsync(Request("null"), CancellationToken.None);
+        nulls.Count.Should().Be(0);
+        (nulls.Min, nulls.Max, nulls.Avg).Should().Be(((double?)null, (double?)null, (double?)null));
+        nulls.Quantiles.Single().Value.Should().BeNull();
+        nulls.Buckets.Select(b => b.Count).Should().Equal(0, 0);
+
+        DistributionResponse zeros = await query.ExecuteAsync(Request(null), CancellationToken.None);
+        (zeros.Min, zeros.Max, zeros.Avg).Should().Be(((double?)0, (double?)0, (double?)0));
+        zeros.Quantiles.Single().Value.Should().Be(0);
     }
 }
