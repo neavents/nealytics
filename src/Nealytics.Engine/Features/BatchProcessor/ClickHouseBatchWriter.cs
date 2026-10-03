@@ -46,11 +46,6 @@ public sealed partial class ClickHouseBatchWriter : ITelemetryBatchWriter
     private static partial void LogMeasureValuesRejected(
         ILogger logger, string measure, int rejectedCount, int batchCount, string declaredType);
 
-    /// <summary>
-    /// The INSERT's column list, built from <paramref name="layout"/> rather than written out —
-    /// the engine does not know the deployment's dimension names, and the value-array dictionary
-    /// is built from the same list so the two cannot disagree.
-    /// </summary>
     internal static string BuildInsertColumns(TelemetryColumnLayout layout)
     {
         StringBuilder builder = new(256);
@@ -85,7 +80,6 @@ public sealed partial class ClickHouseBatchWriter : ITelemetryBatchWriter
     public async Task WriteAsync(
         IReadOnlyList<GlobalTelemetryPayload> batch, int count, CancellationToken cancellationToken)
     {
-        // Buffers own their own rent/return; see TelemetryColumnBuffers for why.
         using TelemetryColumnBuffers buffers = new(count, _layout);
 
         buffers.Fill(batch);
@@ -106,21 +100,11 @@ public sealed partial class ClickHouseBatchWriter : ITelemetryBatchWriter
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Do not put this connection back. A ClickHouse restart leaves connections reporting
-            // Open while being unusable, so a pooled corpse is handed straight back to the next
-            // retry — which is how a database blip that resolved itself in seconds turned into a
-            // service that needed restarting. Throwing away a healthy connection costs one
-            // reconnect; keeping a dead one costs every batch after it.
             lease.Discard();
             throw;
         }
     }
 
-    /// <summary>
-    /// A value that arrived and did not survive is a data loss event, so it is counted and named.
-    /// The batch still goes in — one unparseable cell must not cost the other events in it, and
-    /// beacons cannot retry.
-    /// </summary>
     private void ReportRejectedDimensionValues(TelemetryColumnBuffers buffers, int count)
     {
         IReadOnlyList<DimensionColumnBuffer> dimensionBuffers = buffers.DimensionBuffers;

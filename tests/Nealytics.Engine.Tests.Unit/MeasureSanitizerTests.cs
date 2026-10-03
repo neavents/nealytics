@@ -126,7 +126,7 @@ public class MeasureSanitizerTests
     {
         TelemetryEngineOptions options = new()
         {
-            Dimensions = [new DimensionOptions { Name = "menu_id", Type = "String" }],
+            Dimensions = [new DimensionOptions { Name = "article_id", Type = "String" }],
             Measures = [new MeasureOptions { Name = "dwell_ms", Type = "UInt32" }],
         };
 
@@ -134,7 +134,7 @@ public class MeasureSanitizerTests
         MeasureSanitizer sanitizer = new(
             new MeasureRegistry(options, dimensions), NullLogger<MeasureSanitizer>.Instance);
 
-        GlobalTelemetryPayload payload = Payload(new Dictionary<string, string> { ["menu_id"] = "01ABC" });
+        GlobalTelemetryPayload payload = Payload(new Dictionary<string, string> { ["article_id"] = "01ABC" });
 
         sanitizer.Sanitize(payload).Should().Be(1,
             "the two maps are separate kinds, and a dimension arriving in the measures map would "

@@ -36,8 +36,6 @@ public sealed partial class ApiKeyValidator
                     + "pin would silently protect nothing, so it is refused rather than ignored.");
             }
 
-            // A key that pins a project but is not accepted at all is dead configuration, and dead
-            // security configuration is worse than none: it reads as a control that is in force.
             if (!_validKeys.Contains(declared.Key))
             {
                 throw new InvalidOperationException(
@@ -74,13 +72,6 @@ public sealed partial class ApiKeyValidator
 
     public bool IsValid(string key) => _validKeys.Contains(key);
 
-    /// <summary>
-    /// Whether this key may write this project.
-    ///
-    /// True for any key with no pin, which is every key in a deployment that has not opted in. The
-    /// permissive default is deliberate: turning this on for everyone would break every existing
-    /// deployment at once, and a security control that arrives as an outage gets reverted.
-    /// </summary>
     public bool MayWriteProject(string key, string projectId) =>
         !_pinnedProjects.TryGetValue(key, out string? pinned)
         || string.Equals(pinned, projectId, StringComparison.Ordinal);

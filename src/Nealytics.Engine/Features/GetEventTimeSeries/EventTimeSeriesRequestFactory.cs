@@ -138,7 +138,6 @@ public static class EventTimeSeriesRequestFactory
             return EventTimeSeriesRequestResult.Fail(StatusBadRequest, TrafficFilter.Rejection(trafficRaw));
         }
 
-        // The same parser /breakdown uses, so a filter means one thing across the engine.
         FilterParser.Result parsedFilters = FilterParser.Parse(filtersRaw ?? [], columns, measures, MaxFieldLength);
 
         if (parsedFilters.Outcome != FilterParser.Outcome.Ok)

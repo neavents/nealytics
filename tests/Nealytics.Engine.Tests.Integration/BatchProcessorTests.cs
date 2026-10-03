@@ -18,7 +18,7 @@ public class BatchProcessorFlushTests : IntegrationTestBase
         // This class asserts an exact count under a project id that is the same on every run, so it
         // has to start from a known state. It never cleaned up: it was relying on another class's
         // `TRUNCATE TABLE global_events` running first and emptying the whole table — which also
-        // destroyed the estate's real analytics. With the truncate gone this failed honestly on the
+        // destroyed a running deployment's real analytics. With the truncate gone this failed honestly on the
         // second run ("expected 3, found 6"), which is what a test with no cleanup should always
         // have done.
         await ClickHouseTestSupport.DeleteProjectsAsync(projectId);

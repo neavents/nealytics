@@ -77,8 +77,8 @@ public sealed partial class GetTopEventsQuery
         using Activity? activity = TelemetryDiagnostics.Source.StartActivity("GetTopEventsQuery.Execute");
         activity?.SetTag("db.system", "clickhouse");
         activity?.SetTag("db.operation", "select");
-        activity?.SetTag("neavents.project_id", request.ProjectId);
-        activity?.SetTag("neavents.tenant_id", request.TenantId);
+        activity?.SetTag("nealytics.project_id", request.ProjectId);
+        activity?.SetTag("nealytics.tenant_id", request.TenantId);
 
         string dimensionWire = request.DimensionColumn;
         LogQueryStarted(_logger, request.ProjectId, request.TenantId, dimensionWire);
@@ -117,7 +117,7 @@ public sealed partial class GetTopEventsQuery
                 items.Add(item);
             }
 
-            activity?.SetTag("neavents.records_returned", items.Count);
+            activity?.SetTag("nealytics.records_returned", items.Count);
             TelemetryDiagnostics.ReadQueriesExecuted.Add(1);
 
             return new TopEventsResponse

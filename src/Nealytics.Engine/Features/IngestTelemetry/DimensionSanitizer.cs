@@ -6,26 +6,8 @@ using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Diagnostics;
 using Nealytics.Engine.Infrastructure.Serialization;
 
-/// <summary>
-/// Strips dimension keys the deployment has not declared, before the payload reaches the WAL.
-///
-/// Two rules, both deliberate.
-///
-/// <b>Per field, never per event or per batch.</b> The client is <c>navigator.sendBeacon</c>: it
-/// cannot retry and its caller cannot react to a rejection. Losing a whole session's events
-/// because one key was misspelled is far worse than losing one field.
-///
-/// <b>Counted and logged, never silent.</b> An unregistered dimension disappearing without a
-/// trace is the exact failure the declared-dimension design exists to end. A Cloudflare Worker in
-/// this estate returned <c>204</c> for three months while discarding every analytics beacon, and
-/// the only evidence was a table that stopped growing.
-///
-/// Sanitizing happens before the WAL append so a replay cannot reintroduce a key the registry
-/// rejected — the log on disk and the declared schema stay one story.
-/// </summary>
 public sealed partial class DimensionSanitizer
 {
-    /// <summary>Cap on names quoted in a single log line, so a hostile payload cannot flood the log.</summary>
     private const int MaxNamesPerLogLine = 8;
 
     private readonly DimensionRegistry _registry;
@@ -44,20 +26,8 @@ public sealed partial class DimensionSanitizer
     private static partial void LogUndeclaredDimensions(
         ILogger logger, int droppedCount, string eventType, string projectId, string names);
 
-    /// <summary>
-    /// Removes undeclared keys from <paramref name="payload"/> in place. Returns how many were
-    /// dropped.
-    /// </summary>
     public int Sanitize(GlobalTelemetryPayload payload) => Sanitize(payload, out _);
 
-    /// <summary>
-    /// The same, reporting which keys were removed.
-    ///
-    /// The names come from the removal itself rather than from a second pass that reproduces the
-    /// rule. Two implementations of "is this declared" are two things to keep in step, and the one
-    /// that gets read — a response header, a validation report — is not the one that decides what
-    /// is stored, so a divergence would show the caller a set that was never what happened.
-    /// </summary>
     public int Sanitize(GlobalTelemetryPayload payload, out IReadOnlyList<string> dropped)
     {
         dropped = [];

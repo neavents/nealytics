@@ -16,8 +16,8 @@ namespace Nealytics.Engine.Tests.Integration;
 /// real <c>/schema</c> call in production.
 ///
 /// <b>What the census is for.</b> A declared dimension nothing fills is indistinguishable, at every
-/// other layer, from a venue with no traffic: config valid, column present, query returns 200, zero
-/// rows. Four dimensions in the Neavents deployment sat in exactly that state for the whole
+/// other layer, from a tenant with no traffic: config valid, column present, query returns 200, zero
+/// rows. Four dimensions in one deployment sat in exactly that state for the whole
 /// retention window because the producer filling them was written and never deployed. Nothing
 /// reported a problem — the only component able to tell those apart is the one holding the rows.
 ///
@@ -25,7 +25,7 @@ namespace Nealytics.Engine.Tests.Integration;
 /// probe columns and then puts rows in them. <c>SchemaReconcilerGuardTests</c> boots real
 /// migrators, and a migrator that meets an undeclared column holding data refuses to start — by
 /// design. Run in parallel, that is a genuine failure with a correct error message, arriving in a
-/// class that did nothing wrong, on some runs and not others. The estate files that shape as
+/// class that did nothing wrong, on some runs and not others. A suite reports that shape as
 /// flakiness; it is the guard working on a race the test suite created.
 /// </summary>
 [Collection("ClickHouse")]
@@ -156,7 +156,7 @@ public class ColumnPopulationIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task AMeasureNothingSendsReportsZeroRatherThanFailing()
     {
-        // The exact shape of the estate's finding: dwell_ms declared, reconciled, and NULL on every
+        // The exact shape of a real deployment's finding: dwell_ms declared, reconciled, and NULL on every
         // row because the value was still going to metadata_json.
         IReadOnlyDictionary<string, long> counts = await RunAsync();
 

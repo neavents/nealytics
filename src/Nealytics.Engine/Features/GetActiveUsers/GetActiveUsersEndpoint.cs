@@ -30,11 +30,6 @@ public static class GetActiveUsersEndpoint
             ActiveUsersRequestResult parsed = ActiveUsersRequestFactory.Create(
                 user.FindFirst("project_id")?.Value,
                 user.FindFirst("tenant_id")?.Value,
-                // Named, not positional. Nine consecutive string? parameters accept any order the
-                // compiler is given, and they were in the wrong one: `to` was landing in the
-                // `traffic` slot, so TrafficFilter rejected a timestamp and this endpoint returned
-                // 400 to every request that set `to`. Nothing caught it, because the unit tests call
-                // this factory directly and therefore pass the arguments correctly by construction.
                 limitRaw: context.Request.Query["limit"].ToString(),
                 intervalRaw: context.Request.Query["interval"].ToString(),
                 byRaw: context.Request.Query["by"].ToString(),

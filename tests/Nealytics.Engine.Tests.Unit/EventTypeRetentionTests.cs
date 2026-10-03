@@ -22,7 +22,7 @@ namespace Nealytics.Engine.Tests.Unit;
 /// The configuration, the review and the log would all have said a year.</item>
 /// </list>
 ///
-/// The second is why the boot refuses that combination instead of applying it. It is the estate's
+/// The second is why the boot refuses that combination instead of applying it. It is a
 /// recurring failure — a change that reports success while quietly keeping the old behaviour — and
 /// here it destroys data.
 /// </summary>

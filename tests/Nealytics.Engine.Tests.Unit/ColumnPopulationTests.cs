@@ -11,18 +11,16 @@ namespace Nealytics.Engine.Tests.Unit;
 /// <b>Why this exists.</b> A dimension that is declared, reconciled into ClickHouse, offered by the
 /// query allowlist and returned by <c>/schema</c> can still be empty on every row, because nothing
 /// upstream sends it. Every layer reports success; the column is simply blank. That is
-/// indistinguishable, from the outside, from a venue that had no traffic — and only one of those is
+/// indistinguishable, from the outside, from a tenant that had no traffic — and only one of those is
 /// a bug.
 ///
-/// It is not a hypothetical. Four dimensions in this estate's own declaration — <c>locale</c>,
-/// <c>translation_present</c>, <c>query_id</c> and <c>has_photo</c> — were declared, created, and
-/// empty on all 4,542 rows for the entire retention window, because the producer that fills them
+/// It is not a hypothetical. Four dimensions in one deployment's declaration were declared,
+/// created, and empty on all 4,542 rows for the entire retention window, because the producer that fills them
 /// was written but never deployed. Finding that took hand-written ClickHouse SQL against the
 /// container. It should take one authenticated GET, which is what this endpoint is for.
 ///
-/// The same shape burned this estate before at the other end: <c>menu_id</c> was populated for
-/// months with the packed payload's dense id, so a leaderboard built on it rendered two healthy
-/// bars labelled "0" and "01MENU". Population is not proof of correctness — but absence of
+/// The same shape shows up at the other end: an <c>article_id</c> populated for months with a
+/// producer's internal index renders a leaderboard of healthy bars labelled "0" and "1". Population is not proof of correctness — but absence of
 /// population is proof of a gap, and that half is cheap to report.
 /// </summary>
 public class ColumnPopulationTests

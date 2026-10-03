@@ -93,8 +93,8 @@ public class MeasureRegistryTests
     public void NameAlreadyDeclaredAsADimension_RefusesTheBoot()
     {
         Action build = () => Build(
-            [Valid("menu_id")],
-            [new DimensionOptions { Name = "menu_id", Type = "String" }]);
+            [Valid("article_id")],
+            [new DimensionOptions { Name = "article_id", Type = "String" }]);
 
         build.Should().Throw<InvalidOperationException>()
             .WithMessage("*already declared under TelemetryEngine:Dimensions*");
@@ -104,8 +104,8 @@ public class MeasureRegistryTests
     public void NameCollidingWithARetiredDimension_StillRefusesTheBoot()
     {
         Action build = () => Build(
-            [Valid("menu_id")],
-            [new DimensionOptions { Name = "menu_id", Type = "String", Retired = true }]);
+            [Valid("article_id")],
+            [new DimensionOptions { Name = "article_id", Type = "String", Retired = true }]);
 
         build.Should().Throw<InvalidOperationException>(
             "a retired dimension keeps its column, so the name is still taken");

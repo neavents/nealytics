@@ -26,14 +26,9 @@ services:
     environment:
       - ASPNETCORE_URLS=http://+:5000
       - TelemetryEngine__ClickHouseConnectionString=Host=telemetry-db;Port=9000;Database=nealytics_core;User=default;Password=;
-      # The headline feature, switched on by default so `docker compose up` demonstrates it rather
-      # than describing it. The engine knows none of the names in that file; it reads the
-      # declaration at boot and creates the matching columns, and GET /api/v1/schema then reports
-      # back exactly what this deployment collects. Point it at your own file to get your own
-      # vocabulary out of the same binary.
       - TelemetryEngine__SchemaFile=/etc/nealytics/schema.json
       - TelemetryEngine__WriteAheadLogDirectory=/app/logs/
-      - TelemetryEngine__AllowedProjectKeys=neavents:projkey123,authhub:projkey456,ita:projkey789
+      - TelemetryEngine__AllowedProjectKeys=myapp:mykey123
       - TelemetryEngine__JwtSymmetricKey=replace_this_please
       - TelemetryEngine__MaxRequestBodyBytes=1048576
       - TelemetryEngine__MaxQueryLimit=10000
@@ -59,7 +54,7 @@ services:
       - DOTNET_gcConcurrent=1
     volumes:
       - wal_logs:/app/logs/
-      - ./neavents-schema.example.json:/etc/nealytics/schema.json:ro
+      - ./example-schema.json:/etc/nealytics/schema.json:ro
     depends_on:
       - telemetry-db
     ulimits:

@@ -23,13 +23,13 @@ namespace Nealytics.Engine.Tests.Unit;
 /// </summary>
 public class SessionRollupTests
 {
-    private static Rollup Sessions(string dimensions = "menu_id,locale", string measures = "dwell_ms:sum,dwell_ms:max")
+    private static Rollup Sessions(string dimensions = "article_id,locale", string measures = "dwell_ms:sum,dwell_ms:max")
     {
         TelemetryEngineOptions options = new()
         {
             Dimensions =
             [
-                new DimensionOptions { Name = "menu_id", Type = "String" },
+                new DimensionOptions { Name = "article_id", Type = "String" },
                 new DimensionOptions { Name = "locale", Type = "LowCardinality" },
             ],
             Measures = [new MeasureOptions { Name = "dwell_ms", Type = "UInt32", Aggregations = "sum,max" }],
@@ -80,7 +80,7 @@ public class SessionRollupTests
         // regroups.
         ddl.Should().Contain("event_date Date");
         ddl.Should().Contain("PARTITION BY toYYYYMM(event_date)");
-        ddl.Should().Contain("ORDER BY (project_id, tenant_id, event_date, session_id, traffic_class, menu_id, locale)");
+        ddl.Should().Contain("ORDER BY (project_id, tenant_id, event_date, session_id, traffic_class, article_id, locale)");
     }
 
     [Fact]
@@ -124,7 +124,7 @@ public class SessionRollupTests
         string view = RollupRegistry.BuildViewDdl(Sessions());
 
         view.Should().Contain("toDate(timestamp) AS event_date");
-        view.Should().Contain("GROUP BY project_id, tenant_id, event_date, session_id, traffic_class, menu_id, locale");
+        view.Should().Contain("GROUP BY project_id, tenant_id, event_date, session_id, traffic_class, article_id, locale");
         view.Should().NotContain("toStartOfDay");
         view.Should().NotContain("toStartOfHour");
     }
@@ -136,7 +136,7 @@ public class SessionRollupTests
 
         // AggregatingMergeTree refuses a nullable sorting key outright, and this is also exactly how
         // /breakdown renders a key — so the two agree by construction rather than by luck.
-        view.Should().Contain("ifNull(toString(menu_id), '') AS menu_id");
+        view.Should().Contain("ifNull(toString(article_id), '') AS article_id");
     }
 
     [Fact]
@@ -178,8 +178,8 @@ public class SessionRollupTests
         // The session branch must not have changed the shape of the rollups already in production.
         TelemetryEngineOptions options = new()
         {
-            Dimensions = [new DimensionOptions { Name = "menu_id", Type = "String" }],
-            Rollups = [new RollupOptions { Name = "daily", Grain = "day", Dimensions = "menu_id" }],
+            Dimensions = [new DimensionOptions { Name = "article_id", Type = "String" }],
+            Rollups = [new RollupOptions { Name = "daily", Grain = "day", Dimensions = "article_id" }],
         };
 
         DimensionRegistry dimensions = new(options);
@@ -207,12 +207,12 @@ public class SessionRollupRoutingTests
     {
         TelemetryEngineOptions options = new()
         {
-            Dimensions = [new DimensionOptions { Name = "menu_id", Type = "String" }],
+            Dimensions = [new DimensionOptions { Name = "article_id", Type = "String" }],
             Rollups =
             [
                 new RollupOptions
                 {
-                    Name = "sessions", Grain = grain, Dimensions = "menu_id", EventTypes = eventTypes,
+                    Name = "sessions", Grain = grain, Dimensions = "article_id", EventTypes = eventTypes,
                 },
             ],
         };
@@ -267,7 +267,7 @@ public class SessionRollupRoutingTests
         // It holds only those rows, so its per-session event count is not the session's event
         // count. A perfectly good rollup that answers a different question.
         GetSessionAnalyticsQuery.SelectRollup(
-            Request(Midnight, NextWeek), Registry(eventTypes: "app_open,menu_view"))
+            Request(Midnight, NextWeek), Registry(eventTypes: "app_open,article_view"))
             .Should().BeNull();
     }
 

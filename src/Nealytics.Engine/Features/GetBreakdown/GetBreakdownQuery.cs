@@ -15,14 +15,6 @@ using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Storage;
 using Octonica.ClickHouseClient;
 
-/// <summary>
-/// The generic breakdown: count a metric, grouped by any allowed column.
-///
-/// This is the query that makes the engine reusable. It knows nothing about what it is grouping —
-/// the column name arrives from <see cref="QueryColumns"/>, which is built from the
-/// deployment's declared dimensions, so the same code answers "top menus" here and "top authors"
-/// in a clone.
-/// </summary>
 public sealed partial class GetBreakdownQuery
 {
     private readonly ClickHouseConnectionFactory _connectionFactory;
@@ -50,15 +42,6 @@ public sealed partial class GetBreakdownQuery
             + "The response says so — callers must not read the rows as complete.")]
     private static partial void LogTruncated(ILogger logger, string groupBy, long groupCount, int limit);
 
-    /// <summary>
-    /// Builds the statement.
-    ///
-    /// Every caller-supplied <i>value</i> is a ClickHouse parameter. The only interpolated text is
-    /// <see cref="BreakdownRequest.GroupByColumn"/> and each filter's column, and those are not
-    /// caller strings at all — they are instances the allowlist held before the request arrived.
-    /// ClickHouse has no parameter form for an identifier, so this is the one safe construction
-    /// available, and it is safe because the caller's bytes never reach the builder.
-    /// </summary>
     internal static (string Sql, IReadOnlyList<KeyValuePair<string, object?>> Parameters) BuildQuery(
         in BreakdownRequest request) => BuildQuery(request, null);
 
@@ -76,15 +59,9 @@ public sealed partial class GetBreakdownQuery
         string aggregate = request.Metric switch
         {
             BreakdownMetric.Events => request.Exact ? "uniqExact(event_id)" : "count()",
-            // uniqExact holds every distinct value in memory; uniq is HyperLogLog and holds a
-            // fixed small amount whatever the cardinality. Exact stays the default so no existing
-            // number moves, but a wide range over a large estate needs the escape hatch or the
-            // query does not get slower, it fails.
             BreakdownMetric.Sessions => request.Approximate ? "uniq(session_id)" : "uniqExact(session_id)",
             BreakdownMetric.Users => request.Approximate ? "uniq(user_id)" : "uniqExact(user_id)",
 
-            // Both halves are canonical instances resolved from the registry and a closed map, so
-            // neither has ever been caller input. Same property QueryColumns relies on.
             BreakdownMetric.Measure => $"{request.MeasureFunction}({request.MeasureColumn})",
 
             _ => throw new ArgumentOutOfRangeException(nameof(request), request.Metric, "Unhandled metric."),
@@ -106,10 +83,6 @@ public sealed partial class GetBreakdownQuery
             _ => throw new ArgumentOutOfRangeException(nameof(request), request.Order, "Unhandled order."),
         };
 
-        // One statement, not three. The rows, the grand total and the number of groups have to
-        // agree with each other, and issuing them separately means each sees a different set of
-        // rows as ingestion continues — so `share` would not sum to what the totals imply and
-        // `truncated` could be computed against a group count the rows never had.
         StringBuilder sql = new(768);
         sql.Append("WITH grouped AS (SELECT ifNull(toString(");
         sql.Append(request.GroupByColumn);
@@ -134,8 +107,8 @@ public sealed partial class GetBreakdownQuery
         using Activity? activity = TelemetryDiagnostics.Source.StartActivity("GetBreakdownQuery.Execute");
         activity?.SetTag("db.system", "clickhouse");
         activity?.SetTag("db.operation", "select");
-        activity?.SetTag("neavents.project_id", request.ProjectId);
-        activity?.SetTag("neavents.tenant_id", request.TenantId);
+        activity?.SetTag("nealytics.project_id", request.ProjectId);
+        activity?.SetTag("nealytics.tenant_id", request.TenantId);
         activity?.SetTag("nealytics.group_by", request.GroupByColumn);
 
         string metricWire = request.MetricWire ?? BreakdownRequestFactory.ToWireFormat(request.Metric);
@@ -189,8 +162,6 @@ public sealed partial class GetBreakdownQuery
                 groupCount = Convert.ToInt64(reader.GetValue(3), CultureInfo.InvariantCulture);
             }
 
-            // Against the grand total, not the sum of returned rows: a capped response's shares
-            // then add up to less than one, which is the honest reading of a partial list.
             if (total > 0)
             {
                 for (int i = 0; i < rows.Count; i++)
@@ -205,7 +176,7 @@ public sealed partial class GetBreakdownQuery
                 LogTruncated(_logger, request.GroupByColumn, groupCount, request.Limit);
             }
 
-            activity?.SetTag("neavents.records_returned", rows.Count);
+            activity?.SetTag("nealytics.records_returned", rows.Count);
             activity?.SetTag("nealytics.truncated", truncated);
             TelemetryDiagnostics.ReadQueriesExecuted.Add(1);
 
@@ -235,17 +206,6 @@ public sealed partial class GetBreakdownQuery
         }
     }
 
-    /// <summary>
-    /// The same statement shape, read from pre-aggregated state instead of raw rows.
-    ///
-    /// The CTE, the grand total and the group count are identical on purpose: `share` and
-    /// `truncated` must mean exactly what they mean on the raw path, or a chart would change
-    /// meaning when it changed source.
-    ///
-    /// The range is half open — `bucket >= from AND bucket < to`. A rollup row is one whole bucket,
-    /// and <see cref="RollupPlanner.IsAligned"/> has already refused any range whose ends are not on
-    /// a boundary, so every bucket this touches is fully inside the request.
-    /// </summary>
     private static (string Sql, IReadOnlyList<KeyValuePair<string, object?>> Parameters) BuildRollupQuery(
         in BreakdownRequest request,
         RollupPlan plan,

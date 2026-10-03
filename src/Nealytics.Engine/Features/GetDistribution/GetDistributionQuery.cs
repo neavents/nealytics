@@ -124,8 +124,8 @@ public sealed partial class GetDistributionQuery
         using Activity? activity = TelemetryDiagnostics.Source.StartActivity("GetDistributionQuery.Execute");
         activity?.SetTag("db.system", "clickhouse");
         activity?.SetTag("db.operation", "select");
-        activity?.SetTag("neavents.project_id", request.ProjectId);
-        activity?.SetTag("neavents.tenant_id", request.TenantId);
+        activity?.SetTag("nealytics.project_id", request.ProjectId);
+        activity?.SetTag("nealytics.tenant_id", request.TenantId);
         activity?.SetTag("nealytics.subject", request.Wire);
 
         LogQueryStarted(_logger, request.Wire, request.ProjectId, request.TenantId);

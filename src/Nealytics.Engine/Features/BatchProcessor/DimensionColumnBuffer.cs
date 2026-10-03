@@ -5,15 +5,6 @@ using System.Buffers;
 using System.Globalization;
 using Nealytics.Engine.Infrastructure.Configuration;
 
-/// <summary>
-/// A pooled column array for one declared dimension.
-///
-/// The engine cannot have a strongly-typed field per dimension any more — it does not know their
-/// names — so each dimension owns a buffer that knows its own ClickHouse type and how to turn the
-/// wire string into it. The rent/return discipline is the same as the core columns':
-/// reference-typed arrays are cleared on return, because a pooled <c>string[]</c> handed to a
-/// later batch without clearing leaks one tenant's ids into another tenant's rows.
-/// </summary>
 internal abstract class DimensionColumnBuffer : IDisposable
 {
     protected DimensionColumnBuffer(Dimension dimension)
@@ -23,14 +14,8 @@ internal abstract class DimensionColumnBuffer : IDisposable
 
     internal Dimension Dimension { get; }
 
-    /// <summary>
-    /// Values that were present but could not be parsed as the declared type. Counted rather than
-    /// discarded quietly — a value vanishing without a trace is the failure this whole design
-    /// exists to end.
-    /// </summary>
     internal int RejectedValueCount { get; private set; }
 
-    /// <summary>Writes <paramref name="raw"/> at <paramref name="index"/>, or the column's absent value.</summary>
     internal void Set(int index, string? raw)
     {
         if (!TrySet(index, raw))
@@ -40,12 +25,10 @@ internal abstract class DimensionColumnBuffer : IDisposable
         }
     }
 
-    /// <summary>The value array, sliced to the batch length, as the driver wants it.</summary>
     internal abstract object BuildSegment(int count);
 
     public abstract void Dispose();
 
-    /// <summary>False when a non-empty value did not parse as the declared type.</summary>
     protected abstract bool TrySet(int index, string? raw);
 
     protected abstract void SetAbsent(int index);
@@ -72,8 +55,6 @@ internal abstract class DimensionColumnBuffer : IDisposable
 
         protected override bool TrySet(int index, string? raw)
         {
-            // Absent and empty both become NULL. An empty string would otherwise become its own
-            // GROUP BY bucket that means "we did not receive this", which is what NULL already says.
             _values[index] = string.IsNullOrEmpty(raw) ? null : raw;
             return true;
         }
@@ -94,8 +75,6 @@ internal abstract class DimensionColumnBuffer : IDisposable
             _values = ArrayPool<string>.Shared.Rent(capacity);
         }
 
-        // LowCardinality columns are not nullable here: empty string rather than null keeps a
-        // GROUP BY total, the same choice device_class/os/browser/country already make.
         protected override bool TrySet(int index, string? raw)
         {
             _values[index] = raw ?? string.Empty;

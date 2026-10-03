@@ -143,8 +143,8 @@ public sealed partial class GetFunnelQuery
     {
         using Activity? activity = TelemetryDiagnostics.Source.StartActivity("GetFunnelQuery.Execute");
         activity?.SetTag("db.system", "clickhouse");
-        activity?.SetTag("neavents.project_id", request.ProjectId);
-        activity?.SetTag("neavents.tenant_id", request.TenantId);
+        activity?.SetTag("nealytics.project_id", request.ProjectId);
+        activity?.SetTag("nealytics.tenant_id", request.TenantId);
 
         LogQueryStarted(
             _logger, request.ProjectId, request.TenantId, request.Steps.Count, request.WindowSeconds);

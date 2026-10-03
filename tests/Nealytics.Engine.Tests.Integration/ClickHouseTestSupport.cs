@@ -36,10 +36,10 @@ public static class ClickHouseTestSupport
     /// <para>This replaced <c>TRUNCATE TABLE nealytics_core.global_events</c>, which two test
     /// classes ran in <c>InitializeAsync</c>. There is no separate test database: the connection
     /// string defaults to <c>127.0.0.1:9000/nealytics_core</c>, which on a developer machine is the
-    /// container the dashboard reads. So <c>dotnet test</c> destroyed the estate's analytics, every
+    /// container a local deployment reads. So <c>dotnet test</c> destroyed that deployment's analytics, every
     /// time, and left the table holding nothing but the suite's own <c>p-bd</c>/<c>p-flush</c>
-    /// fixtures. Measured before this change: 55 rows, all synthetic, not one belonging to project
-    /// <c>neavents</c>.</para>
+    /// fixtures. Measured before this change: 55 rows, all synthetic, not one belonging to the
+    /// deployment's own project.</para>
     ///
     /// <para>Nothing needed the table empty — every assertion in those classes is scoped by a JWT
     /// carrying <c>project_id</c>, and each class uses project ids no other class touches. What

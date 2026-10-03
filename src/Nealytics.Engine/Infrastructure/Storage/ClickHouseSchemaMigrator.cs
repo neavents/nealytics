@@ -15,39 +15,11 @@ using Nealytics.Engine.Infrastructure.Configuration;
 using Octonica.ClickHouseClient;
 using Octonica.ClickHouseClient.Exceptions;
 
-/// <summary>
-/// Reconciles the declared dimensions against the live shape of <c>global_events</c>.
-///
-/// <c>clickhouse-init.sql</c> is mounted into <c>docker-entrypoint-initdb.d</c>, so it runs
-/// exactly once, against an empty data volume. Any deployment that already has data never sees
-/// it — which is why this exists at all. It also cannot know the deployment's dimensions, which
-/// are declared in configuration; those columns are created here or nowhere.
-///
-/// It runs before the batch writer takes traffic: a missing column rejects <b>entire batches</b>,
-/// not one row, and telemetry has no retry once the beacon returns.
-///
-/// <para><b>On concurrency.</b> There is deliberately no advisory lock. ClickHouse has none, and
-/// the Postgres lesson does not transfer: <c>ADD COLUMN IF NOT EXISTS</c> is idempotent so two
-/// replicas racing converge, and replicas of one deployment read the same config so they cannot
-/// disagree about a type. A genuine disagreement means two different configs deployed at once —
-/// a deploy error, which the type-mismatch check below turns into a refused boot.</para>
-///
-/// <para><b>Two kinds of failure, two answers.</b> A <see cref="SchemaReconciliationException"/> —
-/// a declared type that contradicts the column, or a column holding data nobody declared — is a
-/// disagreement between config and storage. Restarting will not fix it, so the boot is refused.
-/// Failing to <i>reach</i> ClickHouse is the opposite: transient, and refusing to start would take
-/// analytics reads down because the write path could not be widened. That is logged loudly and the
-/// service comes up; the batch writer's own retries handle the rest.</para>
-/// </summary>
 public sealed partial class ClickHouseSchemaMigrator : IHostedService
 {
     private const string Database = "nealytics_core";
     private const string Table = "global_events";
 
-    /// <summary>
-    /// Raised when configuration and storage disagree about the schema. Distinct from any
-    /// connection failure on purpose: this one is never swallowed.
-    /// </summary>
     public sealed class SchemaReconciliationException : InvalidOperationException
     {
         public SchemaReconciliationException(string message) : base(message)
@@ -55,10 +27,6 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         }
     }
 
-    /// <summary>
-    /// Core columns, kept in step with <c>clickhouse-init.sql</c> by hand — the two describe the
-    /// same table. Nothing deployment-specific belongs here; that is what the registry is for.
-    /// </summary>
     internal static readonly IReadOnlyList<string> CoreStatements =
     [
         $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS user_id Nullable(String)",
@@ -73,9 +41,6 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS referrer LowCardinality(String) DEFAULT ''",
         $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS ingested_at DateTime64(3, 'UTC') DEFAULT now64(3)",
 
-        // Metadata-only and idempotent, verified on 26.7.1 including on a Nullable(String). Existing
-        // parts stay unindexed until their next merge, so this speeds up new data first -- which is
-        // the right way round, since the drilldown it serves is mostly asked about recent events.
         $"ALTER TABLE {Database}.{Table} ADD INDEX IF NOT EXISTS idx_object_id object_id TYPE bloom_filter(0.01) GRANULARITY 4",
     ];
 
@@ -83,28 +48,11 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         @"TTL\s+toDateTime\(timestamp\)\s*\+\s*(?:toInterval[Dd]ay\((\d+)\)|INTERVAL\s+(\d+)\s+DAY)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    /// <summary>
-    /// One clause of a compound TTL, written against the form ClickHouse actually stores.
-    ///
-    /// Read off 26.7.1 rather than assumed: <c>INTERVAL 30 DAY</c> comes back as
-    /// <c>toIntervalDay(30)</c>, the <c>DELETE</c> keyword is dropped because it is the default,
-    /// and the condition survives verbatim. Both spellings are accepted so a table created by an
-    /// older init script still parses.
-    /// </summary>
     private static readonly Regex RetentionRulePattern = new(
         @"toDateTime\(timestamp\)\s*\+\s*(?:toInterval[Dd]ay\((?<d1>\d+)\)|INTERVAL\s+(?<d2>\d+)\s+DAY)"
         + @"(?:\s+DELETE)?(?:\s+WHERE\s+event_type\s*=\s*'(?<event>[^']*)')?",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    /// <summary>
-    /// What an event type may be called for the purposes of a TTL condition.
-    ///
-    /// Event types are never declared -- ingestion accepts whatever it is sent -- so there is no
-    /// registry to check a name against, and this string is interpolated into DDL. The shape is
-    /// therefore the whole defence: no quote, no backslash, no whitespace, no semicolon can appear
-    /// in a name that matches. Deliberately more permissive than the dimension pattern, because a
-    /// deployment's event vocabulary is its own and may well be camelCase or dotted.
-    /// </summary>
     private static readonly Regex EventTypeNamePattern =
         new(@"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
@@ -246,8 +194,6 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         }
         catch (SchemaReconciliationException)
         {
-            // Config and storage disagree. Deterministic, and a restart will not change it — the
-            // whole point of the guard is that the boot stops here.
             throw;
         }
         catch (Exception ex)
@@ -277,7 +223,6 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
             {
                 if (dimension.Retired)
                 {
-                    // Retired and never created. Nothing to keep, nothing to add.
                     LogRetiredDimension(_logger, dimension.Name, 0);
                     continue;
                 }
@@ -367,23 +312,11 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    /// <summary>
-    /// Whitespace is not semantic in a ClickHouse type, so it is normalised away before comparing.
-    /// The raw strings are what gets logged, so a refusal still shows exactly what was read.
-    /// </summary>
     internal static bool TypesMatch(string declared, string actual) =>
         string.Equals(Normalize(declared), Normalize(actual), StringComparison.Ordinal);
 
     private static string Normalize(string type) => type.Replace(" ", string.Empty, StringComparison.Ordinal);
 
-    /// <summary>
-    /// The most important rule here.
-    ///
-    /// Without it, deleting one line from config leaves the column and its data in place while new
-    /// writes for that dimension start being rejected and the query API stops offering it. A hole
-    /// begins accumulating and the widget that would have shown you goes blank at the same instant.
-    /// The symptom and the evidence disappear together, and someone notices three months later.
-    /// </summary>
     private async Task RefuseUndeclaredColumnsWithDataAsync(
         PooledClickHouseConnection pooled,
         Dictionary<string, string> live,
@@ -571,9 +504,6 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
     {
         StringBuilder ttl = new(128);
 
-        // Per-type clauses first, then the catch-all. Order is cosmetic -- measured on 26.7.1, every
-        // clause is evaluated independently and any match deletes, so the shortest applicable rule
-        // wins wherever it is written. Specific-before-general is simply how it reads.
         foreach (EventTypeRetentionOptions rule in perEventType)
         {
             ttl.Append("toDateTime(timestamp) + INTERVAL ").Append(rule.Days).Append(" DAY DELETE");
@@ -603,10 +533,6 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         return match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value;
     }
 
-    /// <summary>
-    /// Every TTL clause the live table carries, as (days, eventType) with a null event type for the
-    /// catch-all. Returns null when the table has no readable TTL at all.
-    /// </summary>
     internal static List<(int Days, string? EventType)>? ReadRetentionRules(string? createTableQuery)
     {
         if (string.IsNullOrEmpty(createTableQuery))
@@ -625,8 +551,6 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
             return null;
         }
 
-        // Bounded to the TTL clause. Scanning the whole statement would let a column named in a
-        // DEFAULT expression elsewhere be read as a retention rule.
         int end = createTableQuery.IndexOf("\nSETTINGS", ttlAt, StringComparison.Ordinal);
         string ttlText = end < 0 ? createTableQuery[ttlAt..] : createTableQuery[ttlAt..end];
 
@@ -647,11 +571,6 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         return rules.Count == 0 ? null : rules;
     }
 
-    /// <summary>
-    /// Whether the live TTL already says what the configuration says. Compared as a set, because
-    /// clause order carries no meaning to ClickHouse and reordering it must not look like drift --
-    /// a reconciler that logs drift on every boot trains people to stop reading the log.
-    /// </summary>
     internal static bool RetentionAgrees(
         List<(int Days, string? EventType)> actual,
         int retentionDays,
@@ -667,14 +586,6 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         return declared.SetEquals(actual);
     }
 
-    /// <summary>
-    /// Refuses a per-event-type retention that cannot do what it says.
-    ///
-    /// The longer-than-base case is the one that matters and it is not theoretical: declared
-    /// against a 90 day base, a 365 day rule for 'audit' deletes those rows at 90 days while the
-    /// configuration file, the code review and the log all say a year. Verified on 26.7.1 with a
-    /// 100-day-old row that a 365 day rule did not save.
-    /// </summary>
     internal static void ValidateEventTypeRetention(
         int retentionDays, IReadOnlyList<EventTypeRetentionOptions> perEventType)
     {
@@ -785,13 +696,6 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         return live;
     }
 
-    /// <summary>
-    /// Counts rows where the column has a value.
-    ///
-    /// The column name is interpolated because it comes from <c>system.columns</c> — the database's
-    /// own catalogue, never a caller — and ClickHouse has no parameter form for an identifier. It
-    /// is quoted with backticks so a name needing quoting still parses.
-    /// </summary>
     private static async Task<ulong> CountNonNullAsync(
         PooledClickHouseConnection pooled, string column, CancellationToken cancellationToken)
     {

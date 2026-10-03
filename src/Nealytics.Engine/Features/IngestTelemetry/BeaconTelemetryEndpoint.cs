@@ -54,13 +54,10 @@ public static partial class BeaconTelemetryEndpoint
                 return;
             }
 
-            // Covers the chunked case, where there is no Content-Length for the check above to read.
             IngestValidation.ApplyBodyLimit(context, options.Value.MaxRequestBodyBytes);
 
             try
             {
-                // Counted rather than trusted: a chunked request declares no length, so the check
-                // above never fires for one.
                 PipeReader bodyReader = PipeReader.Create(
                     new LengthLimitedStream(context.Request.Body, options.Value.MaxRequestBodyBytes));
                 int accepted = 0;
@@ -83,10 +80,6 @@ public static partial class BeaconTelemetryEndpoint
 
                     if (rejection != IngestRejection.None)
                     {
-                        // One bad element never fails the batch: sendBeacon cannot retry and its
-                        // caller cannot react, so refusing the other 49 events costs far more than
-                        // it protects. But it is counted, because the previous bare continue meant
-                        // a client could lose every event of one shape and see only 204s.
                         rejected++;
                         TelemetryDiagnostics.EventsRejected.Add(
                             1,
@@ -95,7 +88,6 @@ public static partial class BeaconTelemetryEndpoint
                         continue;
                     }
 
-                    // Before the WAL, so a replay cannot reintroduce a key the registry rejected.
                     dimensionSanitizer.Sanitize(payload!);
                     measureSanitizer.Sanitize(payload!);
 
@@ -104,8 +96,8 @@ public static partial class BeaconTelemetryEndpoint
                     accepted++;
                 }
 
-                activity?.SetTag("neavents.beacon_events", accepted);
-                activity?.SetTag("neavents.beacon_rejected", rejected);
+                activity?.SetTag("nealytics.beacon_events", accepted);
+                activity?.SetTag("nealytics.beacon_rejected", rejected);
 
                 if (rejected > 0)
                 {

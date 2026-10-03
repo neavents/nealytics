@@ -20,15 +20,6 @@ public sealed partial class GetSessionAnalyticsQuery
     private readonly RollupRegistry _rollups;
     private readonly ILogger<GetSessionAnalyticsQuery> _logger;
 
-    // One statement, not two, and the totals are computed over the whole range rather than the
-    // page.
-    //
-    // This used to return the LIMITed rows and sum them in C#, so uniqueSessionCount was capped by
-    // limit — with the default of 100 it read exactly 100 for any tenant with more traffic, and the
-    // average duration was the average of whichever 100 sessions happened to sort first. The
-    // dashboard's ROW_CAP workaround exists solely because of that. The totals now come from the
-    // same statement as the rows, for the reason /breakdown does it: issued separately, each would
-    // see a different set of rows as ingestion continues.
     public GetSessionAnalyticsQuery(
         ClickHouseConnectionFactory connectionFactory,
         RollupRegistry rollups,
@@ -39,21 +30,6 @@ public sealed partial class GetSessionAnalyticsQuery
         _logger = logger;
     }
 
-    /// <summary>
-    /// The session rollup that may answer this request, or null to scan raw.
-    ///
-    /// Three conditions, and each one is a way the answer would otherwise be quietly wrong rather
-    /// than merely slow:
-    ///
-    /// <list type="bullet">
-    /// <item><b>Both ends on midnight.</b> A rollup row covers a whole day, so answering 12:00-18:00
-    /// from it would return whole days — a number that is wrong and looks completely healthy.</item>
-    /// <item><b>The rollup filters no event types.</b> One declared over <c>app_open,menu_view</c>
-    /// holds only those rows, so its per-session event count is not the session's event count. It is
-    /// a perfectly good rollup that answers a different question.</item>
-    /// <item><b>It exists.</b> Absent one, raw is not a fallback, it is the answer.</item>
-    /// </list>
-    /// </summary>
     internal static Rollup? SelectRollup(in SessionAnalyticsRequest request, RollupRegistry rollups)
     {
         ArgumentNullException.ThrowIfNull(rollups);
@@ -92,19 +68,6 @@ public sealed partial class GetSessionAnalyticsQuery
 
         return null;
     }
-
-    /// <summary>
-    /// The same statement shape read from merged state, so every number the response carries keeps
-    /// the meaning it has on the raw path.
-    ///
-    /// <c>GROUP BY session_id</c> without the date is what recombines a session that crossed
-    /// midnight: it is stored as one row per day, and <c>minMerge</c>/<c>maxMerge</c> put the two
-    /// halves back together. Verified on 26.7.1 — a 23:50-00:05 session reads back as a single
-    /// 900-second session, and an event inserted after the fact extends it with no job to re-run.
-    ///
-    /// The range is half open on <c>event_date</c>, matching the rollup path in /breakdown, and
-    /// <see cref="SelectRollup"/> has already refused any range whose ends are not on midnight.
-    /// </summary>
 
     [LoggerMessage(EventId = 3001, Level = LogLevel.Information,
         Message = "Executing session analytics query for Project: {ProjectId} / Tenant: {TenantId}.")]
@@ -191,8 +154,8 @@ public sealed partial class GetSessionAnalyticsQuery
         using Activity? activity = TelemetryDiagnostics.Source.StartActivity("GetSessionAnalyticsQuery.Execute");
         activity?.SetTag("db.system", "clickhouse");
         activity?.SetTag("db.operation", "select");
-        activity?.SetTag("neavents.project_id", request.ProjectId);
-        activity?.SetTag("neavents.tenant_id", request.TenantId);
+        activity?.SetTag("nealytics.project_id", request.ProjectId);
+        activity?.SetTag("nealytics.tenant_id", request.TenantId);
 
         LogQueryStarted(_logger, request.ProjectId, request.TenantId);
         long startTicks = Stopwatch.GetTimestamp();
@@ -202,7 +165,7 @@ public sealed partial class GetSessionAnalyticsQuery
             Rollup? rollup = SelectRollup(request, _rollups);
             (string sqlCommandText, IReadOnlyList<KeyValuePair<string, object?>> parameters) =
                 BuildQuery(request, rollup);
-            activity?.SetTag("neavents.source", rollup is null ? "raw" : "rollup:" + rollup.Name);
+            activity?.SetTag("nealytics.source", rollup is null ? "raw" : "rollup:" + rollup.Name);
 
             await using PooledClickHouseConnection lease =
                 await _connectionFactory.AcquireAsync(cancellationToken);
@@ -251,7 +214,7 @@ public sealed partial class GetSessionAnalyticsQuery
                 sessions.Add(item);
             }
 
-            activity?.SetTag("neavents.sessions_returned", sessions.Count);
+            activity?.SetTag("nealytics.sessions_returned", sessions.Count);
             TelemetryDiagnostics.ReadQueriesExecuted.Add(1);
 
             return Aggregate(

@@ -35,10 +35,8 @@ public sealed class FunnelStepResult
     public string Label { get; init; } = string.Empty;
     public long Count { get; init; }
 
-    /// <summary>Share of the first step, 0..1. The first step is always 1.</summary>
     public double Conversion { get; init; }
 
-    /// <summary>Share of the immediately preceding step, 0..1.</summary>
     public double StepConversion { get; init; }
 }
 

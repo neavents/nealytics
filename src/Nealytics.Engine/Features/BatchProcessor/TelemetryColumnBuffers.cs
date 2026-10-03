@@ -6,22 +6,6 @@ using System.Collections.Generic;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Serialization;
 
-/// <summary>
-/// Owns the pooled column arrays for one insert batch.
-///
-/// These were nine locals in <see cref="ClickHouseBatchWriter"/>, rented at the top and returned
-/// in a <c>finally</c>, with the array list repeated three times over — rent, fill, build, return.
-/// Four hand-maintained copies of one list is a rent that eventually goes unreturned or a column
-/// that ends up misaligned by one.
-///
-/// The core array list now appears once, and the deployment's dimensions are not a list in this
-/// file at all: they come from <see cref="DimensionRegistry"/>, one
-/// <see cref="DimensionColumnBuffer"/> each, built in registry order from the same
-/// <see cref="TelemetryColumnLayout"/> the INSERT statement is built from.
-///
-/// Disposal returns every buffer, and reference-typed arrays are cleared on return so a pooled
-/// array cannot hand a later batch someone else's tenant id.
-/// </summary>
 internal sealed class TelemetryColumnBuffers : IDisposable
 {
     private readonly int _count;
@@ -89,7 +73,6 @@ internal sealed class TelemetryColumnBuffers : IDisposable
 
     internal IReadOnlyList<MeasureColumnBuffer> MeasureBuffers => _measureBuffers;
 
-    /// <summary>Copies one batch into the column arrays, in insert order.</summary>
     internal void Fill(IReadOnlyList<GlobalTelemetryPayload> batch)
     {
         DateTimeOffset ingestedAt = DateTimeOffset.UtcNow;
@@ -107,17 +90,12 @@ internal sealed class TelemetryColumnBuffers : IDisposable
             ObjectIds[i] = payload.ObjectId;
             Seqs[i] = payload.Seq;
 
-            // Anything the edge did not classify is normal traffic. Empty would become its own
-            // GROUP BY bucket and quietly fall outside the default filter.
             TrafficClasses[i] = string.IsNullOrEmpty(payload.TrafficClass) ? "normal" : payload.TrafficClass;
             PagePaths[i] = payload.PagePath ?? string.Empty;
             Referrers[i] = payload.Referrer ?? string.Empty;
 
-            // Server clock, stamped here rather than accepted from the caller: it is the only value
-            // in the row a client cannot get wrong, so clock skew is measurable against it.
             IngestedAts[i] = ingestedAt;
 
-            // LowCardinality columns: empty string rather than null keeps GROUP BY total.
             DeviceClasses[i] = payload.DeviceClass ?? string.Empty;
             OperatingSystems[i] = payload.Os ?? string.Empty;
             Browsers[i] = payload.Browser ?? string.Empty;
@@ -126,9 +104,6 @@ internal sealed class TelemetryColumnBuffers : IDisposable
             MetadataJsons[i] = payload.MetadataJson;
             Timestamps[i] = TelemetryInsertMath.ToClickHouseTimestamp(payload.Timestamp);
 
-            // Driven by the registry, never by the payload's keys. A payload carrying a key that
-            // is no longer declared — a WAL record written before a dimension was retired, say —
-            // simply is not read, rather than widening the insert to a column that may not exist.
             Dictionary<string, string>? dimensions = payload.Dimensions;
             for (int d = 0; d < _dimensionBuffers.Length; d++)
             {
@@ -149,12 +124,6 @@ internal sealed class TelemetryColumnBuffers : IDisposable
         }
     }
 
-    /// <summary>
-    /// Column name to buffer, built by walking <see cref="TelemetryColumnLayout.ColumnNames"/> —
-    /// the same list <see cref="ClickHouseBatchWriter"/> builds its INSERT from. The driver binds
-    /// by name, so a key that is not in that list is a rejected batch, and a name in the list with
-    /// no key here is the same.
-    /// </summary>
     internal Dictionary<string, object?> BuildColumns()
     {
         Dictionary<string, object?> columns = new(_layout.ColumnNames.Count, StringComparer.Ordinal)

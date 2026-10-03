@@ -13,8 +13,8 @@ namespace Nealytics.Engine.Tests.Unit;
 ///
 /// That is a hot-path cost, not a tidiness one. A benchmark at 20k req/s produced roughly 80,000
 /// JSON log lines a second and a <b>7.7 GB</b> file in minutes — every line formatted and written
-/// while the ingest path was trying to work, and in this estate also shipped to the collector over
-/// OTLP.
+/// while the ingest path was trying to work, and, wherever logs are exported, also shipped to the
+/// collector over OTLP.
 ///
 /// Dead configuration is the shape this codebase keeps paying for: something that reads, in review,
 /// like a setting somebody chose.

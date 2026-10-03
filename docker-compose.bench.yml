@@ -2,10 +2,6 @@ services:
   clickhouse-bench:
     image: clickhouse/clickhouse-server:latest
     container_name: nealytics-clickhouse-bench
-    # Deliberately not 9000/8123. The integration suite and scripts/smoke-test.sh both use
-    # docker-compose.test.yml on the default ports and both tear it down with `down -v` — so a
-    # benchmark sharing them destroys whatever else is running, and a publish that has been
-    # compiling for an hour is exactly the thing you do not want to discover this way.
     ports:
       - "9100:9000"
       - "8223:8123"

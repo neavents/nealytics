@@ -25,7 +25,7 @@ public class BreakdownIntegrationTests : IntegrationTestBase, IAsyncLifetime
     /// <summary>
     /// Every test in this class writes under the fixed project <c>p-bd</c>, isolating itself with a
     /// per-test tenant instead. That keeps the assertions independent but leaves the rows behind,
-    /// and the table is shared with the running estate — so the class removes its own project when
+    /// and the table is shared with a running deployment — so the class removes its own project when
     /// it is done. Measured before this: 104 rows, growing by a full set every run.
     /// </summary>
     public Task DisposeAsync() => ClickHouseTestSupport.DeleteProjectsAsync("p-bd");
@@ -76,9 +76,9 @@ public class BreakdownIntegrationTests : IntegrationTestBase, IAsyncLifetime
         string tenantId = $"t-bd-{Guid.NewGuid():N}";
         const string projectId = "p-bd";
 
-        await Ingest(projectId, tenantId, "s1", "menu_view");
-        await Ingest(projectId, tenantId, "s2", "menu_view");
-        await Ingest(projectId, tenantId, "s3", "menu_view");
+        await Ingest(projectId, tenantId, "s1", "article_view");
+        await Ingest(projectId, tenantId, "s2", "article_view");
+        await Ingest(projectId, tenantId, "s3", "article_view");
         await Ingest(projectId, tenantId, "s4", "item_view");
         await SettleAsync();
 
@@ -88,7 +88,7 @@ public class BreakdownIntegrationTests : IntegrationTestBase, IAsyncLifetime
         JsonElement rows = body.GetProperty("rows");
         rows.GetArrayLength().Should().Be(2);
 
-        rows[0].GetProperty("key").GetString().Should().Be("menu_view");
+        rows[0].GetProperty("key").GetString().Should().Be("article_view");
         rows[0].GetProperty("value").GetInt64().Should().Be(3);
         rows[1].GetProperty("key").GetString().Should().Be("item_view");
         rows[1].GetProperty("value").GetInt64().Should().Be(1);
@@ -108,14 +108,14 @@ public class BreakdownIntegrationTests : IntegrationTestBase, IAsyncLifetime
 
         // One session, three events. A per-session metric must say 1, not 3 — that difference is
         // the whole point of offering the metric.
-        await Ingest(projectId, tenantId, "same-session", "menu_view");
-        await Ingest(projectId, tenantId, "same-session", "menu_view");
-        await Ingest(projectId, tenantId, "same-session", "menu_view");
-        await Ingest(projectId, tenantId, "other-session", "menu_view");
+        await Ingest(projectId, tenantId, "same-session", "article_view");
+        await Ingest(projectId, tenantId, "same-session", "article_view");
+        await Ingest(projectId, tenantId, "same-session", "article_view");
+        await Ingest(projectId, tenantId, "other-session", "article_view");
         await SettleAsync();
 
         JsonElement body = await Get(projectId, tenantId,
-            $"/api/v1/analytics/breakdown?metric=sessions&eventType=menu_view&groupBy=event_type{Range()}");
+            $"/api/v1/analytics/breakdown?metric=sessions&eventType=article_view&groupBy=event_type{Range()}");
 
         body.GetProperty("rows")[0].GetProperty("value").GetInt64().Should().Be(2);
     }

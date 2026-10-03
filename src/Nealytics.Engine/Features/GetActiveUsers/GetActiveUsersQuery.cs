@@ -69,8 +69,8 @@ public sealed partial class GetActiveUsersQuery
         using Activity? activity = TelemetryDiagnostics.Source.StartActivity("GetActiveUsersQuery.Execute");
         activity?.SetTag("db.system", "clickhouse");
         activity?.SetTag("db.operation", "select");
-        activity?.SetTag("neavents.project_id", request.ProjectId);
-        activity?.SetTag("neavents.tenant_id", request.TenantId);
+        activity?.SetTag("nealytics.project_id", request.ProjectId);
+        activity?.SetTag("nealytics.tenant_id", request.TenantId);
 
         string intervalWire = ActiveUsersIntervalParser.ToWireFormat(request.Interval);
         string dimensionWire = ActiveDimensionParser.ToWireFormat(request.Dimension);
@@ -111,7 +111,7 @@ public sealed partial class GetActiveUsersQuery
                 points.Add(point);
             }
 
-            activity?.SetTag("neavents.buckets_returned", points.Count);
+            activity?.SetTag("nealytics.buckets_returned", points.Count);
             TelemetryDiagnostics.ReadQueriesExecuted.Add(1);
 
             return new ActiveUsersResponse

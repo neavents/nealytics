@@ -42,16 +42,6 @@ using Serilog.Sinks.OpenTelemetry;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
-// A deployment's declared schema can live in a JSON file instead of indexed environment variables.
-//
-// Not a second configuration system — it is one more provider feeding the same IConfiguration and
-// the same TelemetryEngine section. It exists because the shape does not scale as environment
-// variables: a dozen dimensions and a dozen measures is seventy-odd TelemetryEngine__Measures__11__
-// lines, which is unreviewable, and in this estate it lived in a compose file that is not in any
-// repository. A file can be committed, diffed and reviewed.
-//
-// Re-adding the environment provider afterwards keeps the precedence everyone expects: the file
-// beats appsettings.json, and an environment variable still beats the file.
 string? schemaFile = builder.Configuration["TelemetryEngine:SchemaFile"];
 
 if (!string.IsNullOrWhiteSpace(schemaFile))
@@ -69,12 +59,6 @@ if (string.IsNullOrWhiteSpace(engineOpts.JwtSymmetricKey) || Encoding.UTF8.GetBy
     throw new InvalidOperationException("TelemetryEngine:JwtSymmetricKey must be at least 32 bytes.");
 }
 
-// Built eagerly, before anything can take traffic, because an invalid declaration throws here and
-// a refused boot is the only safe answer. The alternative — resolving it lazily on first ingest —
-// would let the service report healthy and then fail one request at a time.
-//
-// The engine ships with this list empty. What is in it comes from the deployment's configuration,
-// which is what makes this repo free of any one customer's vocabulary.
 DimensionRegistry dimensionRegistry = new(engineOpts);
 builder.Services.AddSingleton(dimensionRegistry);
 
@@ -99,26 +83,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, TelemetryAotContext.Default);
 });
 
-// The log pipeline had no exporter at all.
-//
-// Traces and metrics reach the collector through AddOpenTelemetry further down; logs went to the
-// console and nowhere else. Nothing about that is visible: a service that exports no logs looks
-// exactly like a service with nothing to report, and this one is the analytics ingest path, so
-// the records that never left cover every beacon this estate receives.
-//
-// Confirmed live on 2026-07-31 — 8,670 spans from Nealytics.Engine in two hours and not one log
-// line in the store. It was the last of the ten services still in that state.
-var nealyticsOtlpEndpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
+string? nealyticsOtlpEndpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
 
-// Read from configuration rather than hard-coded, because appsettings.json already declares
-// "Microsoft.AspNetCore": "Warning" and it did nothing at all: Serilog owns this pipeline outright
-// (see below) and never looks at Logging:LogLevel, so the setting read as a control that was in
-// force while ASP.NET Core logged four Information lines per request -- ExecutedEndpoint,
-// WritingResultAsJson, SettingStatusCode, RequestFinished.
-//
-// At ingest rates that is not a tidiness problem. A benchmark at 20k req/s produced 80k JSON log
-// lines a second and a 7.7 GB file in minutes, all of it formatted and written on the hot path, and
-// in this estate every one of those lines is also shipped to the collector over OTLP.
 static LogEventLevel NealyticsLevel(string? configured, LogEventLevel fallback) => configured switch
 {
     "Trace" => LogEventLevel.Verbose,
@@ -131,7 +97,7 @@ static LogEventLevel NealyticsLevel(string? configured, LogEventLevel fallback) 
     _ => fallback,
 };
 
-var nealyticsLogConfig = new LoggerConfiguration()
+LoggerConfiguration nealyticsLogConfig = new LoggerConfiguration()
     .MinimumLevel.Is(NealyticsLevel(
         builder.Configuration["Logging:LogLevel:Default"], LogEventLevel.Information))
     .MinimumLevel.Override("Microsoft.AspNetCore", NealyticsLevel(
@@ -145,11 +111,6 @@ if (!string.IsNullOrWhiteSpace(nealyticsOtlpEndpoint))
     {
         otlp.Endpoint = nealyticsOtlpEndpoint;
 
-        // Explicit rather than inherited. Serilog's sink does read OTEL_EXPORTER_OTLP_PROTOCOL, but
-        // only after this action runs and without saying so anywhere, so a deployment that sets the
-        // endpoint under a different key — which most of this estate does — silently falls back to
-        // gRPC against an HTTP/protobuf port and delivers nothing. The port is the one fact that
-        // cannot disagree with the endpoint: 4317 IS gRPC, 4318 IS http/protobuf.
         otlp.Protocol =
             Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_PROTOCOL")?.Trim().ToLowerInvariant() switch
             {
@@ -160,9 +121,6 @@ if (!string.IsNullOrWhiteSpace(nealyticsOtlpEndpoint))
                     : OtlpProtocol.HttpProtobuf,
             };
 
-        // Must match the serviceName the tracer registers below, exactly. The two pipelines build
-        // separate resources and share nothing, so a name set in one place and not the other files
-        // the logs under unknown_service:dotnet — delivered, stored, and attributed to nothing.
         otlp.ResourceAttributes = new Dictionary<string, object>
         {
             ["service.name"] = "Nealytics.Engine",
@@ -173,11 +131,6 @@ if (!string.IsNullOrWhiteSpace(nealyticsOtlpEndpoint))
 
 Log.Logger = nealyticsLogConfig.CreateLogger();
 
-// Serilog owns the log pipeline outright here and exports OTLP itself through the sink above, so
-// there is no second ILoggerProvider to forward to and no writeToProviders question to get wrong.
-// That question is real — its default of false is exactly what left the sibling dracula service
-// exporting nothing, under a comment claiming the bridge was connected — but the way to not get it
-// wrong is to not depend on it.
 builder.Host.UseSerilog(Log.Logger, dispose: true);
 
 builder.Services.AddCors(cors =>
@@ -186,10 +139,6 @@ builder.Services.AddCors(cors =>
     {
         if (string.IsNullOrWhiteSpace(engineOpts.CorsAllowedOrigins))
         {
-            // Said out loud rather than assumed. The default is any origin, which is right for
-            // getting started and wrong for a deployment — and an unset value looks identical to a
-            // deliberate one from outside, so the only way anyone learns which they have is a log
-            // line at boot.
             Log.Logger.Warning(
                 "TelemetryEngine:CorsAllowedOrigins is not set, so the beacon endpoint accepts a "
                 + "cross-origin POST from anywhere. Set it to the origins that serve your pages.");
@@ -247,9 +196,6 @@ builder.Services.AddSingleton<TelemetryChannelBroker>();
 builder.Services.AddSingleton<ApiKeyValidator>();
 builder.Services.AddSingleton<DimensionSanitizer>();
 builder.Services.AddSingleton<MeasureSanitizer>();
-// Widens global_events before the batch processor takes traffic. clickhouse-init.sql only runs
-// on an empty volume, so an existing deployment would otherwise reject every batch naming a
-// column added since it was first created.
 builder.Services.AddHostedService<ClickHouseSchemaMigrator>();
 builder.Services.AddSingleton<ITelemetryBatchWriter, ClickHouseBatchWriter>();
 builder.Services.AddHostedService<TelemetryBatchProcessor>();
@@ -265,25 +211,11 @@ builder.Services.AddScoped<GetPivotQuery>();
 builder.Services.AddScoped<GetDistributionQuery>();
 builder.Services.AddSingleton<GetEventTypesQuery>();
 builder.Services.AddSingleton<GetColumnPopulationQuery>();
-// The query allowlist. A singleton built from the registry, so groupBy/filter validation and the
-// schema reconciler can never disagree about which dimensions exist.
 builder.Services.AddSingleton(new QueryColumns(dimensionRegistry));
 
-// Where telemetry actually goes, and it went nowhere before this.
-//
-// AddOtlpExporter() with no configuration uses the SDK defaults: http://localhost:4317 over gRPC.
-// Inside a container localhost is the container itself, so every span and metric was posted to a port
-// nothing was listening on — silently, because the exporter retries in the background and logs at
-// debug. nealytics had no OTEL variables in docker-compose either, so nothing overrode it.
-//
-// The endpoint is read from OTEL_EXPORTER_OTLP_ENDPOINT, which is what the rest of the estate is given
-// and what compose now supplies. The protocol is resolved rather than defaulted: the collector is
-// addressed on :4318 everywhere here, and gRPC to an HTTP/protobuf port delivers nothing. That exact
-// mismatch shipped in identity, messaging, subscription and neaslator — the endpoint and the protocol
-// are set in different places, and neither looks wrong on its own.
 static void ConfigureOtlp(OtlpExporterOptions options)
 {
-    var endpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
+    string? endpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
     if (!string.IsNullOrWhiteSpace(endpoint))
     {
         options.Endpoint = new Uri(endpoint);
@@ -297,9 +229,6 @@ static void ConfigureOtlp(OtlpExporterOptions options)
 
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(resource => resource
-        // Without these a span arrives and cannot be attributed to anything. service.name in
-        // particular is what SigNoz groups by, so its absence makes traces effectively invisible even
-        // when they are delivered.
         .AddService(
             serviceName: "Nealytics.Engine",
             serviceVersion: "1.0",

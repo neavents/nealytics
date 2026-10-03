@@ -9,8 +9,8 @@ namespace Nealytics.Engine.Tests.Unit;
 ///
 /// The per-field drop rule is right — one misspelled key must not cost the whole event — but on its
 /// own it means a caller can integrate against this engine, get a 202 every time, and never learn
-/// that half of what they send is being discarded. That is the same shape as the Worker in this
-/// estate that returned 204 for three months while dropping every beacon.
+/// that half of what they send is being discarded. That is the same shape as an edge worker that
+/// returned 204 for three months while dropping every beacon.
 ///
 /// Headers rather than a body, because the status code is load-bearing for anything in front of
 /// this and a 202 that sometimes carries a JSON explanation is a worse contract than a 202 that

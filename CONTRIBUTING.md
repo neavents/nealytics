@@ -52,7 +52,8 @@ dotnet test --collect:"XPlat Code Coverage"
 The engine follows a deliberately strict style. Please match it in `src/`:
 
 - **No `var`.** Every local is written with its explicit type. This keeps value-type boxing and implicit allocation conversions visible.
-- **No comments** in engine source, SQL, or configuration files. Names should carry the intent.
+- **No comments** in engine source, SQL, or configuration files, including XML doc comments and `"//"` keys in JSON. Names should carry the intent. Reasoning a reader needs that names cannot carry goes in [`docs/design-notes.md`](docs/design-notes.md). `EngineSourceStyleTests` enforces this.
+- **No product vocabulary.** The engine knows no deployment's words; a deployment declares its own dimensions. `DomainVocabularyTests` fails on product words anywhere in engine source, SQL or configuration, comments and strings included.
 - **Vertical Slice Architecture.** Each feature lives in its own `Features/<Name>` folder with its endpoint, query/command, and DTOs. `Infrastructure` must never depend on `Features` (enforced by `ArchitectureTests`).
 - **Sealed by default.** Response models, payloads, and infrastructure classes are sealed (also enforced by `ArchitectureTests`).
 - Keep the parsing/validation logic out of endpoint lambdas and in a testable request factory, and keep I/O behind an interface where it helps testing (see `ITelemetryBatchWriter`).

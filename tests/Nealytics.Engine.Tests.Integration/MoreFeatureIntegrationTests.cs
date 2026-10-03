@@ -14,7 +14,7 @@ public class MoreFeatureIntegrationTests : IntegrationTestBase, IAsyncLifetime
     public Task InitializeAsync() => Task.CompletedTask;
     /// <summary>
     /// The fixed project ids this class writes under. The suite shares
-    /// nealytics_core.global_events with the running estate, so each class removes its own
+    /// nealytics_core.global_events with a running deployment, so each class removes its own
     /// rows — nothing else will. This used to be done, accidentally, by another class's
     /// TRUNCATE of the whole table.
     /// </summary>

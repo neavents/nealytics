@@ -10,8 +10,8 @@ namespace Nealytics.Engine.Tests.Unit;
 /// Scoping a time series to one entity.
 ///
 /// <b>What could not be asked before this.</b> <c>/timeseries</c> took no filters at all, so a
-/// series could only ever cover a whole tenant. "Scans over time for THIS menu" was not
-/// expressible — which meant a per-menu, per-section or per-item chart either showed the venue's
+/// series could only ever cover a whole tenant. "Views over time for THIS article" was not
+/// expressible — which meant a per-article, per-section or per-item chart either showed the tenant's
 /// total under an entity's heading, or could not be built. Every scoped analytics page in a
 /// dashboard depends on this one parameter.
 ///
@@ -28,7 +28,7 @@ public class TimeSeriesFilterTests
         {
             Dimensions =
             [
-                new DimensionOptions { Name = "menu_id", Type = "String" },
+                new DimensionOptions { Name = "article_id", Type = "String" },
                 new DimensionOptions { Name = "section_id", Type = "String" },
             ],
         }));
@@ -47,20 +47,20 @@ public class TimeSeriesFilterTests
     [Fact]
     public void AFilterIsResolvedToItsColumn()
     {
-        EventTimeSeriesRequestResult result = Create("menu_id:01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        EventTimeSeriesRequestResult result = Create("article_id:01ARZ3NDEKTSV4RRFFQ69G5FAV");
 
         result.Success.Should().BeTrue();
         result.Request.Filters.Should().ContainSingle();
-        result.Request.Filters[0].Column.Should().Be("menu_id");
+        result.Request.Filters[0].Column.Should().Be("article_id");
         result.Request.Filters[0].Value.Should().Be("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     }
 
     [Fact]
     public void FiltersCompose()
     {
-        // A section page scopes by menu AND section. If the second overwrote the first the chart
-        // would silently widen to the whole menu and still look plausible.
-        EventTimeSeriesRequestResult result = Create("menu_id:01MENU", "section_id:01SECTION");
+        // A section page scopes by article AND section. If the second overwrote the first the chart
+        // would silently widen to the whole article and still look plausible.
+        EventTimeSeriesRequestResult result = Create("article_id:01ARTICLE", "section_id:01SECTION");
 
         result.Request.Filters.Should().HaveCount(2);
     }
@@ -68,7 +68,7 @@ public class TimeSeriesFilterTests
     [Fact]
     public void NoFiltersIsStillAValidRequest()
     {
-        Create().Success.Should().BeTrue("the venue-wide series is the original behaviour");
+        Create().Success.Should().BeTrue("the tenant-wide series is the original behaviour");
     }
 
     [Fact]
@@ -83,14 +83,14 @@ public class TimeSeriesFilterTests
     [Fact]
     public void AMalformedFilterIsRefused()
     {
-        Create("menu_id-no-colon").Success.Should().BeFalse();
+        Create("article_id-no-colon").Success.Should().BeFalse();
     }
 
     [Fact]
     public void AValueMayContainAColon()
     {
         // Split on the FIRST colon only: a page path or a timestamp legitimately contains one.
-        EventTimeSeriesRequestResult result = Create("menu_id:a:b:c");
+        EventTimeSeriesRequestResult result = Create("article_id:a:b:c");
 
         result.Success.Should().BeTrue();
         result.Request.Filters[0].Value.Should().Be("a:b:c");
@@ -101,26 +101,26 @@ public class TimeSeriesFilterTests
     {
         // The injection boundary. This does not resolve, so it is a 400 and the SQL builder never
         // sees it — the same property /breakdown relies on.
-        Create("menu_id; DROP TABLE global_events--:x").Success.Should().BeFalse();
+        Create("article_id; DROP TABLE global_events--:x").Success.Should().BeFalse();
     }
 
     [Fact]
     public void TheFilterReachesTheSqlAsABoundParameter()
     {
-        EventTimeSeriesRequestResult result = Create("menu_id:01MENU");
+        EventTimeSeriesRequestResult result = Create("article_id:01ARTICLE");
 
         (string sql, IReadOnlyList<KeyValuePair<string, object?>> parameters) =
             GetEventTimeSeriesQuery.BuildQuery(result.Request);
 
-        sql.Should().Contain("AND toString(menu_id) = {filter0:String}");
-        sql.Should().NotContain("01MENU", "the value is bound, never concatenated");
-        parameters.Should().Contain(p => p.Key == "filter0" && (string?)p.Value == "01MENU");
+        sql.Should().Contain("AND toString(article_id) = {filter0:String}");
+        sql.Should().NotContain("01ARTICLE", "the value is bound, never concatenated");
+        parameters.Should().Contain(p => p.Key == "filter0" && (string?)p.Value == "01ARTICLE");
     }
 
     [Fact]
     public void TwoFiltersBecomeTwoConditionsAndTwoParameters()
     {
-        EventTimeSeriesRequestResult result = Create("menu_id:01MENU", "section_id:01SEC");
+        EventTimeSeriesRequestResult result = Create("article_id:01ARTICLE", "section_id:01SEC");
 
         (string sql, IReadOnlyList<KeyValuePair<string, object?>> parameters) =
             GetEventTimeSeriesQuery.BuildQuery(result.Request);

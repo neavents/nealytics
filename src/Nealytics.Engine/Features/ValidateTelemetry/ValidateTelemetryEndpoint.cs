@@ -54,8 +54,6 @@ public static class ValidateTelemetryEndpoint
 
             IngestRejection rejection = IngestValidation.Validate(payload, System.DateTime.UtcNow);
 
-            // Checked here too, or a dry run would report "accepted" for a payload /track refuses —
-            // which is the one thing this endpoint exists to make impossible.
             if (rejection == IngestRejection.None
                 && !keyValidator.MayWriteProject(clientProjectKey, payload!.ProjectId))
             {
@@ -71,14 +69,8 @@ public static class ValidateTelemetryEndpoint
                 });
             }
 
-            // Validate returning None means the payload is not null, but that is a fact about the
-            // enum rather than something the compiler can see. Narrowed once, here, instead of a
-            // null-forgiving operator at each of the four later uses.
             GlobalTelemetryPayload accepted = payload!;
 
-            // The reported set comes out of the sanitizer that did the removing. Computing it a
-            // second time here would make this endpoint's whole purpose -- telling you what the
-            // real ingest path does with your payload -- rest on two implementations agreeing.
             dimensionSanitizer.Sanitize(accepted, out IReadOnlyList<string> droppedDimensions);
             measureSanitizer.Sanitize(accepted, out IReadOnlyList<string> droppedMeasures);
 
@@ -127,15 +119,8 @@ public static class ValidateTelemetryEndpoint
     private const string Required =
         "projectId, tenantId, sessionId and eventType are all required.";
 
-    /// <summary>
-    /// Says which check refused the payload and what to do about it. The point of a dry run is that
-    /// one curl tells you why, so "invalid" on its own would defeat the endpoint.
-    /// </summary>
     private static string Explain(IngestRejection rejection) => rejection switch
     {
-        // Names the field that stopped it AND the whole required set. Only the first would cost a
-        // caller wiring this up one round trip per missing field; only the set would leave them to
-        // work out which one they actually missed.
         IngestRejection.MissingProjectId => $"projectId is missing. {Required}",
         IngestRejection.MissingTenantId => $"tenantId is missing. {Required}",
         IngestRejection.MissingSessionId => $"sessionId is missing. {Required}",

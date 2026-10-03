@@ -61,7 +61,7 @@ public class ClickHouseBatchWriterTests
 
         // The shipped engine declares nothing. object_id is "the thing this event is about";
         // device_class/os/browser/country are derived at the edge from the User-Agent and
-        // Cloudflare request metadata. No deployment vocabulary appears here at all.
+        // the edge's request metadata. No deployment vocabulary appears here at all.
         command.Should().Contain("(event_id, project_id, tenant_id, session_id, user_id, event_type, object_id, seq, traffic_class, page_path, referrer, ingested_at, device_class, os, browser, country, metadata_json, timestamp)");
     }
 
@@ -82,7 +82,7 @@ public class ClickHouseBatchWriterTests
         // cannot name anyone's product concepts, because it does not know any.
         string columns = ClickHouseBatchWriter.BuildInsertColumns(Layout());
 
-        columns.Should().NotContainEquivalentOf("menu");
+        columns.Should().NotContainEquivalentOf("article");
         columns.Should().NotContainEquivalentOf("section");
         columns.Should().NotContainEquivalentOf("item_id");
     }

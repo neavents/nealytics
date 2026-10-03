@@ -83,8 +83,8 @@ public sealed partial class GetEventTimeSeriesQuery
         using Activity? activity = TelemetryDiagnostics.Source.StartActivity("GetEventTimeSeriesQuery.Execute");
         activity?.SetTag("db.system", "clickhouse");
         activity?.SetTag("db.operation", "select");
-        activity?.SetTag("neavents.project_id", request.ProjectId);
-        activity?.SetTag("neavents.tenant_id", request.TenantId);
+        activity?.SetTag("nealytics.project_id", request.ProjectId);
+        activity?.SetTag("nealytics.tenant_id", request.TenantId);
 
         string intervalWire = TimeSeriesIntervalParser.ToWireFormat(request.Interval);
         LogQueryStarted(_logger, request.ProjectId, request.TenantId, intervalWire);
@@ -140,7 +140,7 @@ public sealed partial class GetEventTimeSeriesQuery
                 totalCount += bucketCount;
             }
 
-            activity?.SetTag("neavents.buckets_returned", points.Count);
+            activity?.SetTag("nealytics.buckets_returned", points.Count);
             TelemetryDiagnostics.ReadQueriesExecuted.Add(1);
 
             return new EventTimeSeriesResponse

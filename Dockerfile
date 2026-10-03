@@ -18,8 +18,6 @@ RUN RID=$([ "$TARGETARCH" = "arm64" ] && echo linux-arm64 || echo linux-x64) && 
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0 AS runtime
 WORKDIR /app
 
-# curl is here for the HEALTHCHECK below. This image ships no HTTP client, so Docker had no way
-# to probe the container and reported no health status at all.
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -r nealytics 2>/dev/null || true && \

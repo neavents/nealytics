@@ -9,29 +9,13 @@ public readonly struct RollupPlan
 {
     public Rollup Rollup { get; init; }
 
-    /// <summary>The <c>-Merge</c> expression that reproduces the requested metric from stored state.</summary>
     public string ValueExpression { get; init; }
 
-    /// <summary>
-    /// True when groups whose value is zero must be dropped to match the raw query.
-    ///
-    /// Only the user metric needs this: raw counts users with <c>user_id IS NOT NULL</c> in the
-    /// WHERE clause, so a group containing no known user has no rows at all and never appears. The
-    /// rollup keeps that group with a merged count of zero, and without this it would show up as a
-    /// row raw would never have returned.
-    /// </summary>
     public bool DropZeroGroups { get; init; }
 }
 
 public static class RollupPlanner
 {
-    /// <summary>
-    /// Whether a rollup may answer this range at all.
-    ///
-    /// A rollup row is one whole bucket. Answering 12:00–18:00 from a daily rollup would return the
-    /// whole day — a number that is wrong and looks entirely healthy. So a rollup is used only when
-    /// both ends sit on a bucket boundary, and the routed query then covers <c>[from, to)</c>.
-    /// </summary>
     public static bool IsAligned(DateTime from, DateTime to, RollupGrain grain)
     {
         if (from >= to)
@@ -44,10 +28,6 @@ public static class RollupPlanner
             RollupGrain.Day => IsMidnight(from) && IsMidnight(to),
             RollupGrain.Hour => IsHourStart(from) && IsHourStart(to),
 
-            // A session rollup is never a breakdown source. It has no `bucket` column and does not
-            // key on event_type, so the query this planner builds would not merely be slow against
-            // it — it would not be the same question. Stated rather than left to the catch-all,
-            // because the next grain added here will inherit whichever it is.
             RollupGrain.Session => false,
             _ => false,
         };
@@ -145,8 +125,6 @@ public static class RollupPlanner
                     return null;
                 }
 
-                // A rollup stores sum/avg/min/max/count states only. A percentile arrives here as
-                // quantile(0.95), which is not a stored state and never will be, so it stays on raw.
                 if (!RollupRegistry.SupportedAggregations.Contains(request.MeasureFunction))
                 {
                     return null;

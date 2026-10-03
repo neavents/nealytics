@@ -170,8 +170,8 @@ public sealed partial class GetPivotQuery
         using Activity? activity = TelemetryDiagnostics.Source.StartActivity("GetPivotQuery.Execute");
         activity?.SetTag("db.system", "clickhouse");
         activity?.SetTag("db.operation", "select");
-        activity?.SetTag("neavents.project_id", request.ProjectId);
-        activity?.SetTag("neavents.tenant_id", request.TenantId);
+        activity?.SetTag("nealytics.project_id", request.ProjectId);
+        activity?.SetTag("nealytics.tenant_id", request.TenantId);
         activity?.SetTag("nealytics.group_by", request.GroupByColumn);
 
         LogQueryStarted(_logger, request.ProjectId, request.TenantId, request.GroupByColumn, request.Metrics.Count);
@@ -217,7 +217,7 @@ public sealed partial class GetPivotQuery
             }
 
             bool truncated = groupCount > rows.Count;
-            activity?.SetTag("neavents.records_returned", rows.Count);
+            activity?.SetTag("nealytics.records_returned", rows.Count);
             activity?.SetTag("nealytics.truncated", truncated);
             TelemetryDiagnostics.ReadQueriesExecuted.Add(1);
 

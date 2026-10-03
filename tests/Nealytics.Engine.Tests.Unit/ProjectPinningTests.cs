@@ -17,7 +17,7 @@ namespace Nealytics.Engine.Tests.Unit;
 /// a security control that arrives as an outage gets reverted rather than fixed. A key with no
 /// entry behaves exactly as it does today.
 ///
-/// <b>Only the project, never the tenant.</b> One edge worker legitimately serves every venue
+/// <b>Only the project, never the tenant.</b> One edge worker legitimately serves every tenant
 /// through a single key -- that is the entire architecture -- so a tenant pin would be wrong by
 /// design rather than merely strict.
 /// </summary>

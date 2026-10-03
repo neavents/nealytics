@@ -85,7 +85,7 @@ No auth required. `/health` always returns `200` while the process is running, u
 ```bash
 curl -X POST http://localhost:5000/api/v1/telemetry/track \
   -H "Content-Type: application/json" \
-  -H "X-Project-Key: neavents:projkey123" \
+  -H "X-Project-Key: myapp:mykey123" \
   -d '{
     "projectId": "my-app",
     "tenantId": "tenant-1",
@@ -279,7 +279,7 @@ Query params (all whitelisted; any other value returns `400`):
 - `mode`, `exact` (default → `uniqExact`) or `approx` (→ `uniq`, HyperLogLog; cheaper/approximate for large ranges).
 - `from` / `to` (ISO 8601, defaults to last 24 hours). `from` must be ≤ `to`.
 - `eventType`, count only sessions or users that produced this event.
-- `filter` (repeatable), the same grammar as `/breakdown` (`column:value`, `measure>=number`), so "visitors to this menu per day" is one call.
+- `filter` (repeatable), the same grammar as `/breakdown` (`column:value`, `measure>=number`), so "visitors to this category per day" is one call.
 - `tz`, an IANA zone; buckets are cut on that zone's midnight.
 - `traffic`, `normal` (default), `bot`, `internal` or `all`.
 - `limit`, max buckets returned (defaults to `MaxQueryLimit`).
@@ -310,7 +310,7 @@ It also reports what is **actually arriving**, which is a different question fro
 ```json
 {
   "dimensions": [
-    { "name": "menu_id", "type": "String", "populated": true,  "nonEmptyCount": 4477 },
+    { "name": "product_id", "type": "String", "populated": true,  "nonEmptyCount": 4477 },
     { "name": "locale",  "type": "LowCardinality", "populated": false, "nonEmptyCount": 0 }
   ],
   "eventTypesAvailable": true,
@@ -320,17 +320,16 @@ It also reports what is **actually arriving**, which is a different question fro
 
 **Why a declared but empty column is worth an endpoint.** It looks healthy from every other angle:
 the config is valid, the reconciler created the column, the query allowlist offers it, and a
-breakdown over it returns `200` with no rows, exactly what a venue with no traffic returns. The
+breakdown over it returns `200` with no rows, exactly what a tenant with no traffic returns. The
 only component that can tell those apart is the one holding the data.
 
-This is not hypothetical. Four dimensions in the Neavents deployment, `locale`,
-`translation_present`, `query_id` and `has_photo`, were declared, reconciled and offered for the
-whole retention window while sitting empty on every row, because the producer that fills them was
-written but never deployed. Nothing anywhere reported a problem.
+It happens without anything reporting a problem: a dimension is declared, reconciled and offered
+for the whole retention window while sitting empty on every row, because the producer that fills
+it was written but never deployed.
 
-Note what `populated` does **not** claim. A column can be full of the wrong thing: `menu_id` carried
-the packed payload's dense id for months, so a leaderboard on it drew two confident bars labelled
-`"0"` and `"01MENU"`. Population is not correctness. Absence of population is a gap, and that half
+Note what `populated` does **not** claim. A column can be full of the wrong thing: a `product_id`
+that carries a producer's internal index instead of the id draws a leaderboard of confident bars
+labelled `"0"` and `"1"`. Population is not correctness. Absence of population is a gap, and that half
 is cheap to report.
 
 `eventTypesAvailable` and `populationAvailable` are `false` when a census could not be taken. Read
@@ -538,6 +537,8 @@ JWT example payload:
 
 Everything below is the deep dive. How things actually work under the hood.
 
+The reasoning behind the less obvious choices in the source is in [`docs/design-notes.md`](docs/design-notes.md).
+
 ---
 
 ## Configuration Reference
@@ -615,7 +616,7 @@ reads it instead of scanning raw:
 
 ```jsonc
 { "Name": "sessions", "Grain": "session", "EventTypes": "",
-  "Dimensions": "menu_id,locale", "Measures": "dwell_ms:sum,dwell_ms:max" }
+  "Dimensions": "category_id,locale", "Measures": "dwell_ms:sum,dwell_ms:max" }
 ```
 
 This is what replaces a scheduled sessionizer. A job that sweeps sessions idle for thirty minutes
@@ -637,7 +638,7 @@ Three properties worth knowing before you declare one, all measured on 26.7.1:
   write time. The definition can change without rebuilding the table.
 
 `/sessions` reads the rollup only when **both ends of the range sit on midnight** and the rollup
-**filters no event types**, one declared over `app_open,menu_view` holds only those rows, so its
+**filters no event types**, one declared over `app_open,page_view` holds only those rows, so its
 per session event count is not the session's event count. Otherwise it scans raw. The response says
 which, in `source`.
 
@@ -690,7 +691,21 @@ aggregate a new shape while every stored row kept the old one.
 Past a handful of entries, declare them in a file instead, `TelemetryEngine__SchemaFile=/etc/nealytics/schema.json`,
 whose root is a `TelemetryEngine` section. It is the same configuration system, one more provider,
 so an environment variable still overrides anything in it. See
-[`neavents-schema.example.json`](neavents-schema.example.json).
+[`example-schema.json`](example-schema.json), a publishing site's declaration that the
+[`docker-compose.yml`](docker-compose.yml) mounts. Its choices are the ones worth copying:
+
+- **A fact about the object is snapshotted onto the event, never joined at query time.**
+  `has_video` is sent with each impression, so when a video is added to an article in September,
+  August still compares as without video. A live join would report that every August impression
+  had one.
+- **A measure is bounded where an out of range value is not a reading.** `read_ms` stops at 30
+  minutes, because a forgotten tab is not a read. Out of range values are rejected and counted,
+  never clamped, so the loss is visible instead of silently moving the average.
+- **The highest volume event type gets a rollup and a shorter retention.** Impressions outnumber
+  everything else by an order of magnitude and are worth nothing individually once
+  `daily_by_object` has aggregated them, so they are kept for 30 days and the rollup answers the
+  reports built on them.
+- **The session rollup filters no event types,** so `/sessions` can read it.
 
 ```bash
 TelemetryEngine__Dimensions__0__Name=product_id
@@ -723,6 +738,7 @@ curl -XPOST localhost:5000/api/v1/telemetry/validate -H 'X-Project-Key: myapp:my
 | `WriteAheadLogDirectory` | `/var/log/nealytics_engine/` | Directory for the WAL file. Must be writable. |
 | `WalFileBufferBytes` | `65536` | Size of the buffered WAL `FileStream`. Larger buffers let group commit coalesce more appends per flush. |
 | `ConnectionPoolSize` | `16` | Max concurrent ClickHouse connections. Bounds acquisition (acquire side semaphore) and idle retention. `0` = unbounded, retain nothing. |
+| `ConnectionMaxIdleSeconds` | `300` | A pooled connection idle longer than this is reopened rather than reused. Keep it below the server's `idle_connection_timeout` (3600 by default): past that ClickHouse closes the socket silently, the client still reports `Open`, and the first write on it fails. `0` disables the check. |
 | `EnableWireCompression` | `true` | Enables LZ4 compression on the ClickHouse native protocol (inserts and query results). |
 
 ### Batch Processing
@@ -894,7 +910,7 @@ Three things to know before you do it:
   the `WHERE` unconditionally, so a tenant keyed shard turns each read into a single shard query.
   Shard at random and every read fans out to every node and merges.
 - **`uniqExact` does not distribute cheaply.** Exact distinct counting ships the whole hash set
-  between nodes. Use `mode=approx` on `/breakdown` and `/active` for anything estate wide, that is
+  between nodes. Use `mode=approx` on `/breakdown` and `/active` for anything spanning many tenants, that is
   what the switch is for.
 - **The schema reconciler is not cluster aware.** It issues `ALTER TABLE` without `ON CLUSTER`, so
   it widens the node it connects to and no other. Until that changes, run declared schema changes
@@ -974,14 +990,34 @@ Activity spans are created for:
 - `IngestHttpRequest` (track endpoint)
 - `BeaconIngest` (beacon endpoint)
 - `BatchProcessor.Flush` (batch insert)
-- `GetProjectTimelineQuery.Execute`
-- `GetSessionAnalyticsQuery.Execute`
+- `<Query>.Execute` for every read: timeline, sessions, time series, active users, top, breakdown,
+  funnel, pivot and distribution
+
+Read spans carry `db.system` and `db.operation`, plus the engine's own attributes under the
+`nealytics.` prefix:
+
+| Attribute | On | What it holds |
+|---|---|---|
+| `nealytics.project_id`, `nealytics.tenant_id` | every read | the scope the query ran under |
+| `nealytics.records_returned` | timeline, top, breakdown, pivot | rows in the response |
+| `nealytics.buckets_returned` | time series, active users | buckets in the response |
+| `nealytics.sessions_returned` | sessions | sessions in the page |
+| `nealytics.source` | sessions | `raw` or `rollup:<name>` |
+| `nealytics.beacon_events`, `nealytics.beacon_rejected` | beacon | elements accepted and refused in one request |
 
 Traces and metrics are exported via OTLP. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to point at your collector (Jaeger, Grafana Tempo, etc.).
 
+The protocol comes from `OTEL_EXPORTER_OTLP_PROTOCOL` (`grpc` or `http/protobuf`) and defaults to
+`http/protobuf`, the protocol of the conventional `:4318` port. The OpenTelemetry SDK's own default
+is gRPC on `localhost:4317`, and gRPC sent to an HTTP/protobuf port delivers nothing without an
+error anywhere, so the default is chosen rather than inherited. Every signal is exported under the
+service name `Nealytics.Engine` with `deployment.environment` set from the host environment.
+
 ### Logging
 
-Structured JSON logging via Serilog. All log messages use the `LoggerMessage` source generator for zero allocation logging on the hot path. Log level is controllable via the standard `Logging__LogLevel__Default` environment variable.
+Structured JSON logging via Serilog. All log messages use the `LoggerMessage` source generator for zero allocation logging on the hot path. Log level is controllable via the standard `Logging__LogLevel__Default` environment variable, and `Logging__LogLevel__Microsoft.AspNetCore` (default `Warning`) sets the framework's level. Both are read into Serilog explicitly: Serilog owns the pipeline and would otherwise ignore them, and at `Information` ASP.NET Core writes four lines per request, which at ingest rates is a hot path cost and a disk filling log.
+
+When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, logs are exported over OTLP as well, under the same service name as traces and metrics so all three land on one service. The log exporter resolves its protocol from `OTEL_EXPORTER_OTLP_PROTOCOL` when it is set and otherwise from the port: an endpoint on `:4317` is gRPC, anything else is HTTP/protobuf.
 
 ---
 

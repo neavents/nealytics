@@ -10,7 +10,7 @@ namespace Nealytics.Engine.Tests.Unit;
 ///
 /// <b>The incident.</b> ClickHouse closes connections idle past <c>idle_connection_timeout</c>,
 /// which defaults to 3600 seconds, and logs nothing — closing an idle socket is not an error. The
-/// client goes on reporting <c>Open</c>. So after the estate sat quiet overnight, every pooled
+/// client goes on reporting <c>Open</c>. So after a deployment sat quiet overnight, every pooled
 /// connection was a corpse that only revealed itself on a write:
 ///
 /// <code>
@@ -20,7 +20,7 @@ namespace Nealytics.Engine.Tests.Unit;
 ///
 /// <b>Why the existing discard-on-failure path did not save it.</b> That path is real and works,
 /// but it costs one failed insert per dead connection. With a pool of 16, five retries a batch and
-/// cross-batch backoff, the estate produced fifteen consecutive failures across four minutes and
+/// cross-batch backoff, that produced fifteen consecutive failures across four minutes and
 /// still had not drained the pool — while <c>/health</c> and <c>/ready</c> stayed green, because
 /// <c>SELECT</c> works and only the columnar writer breaks. Recovery that is O(pool size) in failed
 /// inserts is indistinguishable from an outage.

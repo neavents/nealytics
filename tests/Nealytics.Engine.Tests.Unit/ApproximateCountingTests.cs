@@ -9,13 +9,13 @@ namespace Nealytics.Engine.Tests.Unit;
 ///
 /// <b>What breaks without this.</b> <c>uniqExact</c> builds a real hash set of every distinct value
 /// it sees. Session ids are unique per visit, so that set grows with traffic, and a wide range over
-/// a large estate does not get slower — it meets ClickHouse's memory limit and fails the whole
+/// many tenants does not get slower — it meets ClickHouse's memory limit and fails the whole
 /// query. <c>uniq</c> is HyperLogLog: fixed, small memory whatever the cardinality, for roughly
 /// 1.6% error.
 ///
-/// <b>Opt-in, so no existing number moves.</b> A venue looking at a week of its own traffic should
+/// <b>Opt-in, so no existing number moves.</b> A tenant looking at a week of its own traffic should
 /// keep getting the exact answer. The switch exists for the range that would otherwise return
-/// nothing at all, and an estate that silently changed its numbers on upgrade would be worse than
+/// nothing at all, and a deployment that silently changed its numbers on upgrade would be worse than
 /// one that failed.
 ///
 /// The spelling matches <c>/active</c>'s <c>mode=exact|approx</c>, which has had this since it was

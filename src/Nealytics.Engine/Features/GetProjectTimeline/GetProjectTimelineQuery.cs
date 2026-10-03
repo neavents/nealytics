@@ -112,8 +112,8 @@ public sealed partial class GetProjectTimelineQuery
         using Activity? activity = TelemetryDiagnostics.Source.StartActivity("GetProjectTimelineQuery.Execute");
         activity?.SetTag("db.system", "clickhouse");
         activity?.SetTag("db.operation", "select");
-        activity?.SetTag("neavents.project_id", request.ProjectId);
-        activity?.SetTag("neavents.tenant_id", request.TenantId);
+        activity?.SetTag("nealytics.project_id", request.ProjectId);
+        activity?.SetTag("nealytics.tenant_id", request.TenantId);
 
         LogQueryStarted(_logger, request.ProjectId, request.TenantId);
         long startTicks = Stopwatch.GetTimestamp();
@@ -159,7 +159,7 @@ public sealed partial class GetProjectTimelineQuery
                 events.Add(item);
             }
 
-            activity?.SetTag("neavents.records_returned", events.Count);
+            activity?.SetTag("nealytics.records_returned", events.Count);
             TelemetryDiagnostics.ReadQueriesExecuted.Add(1);
 
             return new ProjectTimelineResponse

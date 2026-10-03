@@ -11,7 +11,7 @@ namespace Nealytics.Engine.Tests.Unit;
 /// Not a second configuration system — one more provider feeding the same TelemetryEngine section.
 /// It exists because the shape does not scale: eight dimensions, five measures and two rollups is
 /// roughly seventy TelemetryEngine__Measures__11__ lines, which cannot be reviewed in a diff, and
-/// in this estate they lived in a compose file that is in no repository at all.
+/// a deployment kept them in a compose file that was in no repository at all.
 /// </summary>
 public class SchemaFileTests : IDisposable
 {

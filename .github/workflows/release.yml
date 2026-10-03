@@ -23,16 +23,8 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
-    # Bounded so a hung job fails loudly rather than spending the six hour default. The publish
-    # itself is seconds.
     timeout-minutes: 30
 
-    # The release binary is verified before it is packaged, against a real ClickHouse.
-    #
-    # v1.0.2, v1.1.0 and v1.2.0 all shipped a binary that accepted events and stored none of them.
-    # Ingest returned 202, /health and /ready passed, and every row was lost. Nothing in this
-    # workflow could have noticed, because it published whatever compiled. The unit tests cannot
-    # catch it either. Only running the real binary proves it, which is what smoke-test.sh does.
     services:
       clickhouse:
         image: clickhouse/clickhouse-server:latest
@@ -67,9 +59,6 @@ jobs:
           docker cp clickhouse-init.sql ${{ job.services.clickhouse.id }}:/tmp/clickhouse-init.sql
           docker exec ${{ job.services.clickhouse.id }} clickhouse-client --queries-file /tmp/clickhouse-init.sql
 
-      # Publishes into publish/ AND proves the result commits a row carrying every declared column
-      # type, then answers every read endpoint. The tarball below is that exact binary -- not a
-      # second build that merely used the same inputs.
       - name: Publish and verify the binary stores rows
         env:
           SMOKE_OUT: publish

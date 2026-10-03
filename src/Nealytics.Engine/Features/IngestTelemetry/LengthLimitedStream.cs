@@ -6,22 +6,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 
-/// <summary>
-/// Refuses to read past a byte budget.
-///
-/// A chunked request sends no <c>Content-Length</c>, so the cheap up-front check has nothing to
-/// look at and the body is read to completion. Measured before this existed: a request well over
-/// the configured limit was answered <c>202</c>.
-///
-/// Kestrel's own <c>Limits.MaxRequestBodySize</c> does bound it in production, but that is server
-/// configuration — it belongs to whoever is hosting the process, and it is invisible to any test
-/// that does not run Kestrel. Counting here makes the bound a property of the endpoint, true on
-/// every host, and provable.
-///
-/// Throws <see cref="BadHttpRequestException"/> rather than returning a short read: a truncated body
-/// would surface as malformed JSON and be reported as a client formatting error, which is a
-/// different bug from the one that happened.
-/// </summary>
 internal sealed class LengthLimitedStream : Stream
 {
     private readonly Stream _inner;

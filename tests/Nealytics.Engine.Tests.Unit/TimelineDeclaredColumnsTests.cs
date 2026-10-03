@@ -21,9 +21,9 @@ public class TimelineDeclaredColumnsTests
     public void DeclaredColumns_AreSelectedAfterTheCoreSeven()
     {
         (string sql, _) = GetProjectTimelineQuery.BuildQuery(
-            Request(), ["menu_id", "table_id", "dwell_ms"]);
+            Request(), ["article_id", "table_id", "dwell_ms"]);
 
-        sql.Should().Contain("timestamp, menu_id, table_id, dwell_ms FROM",
+        sql.Should().Contain("timestamp, article_id, table_id, dwell_ms FROM",
             "a dimension value could not be read on a single event at all before, so no breakdown "
             + "row could be drilled into");
     }

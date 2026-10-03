@@ -19,7 +19,7 @@ set -euo pipefail
 # running throughout: the batch writer retries, and the WAL holds anything that fails during the
 # swap. Nothing is dropped until the new table is verified to hold the same number of rows.
 
-CH="${CLICKHOUSE_CLIENT:-docker exec -i neavents-nealytics-clickhouse clickhouse-client}"
+CH="${CLICKHOUSE_CLIENT:-docker exec -i global_telemetry_db clickhouse-client}"
 DB="${NEALYTICS_DB:-nealytics_core}"
 TABLE="${NEALYTICS_TABLE:-global_events}"
 NEW="${TABLE}_repartitioned"

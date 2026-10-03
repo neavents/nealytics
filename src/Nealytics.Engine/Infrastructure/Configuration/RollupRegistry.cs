@@ -14,27 +14,11 @@ public enum RollupGrain
     Hour,
     Day,
 
-    /// <summary>
-    /// One row per session rather than per time bucket.
-    ///
-    /// This is what replaces a scheduled sessionizer. A job that sweeps sessions idle for thirty
-    /// minutes has to be re-run for late arrivals and still leaves a hole when one lands after the
-    /// re-run; an <c>AggregatingMergeTree</c> fed by a materialized view is always current and
-    /// cannot have that hole, because a late row is simply another partial state that merges in.
-    /// "Session ended" then needs no idle rule at all — it is <c>maxMerge(timestamp)</c>.
-    /// </summary>
     Session,
 }
 
 public sealed record RollupMeasure(Measure Measure, string Aggregation, string ColumnName);
 
-/// <summary>
-/// One grouping column in a rollup: either a declared dimension or a core column.
-///
-/// Core columns have to be groupable here or a rollup cannot key on <c>object_id</c>, which is the
-/// identity every item report is built on — the rollup would exist and be unable to answer the one
-/// question it was created for.
-/// </summary>
 public sealed record RollupColumn(string Name, string StoredType);
 
 public sealed record Rollup(
@@ -72,13 +56,6 @@ public sealed class RollupRegistry
     public static readonly FrozenSet<string> SupportedAggregations =
         FrozenSet.ToFrozenSet(["sum", "avg", "min", "max", "count"], StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// Core columns a rollup may group by, and the non-nullable type it stores each as.
-    ///
-    /// AggregatingMergeTree refuses a nullable sorting key outright, so a rollup stores the
-    /// normalised key — <c>ifNull(toString(x), '')</c> — which is also exactly how the breakdown
-    /// endpoint renders its key. The two therefore agree by construction rather than by luck.
-    /// </summary>
     private static readonly Dictionary<string, string> CoreGroupable = new(StringComparer.Ordinal)
     {
         ["object_id"] = "String",
@@ -222,8 +199,6 @@ public sealed class RollupRegistry
                 grain switch
                 {
                     RollupGrain.Hour => "toStartOfHour",
-                    // A session rollup keys on a plain Date, because a partition key must be a
-                    // function of the ORDER BY columns and you cannot partition by min(timestamp).
                     RollupGrain.Session => "toDate",
                     _ => "toStartOfDay",
                 },
@@ -269,20 +244,6 @@ public sealed class RollupRegistry
     private static string[] Split(string? value) =>
         (value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-    /// <summary>
-    /// The key columns of a session rollup, and why they are not the time-bucketed ones.
-    ///
-    /// <b>A plain <c>event_date Date</c>, not the session's start.</b> A partition key must be a
-    /// function of the ORDER BY columns, and <c>min(timestamp)</c> is an aggregate — there is
-    /// nothing to partition by. So the date the row's events fell on is a key column, and a session
-    /// crossing midnight produces two rows. The read side regroups by <c>session_id</c> and they
-    /// recombine. Every daily bucketing has this property; it is honest, not a defect.
-    ///
-    /// <b>No <c>event_type</c>.</b> Every time-bucketed rollup keys on it, and a session rollup must
-    /// not: a session touching five event types would become five rows, and its duration would be
-    /// measured per event type rather than per session — a number that looks entirely reasonable and
-    /// answers a question nobody asked. <c>EventTypes</c> still decides which events feed the view.
-    /// </summary>
     private static bool IsSessionGrain(Rollup rollup) => rollup.Grain == RollupGrain.Session;
 
     public static string BuildTableDdl(Rollup rollup)
@@ -306,8 +267,6 @@ public sealed class RollupRegistry
 
         sql.Append(", events AggregateFunction(count)");
 
-        // The two facts a scheduled sessionizer exists to compute, held as states so a late event
-        // simply merges in rather than arriving after the job that would have counted it.
         sql.Append(", started_at AggregateFunction(min, DateTime64(3, 'UTC'))");
         sql.Append(", ended_at AggregateFunction(max, DateTime64(3, 'UTC'))");
         sql.Append(", users AggregateFunction(uniqExact, Nullable(String))");
@@ -398,10 +357,6 @@ public sealed class RollupRegistry
         sql.Append(", maxState(timestamp) AS ended_at");
         sql.Append(", uniqExactState(user_id) AS users");
 
-        // Kept as a state rather than frozen into an is_bounce flag at write time. A bounce is
-        // "one event type touched", and deciding that here would bake one product's threshold into
-        // storage; countMerge and uniqExactMerge answer it at read time, and can answer a different
-        // definition tomorrow without rebuilding the table.
         sql.Append(", uniqExactState(event_type) AS event_types");
 
         foreach (RollupMeasure measure in rollup.Measures)

@@ -37,7 +37,7 @@ public class SchemaReconcilerGuardTests
     /// <para>Without this, every test here declared <i>only</i> its own probe column — so the
     /// reconciler saw the deployment's real dimensions as undeclared. While those columns were
     /// empty that was invisible. The moment one held a single row, three of these tests failed with
-    /// "Undeclared column(s) ... menu_id (1 row(s))" and the two refusal tests started passing for a
+    /// "Undeclared column(s) ... article_id (1 row(s))" and the two refusal tests started passing for a
     /// reason that had nothing to do with their probe. Both directions are wrong, and the second is
     /// worse: a guard test that would pass with the guard broken.</para>
     ///

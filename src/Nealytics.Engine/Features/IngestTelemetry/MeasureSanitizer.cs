@@ -28,11 +28,6 @@ public sealed partial class MeasureSanitizer
 
     public int Sanitize(GlobalTelemetryPayload payload) => Sanitize(payload, out _);
 
-    /// <summary>
-    /// The same, reporting which keys were removed, so a response header or a validation report
-    /// names the set that was actually dropped rather than one a second implementation of the same
-    /// rule reproduced.
-    /// </summary>
     public int Sanitize(GlobalTelemetryPayload payload, out IReadOnlyList<string> dropped)
     {
         dropped = [];

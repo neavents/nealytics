@@ -76,8 +76,8 @@ The API log reached **7.7 GB in minutes** and filled a 7.8 GB tmpfs.
 `appsettings.json` has always declared `"Microsoft.AspNetCore": "Warning"`, and it did nothing —
 Serilog owns this pipeline outright and never read `Logging:LogLevel`. So ASP.NET Core emitted four
 Information lines per request (`ExecutedEndpoint`, `WritingResultAsJson`, `SettingStatusCode`,
-`RequestFinished`), each JSON-formatted and written while the ingest path was trying to work, and in
-this estate shipped to the collector over OTLP as well. At 20k req/s that is ~80,000 log lines a
+`RequestFinished`), each JSON-formatted and written while the ingest path was trying to work, and
+shipped to the collector over OTLP as well wherever logs are exported. At 20k req/s that is ~80,000 log lines a
 second.
 
 Fixed by reading the declared levels and applying `MinimumLevel.Override("Microsoft.AspNetCore", …)`.

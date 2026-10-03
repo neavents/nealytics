@@ -10,7 +10,7 @@ namespace Nealytics.Engine.Tests.Integration;
 ///
 /// <para><b>Why this is a test.</b> There is no separate test database. The connection string
 /// defaults to <c>127.0.0.1:9000/nealytics_core</c> and <c>docker-compose.yml</c> points the engine
-/// at the same database, so on any machine running the estate, "the table the tests use" and "the
+/// at the same database, so on any machine running a local deployment, "the table the tests use" and "the
 /// table the dashboard reads" are one table. Two classes ran
 /// <c>TRUNCATE TABLE nealytics_core.global_events</c> in their setup, so every <c>dotnet test</c>
 /// silently wiped the owner's analytics and left the table holding only the suite's own fixtures.
@@ -109,7 +109,7 @@ public class SuiteOwnsOnlyItsOwnDataTests
         }
 
         offenders.Should().BeEmpty(
-            "the suite shares nealytics_core.global_events with the running estate; clean up with "
+            "the suite shares nealytics_core.global_events with a running deployment; clean up with "
             + "ClickHouseTestSupport.DeleteProjectsAsync and name the projects you own");
     }
 

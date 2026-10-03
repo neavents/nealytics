@@ -194,14 +194,14 @@ public class MeasureColumnBufferTests
     {
         TelemetryEngineOptions options = new()
         {
-            Dimensions = [new DimensionOptions { Name = "menu_id", Type = "String" }],
+            Dimensions = [new DimensionOptions { Name = "article_id", Type = "String" }],
             Measures = [new MeasureOptions { Name = "dwell_ms", Type = "UInt32" }],
         };
 
         DimensionRegistry registry = new(options);
         TelemetryColumnLayout layout = new(registry, new MeasureRegistry(options, registry));
 
-        layout.ColumnNames.Should().EndWith(["menu_id", "dwell_ms"],
+        layout.ColumnNames.Should().EndWith(["article_id", "dwell_ms"],
             "the writer pairs the name list against the value arrays positionally, so the order "
             + "has to be stable and it has to be one list");
     }
@@ -211,7 +211,7 @@ public class MeasureColumnBufferTests
     {
         TelemetryEngineOptions options = new()
         {
-            Dimensions = [new DimensionOptions { Name = "menu_id", Type = "String" }],
+            Dimensions = [new DimensionOptions { Name = "article_id", Type = "String" }],
             Measures =
             [
                 new MeasureOptions { Name = "dwell_ms", Type = "UInt32" },

@@ -22,7 +22,7 @@ namespace Nealytics.Engine.Tests.Integration;
 /// So the declaration comes from the environment, exactly as it does in production:
 ///
 /// <code>
-/// TelemetryEngine__Dimensions__0__Name=menu_id TelemetryEngine__Dimensions__0__Type=String \
+/// TelemetryEngine__Dimensions__0__Name=article_id TelemetryEngine__Dimensions__0__Type=String \
 /// TelemetryEngine__Dimensions__1__Name=section_id TelemetryEngine__Dimensions__1__Type=String \
 /// TelemetryEngine__Dimensions__2__Name=table_id TelemetryEngine__Dimensions__2__Type=String \
 ///   dotnet test

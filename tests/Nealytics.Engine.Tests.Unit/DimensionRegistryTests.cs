@@ -60,7 +60,7 @@ public class DimensionRegistryTests
 
     [Theory]
     [InlineData("")]
-    [InlineData("Menu_Id")]
+    [InlineData("Article_Id")]
     [InlineData("9lives")]
     [InlineData("has-hyphen")]
     [InlineData("has space")]

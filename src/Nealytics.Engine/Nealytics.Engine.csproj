@@ -4,30 +4,11 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
-    <!--
-      One self contained binary, no runtime needed on the host. Not compiled ahead of time: the
-      ClickHouse client builds its column writers reflectively, which an ahead of time build cannot
-      see, and every published release before v2 accepted events and stored none of them because of
-      it. See the release notes.
-    -->
     <PublishAot>false</PublishAot>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-
-    <!--
-      The JSON surface is source generated through
-      TelemetryAotContext and nothing here relies on reflection-based serialization; leaving this
-      false keeps it that way and keeps the trimmed size down.
-    -->
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
-
-    <!--
-      InvariantGlobalization stays true. The engine deliberately holds no
-      culture-sensitive text handling, parses with InvariantCulture explicitly, and leaves Turkish
-      casing to the producer, which has full ICU. Flipping it would add ~30 MB of ICU data for
-      behaviour nothing here asks for.
-    -->
     <InvariantGlobalization>true</InvariantGlobalization>
     <RootNamespace>Nealytics.Engine</RootNamespace>
     <ServerGarbageCollection>true</ServerGarbageCollection>

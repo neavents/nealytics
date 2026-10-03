@@ -35,10 +35,6 @@ public static class BreakdownRequestFactory
     public const int StatusBadRequest = 400;
     public const int DefaultLimit = 50;
 
-    /// <summary>
-    /// Cap on filters accepted in one request. Each adds a clause and a parameter; an unbounded
-    /// list is a cheap way to make the server build an expensive statement.
-    /// </summary>
     public const int MaxFilters = 16;
 
     public static BreakdownRequestResult Create(
@@ -114,8 +110,6 @@ public static class BreakdownRequestFactory
                 + "Grouping by it would return one row per distinct value.");
         }
 
-        // The injection boundary. What comes back is the allowlist's own instance, never the
-        // caller's string — see QueryColumns.TryResolve.
         if (string.IsNullOrWhiteSpace(groupByRaw))
         {
             return BreakdownRequestResult.Fail(
@@ -134,8 +128,6 @@ public static class BreakdownRequestFactory
                 StatusBadRequest, $"At most {MaxFilters} 'filter' parameters are accepted.");
         }
 
-        // Shared with /timeseries rather than owned here, so the two endpoints cannot disagree
-        // about what a filter means.
         FilterParser.Result parsedFilters = FilterParser.Parse(filtersRaw, columns, measures, MaxFieldLength);
 
         if (parsedFilters.Outcome != FilterParser.Outcome.Ok)
@@ -161,8 +153,6 @@ public static class BreakdownRequestFactory
                 $"'orderBy' must be one of: value_desc, value_asc, key_asc. Got '{orderByRaw}'.");
         }
 
-        // Clamped rather than rejected: groupBy=session_id over a busy range would otherwise try to
-        // return millions of rows. The response says it was capped; see BreakdownResponse.Truncated.
         int limit = Math.Clamp(DefaultLimit, 1, maxLimit);
         if (!string.IsNullOrEmpty(limitRaw)
             && int.TryParse(limitRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedLimit))
@@ -205,8 +195,6 @@ public static class BreakdownRequestFactory
             TenantId = tenantId,
             TrafficClass = trafficClass,
             Exact = string.Equals(exactRaw, "true", StringComparison.Ordinal),
-            // Same spelling as /active's mode parameter, so the two endpoints do not disagree about
-            // the word for the same idea.
             Approximate = string.Equals(modeRaw, "approx", StringComparison.Ordinal),
             Metric = metric,
             MeasureColumn = measureColumn,

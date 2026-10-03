@@ -32,7 +32,6 @@ public static class GetBreakdownEndpoint
                 context.Request.Query["metric"].ToString(),
                 context.Request.Query["groupBy"].ToString(),
                 context.Request.Query["eventType"].ToString(),
-                // Repeatable: ?filter=country:TR&filter=device_class:mobile
                 context.Request.Query["filter"].ToArray().Where(v => v is not null).Select(v => v!).ToArray(),
                 context.Request.Query["from"].ToString(),
                 context.Request.Query["to"].ToString(),

@@ -1,0 +1,42 @@
+{
+  "TelemetryEngine": {
+    "RetentionDays": 90,
+    "EventTypeRetention": [
+      { "EventType": "article_impression", "Days": 30 }
+    ],
+
+    "Dimensions": [
+      { "Name": "author_id", "Type": "String" },
+      { "Name": "category", "Type": "LowCardinality" },
+      { "Name": "locale", "Type": "LowCardinality" },
+      { "Name": "search_id", "Type": "String" },
+      { "Name": "has_video", "Type": "LowCardinality" },
+      { "Name": "is_paywalled", "Type": "LowCardinality" }
+    ],
+
+    "Measures": [
+      { "Name": "read_ms", "Type": "UInt32", "Aggregations": "sum,avg,max,p95", "Minimum": 0, "Maximum": 1800000 },
+      { "Name": "position", "Type": "UInt16", "Aggregations": "avg,min,max", "Minimum": 0 },
+      { "Name": "result_count", "Type": "UInt16", "Aggregations": "sum,avg", "Minimum": 0 },
+      { "Name": "scroll_pct", "Type": "UInt8", "Aggregations": "avg,max", "Minimum": 0, "Maximum": 100 },
+      { "Name": "tip_amount", "Type": "Decimal", "Aggregations": "sum,avg" }
+    ],
+
+    "Rollups": [
+      { "Name": "daily_by_object", "Grain": "day",
+        "EventTypes": "article_impression,article_view",
+        "Dimensions": "object_id,author_id,category,locale,has_video,is_paywalled",
+        "Measures": "read_ms:sum,read_ms:avg,position:avg" },
+
+      { "Name": "daily_by_source", "Grain": "day",
+        "EventTypes": "app_open,page_view",
+        "Dimensions": "category,locale",
+        "Measures": "" },
+
+      { "Name": "sessions", "Grain": "session",
+        "EventTypes": "",
+        "Dimensions": "category,locale",
+        "Measures": "read_ms:sum,read_ms:max" }
+    ]
+  }
+}

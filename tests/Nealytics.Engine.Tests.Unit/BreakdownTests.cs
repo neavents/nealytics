@@ -137,7 +137,7 @@ public class BreakdownTests
     // ─── Injection ───
 
     [Theory]
-    [InlineData("menu_id; DROP TABLE nealytics_core.global_events")]
+    [InlineData("article_id; DROP TABLE nealytics_core.global_events")]
     [InlineData("widget_id; DROP TABLE nealytics_core.global_events")]
     [InlineData("widget_id) UNION ALL SELECT 1,1,1,1 --")]
     [InlineData("1=1")]
@@ -329,12 +329,12 @@ public class BreakdownTests
     [Fact]
     public void FilterSplitsOnTheFirstColonOnly_SoAValueMayContainOne()
     {
-        BreakdownRequestResult result = Create("widget_id", filters: ["object_id:/menu/12:30"]);
+        BreakdownRequestResult result = Create("widget_id", filters: ["object_id:/article/12:30"]);
 
         result.Success.Should().BeTrue();
         result.Request.Filters.Should().ContainSingle();
         result.Request.Filters[0].Column.Should().Be("object_id");
-        result.Request.Filters[0].Value.Should().Be("/menu/12:30");
+        result.Request.Filters[0].Value.Should().Be("/article/12:30");
     }
 
     [Fact]
@@ -361,14 +361,14 @@ public class BreakdownTests
     [Fact]
     public void EventTypeFilter_IsParameterised()
     {
-        BreakdownRequestResult parsed = Create("widget_id", eventType: "menu_view");
+        BreakdownRequestResult parsed = Create("widget_id", eventType: "article_view");
 
         (string sql, IReadOnlyList<KeyValuePair<string, object?>> parameters) =
             GetBreakdownQuery.BuildQuery(parsed.Request);
 
         sql.Should().Contain("event_type = {eventType:String}");
-        sql.Should().NotContain("menu_view");
-        parameters.Should().Contain(p => p.Key == "eventType" && Equals(p.Value, "menu_view"));
+        sql.Should().NotContain("article_view");
+        parameters.Should().Contain(p => p.Key == "eventType" && Equals(p.Value, "article_view"));
     }
 
     // ─── Auth ───
@@ -387,7 +387,7 @@ public class BreakdownTests
     {
         QueryColumns columns = Columns();
 
-        columns.Allowed.Should().NotContain("menu_id");
+        columns.Allowed.Should().NotContain("article_id");
         columns.Allowed.Should().NotContain("section_id");
         columns.Allowed.Should().NotContain("table_id");
         columns.Allowed.Should().Contain("event_type", "core columns are always groupable");
@@ -396,7 +396,7 @@ public class BreakdownTests
     [Fact]
     public void ADeclaredDimensionIsOfferedByName_WhateverThatNameIs()
     {
-        // The same code answers "top menus" here and "top authors" in a clone.
+        // The same code answers "top articles" here and "top authors" in a clone.
         QueryColumns columns = Columns("author_id", "post_id");
 
         columns.Allowed.Should().Contain("author_id");

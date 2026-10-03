@@ -4,101 +4,96 @@ using FluentAssertions;
 namespace Nealytics.Engine.Tests.Unit;
 
 /// <summary>
-/// The engine must not know any one product's words.
-///
-/// This was a manual grep in the plan that introduced declared dimensions, and a check nobody runs
-/// is a check that has already stopped working. The failure it guards is not hypothetical: three
-/// columns of one customer's vocabulary — a menu, a section, a table — were compiled into the
-/// engine, so anyone cloning it for a storefront or a social app inherited <c>menu_id</c>.
-///
-/// The rule is about identifiers, not prose. A doc comment may use a name as an example, because
-/// explaining the mechanism needs one; what it may not do is put that name in a column, a property
-/// or a string the engine emits.
+/// The engine must not know any one product's words: not in an identifier, a string, a comment, a
+/// SQL file or a configuration file. A deployment declares its own vocabulary at runtime.
 /// </summary>
 public class DomainVocabularyTests
 {
     /// <summary>
-    /// Words that belong to a product rather than to analytics. Deliberately several verticals, so
-    /// the test says something about the property rather than about this estate.
+    /// Words that belong to a product rather than to analytics, from several verticals so the test
+    /// says something about the property rather than about one deployment. "post" is absent
+    /// because MapPost and the HTTP verb make it indistinguishable from ordinary engine code.
     /// </summary>
     private static readonly string[] Vertical =
     [
-        "menu", "restaurant", "venue", "dish", "cuisine", "diner", "waiter", "allergen",
+        "menu", "restaurant", "venue", "dish", "cuisine", "diner", "waiter", "allergen", "qr",
         "product", "sku", "basket", "checkout", "storefront",
-        // "post" is deliberately absent: MapPost and the HTTP verb make it a word this cannot
-        // distinguish, and a guard with a known false positive gets suppressed rather than fixed.
         "tweet", "follower", "playlist", "podcast",
         "patient", "invoice", "flight", "booking",
+        "neavents", "smartmenu", "cloudflare",
     ];
 
-    private static readonly HashSet<string> VerticalSet =
-        new(Vertical, StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> VerticalSet = BuildForms(Vertical);
 
-    /// <summary>
-    /// Splits an identifier into its words, so a match is a whole word rather than a substring.
-    ///
-    /// Without this, <c>SetPreflightMaxAge</c> trips on "flight" and <c>Description</c> would trip
-    /// on anything ending in "script". A guard that cries wolf is turned off within a week.
-    /// </summary>
-    private static IEnumerable<string> Segments(string identifier) =>
-        Regex.Split(identifier, @"_|(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
-            .Where(part => part.Length > 0);
-
-    private static readonly Regex CommentOrString = new(
-        @"//.*?$|/\*.*?\*/|""(?:[^""\\]|\\.)*""",
-        RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.Compiled);
-
-    private static IEnumerable<string> SourceFiles()
+    private static HashSet<string> BuildForms(IEnumerable<string> words)
     {
-        DirectoryInfo? directory = new(AppContext.BaseDirectory);
-
-        while (directory is not null)
+        HashSet<string> forms = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string word in words)
         {
-            string candidate = Path.Combine(directory.FullName, "src", "Nealytics.Engine");
-            if (Directory.Exists(candidate))
-            {
-                return Directory.EnumerateFiles(candidate, "*.cs", SearchOption.AllDirectories)
-                    .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
-                                   && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"));
-            }
-
-            directory = directory.Parent;
+            forms.Add(word);
+            forms.Add(word + "s");
+            forms.Add(word + "es");
         }
 
-        throw new DirectoryNotFoundException("src/Nealytics.Engine not found walking up from the test output.");
+        return forms;
     }
 
+    private static readonly Regex Word = new(@"[A-Za-z0-9]+", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Splits text into words and each word into its camelCase and snake_case parts, so a match is
+    /// a whole word: "revenue" is not "venue", and SetPreflightMaxAge is not "flight".
+    /// </summary>
+    private static IEnumerable<string> Segments(string text) =>
+        Word.Matches(text)
+            .SelectMany(match => Regex.Split(match.Value, @"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"))
+            .Where(part => part.Length > 0);
+
+    internal static IReadOnlyList<string> Violations(string text) =>
+        Segments(text).Where(VerticalSet.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    private static List<string> EngineTextFiles() =>
+        [
+            .. RepositoryFiles.EngineFiles().Select(RepositoryFiles.Relative),
+            .. RepositoryFiles.RootFiles("clickhouse-init.sql", "Dockerfile", "docker-compose*.yml").Select(RepositoryFiles.Relative),
+        ];
+
+    public static TheoryData<string> EngineText() => new(EngineTextFiles());
+
     [Fact]
-    public void NoProductVocabularyAppearsInEngineCode()
+    public void TheScanCoversTheEngine()
     {
-        List<string> violations = [];
+        List<string> files = EngineTextFiles();
 
-        foreach (string path in SourceFiles())
-        {
-            // Comments and string literals are stripped first. A doc comment saying "a deployment
-            // declares menu_id" is the mechanism being explained, not the engine knowing it — and
-            // the plan explicitly permits a name as example config in a comment.
-            string code = CommentOrString.Replace(File.ReadAllText(path), " ");
+        files.Should().Contain(Path.Combine("src", "Nealytics.Engine", "Program.cs"));
+        files.Should().Contain(Path.Combine("src", "Nealytics.Engine", "appsettings.json"));
+        files.Should().Contain(Path.Combine("src", "Nealytics.Engine", "Nealytics.Engine.csproj"));
+        files.Should().Contain("clickhouse-init.sql");
+        files.Should().HaveCountGreaterThan(50);
+    }
 
-            foreach (Match identifier in Regex.Matches(code, @"\b[A-Za-z_][A-Za-z0-9_]*\b"))
-            {
-                foreach (string segment in Segments(identifier.Value))
-                {
-                    if (!VerticalSet.Contains(segment)) continue;
+    [Theory]
+    [MemberData(nameof(EngineText))]
+    public void NoProductVocabularyAppearsInEngineText(string relativePath)
+    {
+        string text = File.ReadAllText(Path.Combine(RepositoryFiles.Root().FullName, relativePath));
 
-                    // 'table' is the one word that is also ordinary database English — DataTable,
-                    // TableName, ToTable. Excluded outright rather than pattern-matched: a rule
-                    // with exceptions is a rule nobody can predict.
-                    if (string.Equals(segment, "table", StringComparison.OrdinalIgnoreCase)) continue;
+        Violations(text).Should().BeEmpty(
+            "the engine holds dimensions it was told about and never knows their names; a product "
+            + "word anywhere in it, a doc string included, is a deployment leaking into every clone");
+    }
 
-                    violations.Add($"{Path.GetFileName(path)}: {identifier.Value}");
-                }
-            }
-        }
-
-        violations.Should().BeEmpty(
-            "the engine holds dimensions it was told about and never knows their names at compile "
-            + "time; a product word in an identifier means a clone inherits someone else's schema");
+    [Theory]
+    [InlineData("""string label = "menu";""", "menu")]
+    [InlineData("/// <summary>Counts each venue.</summary>", "venue")]
+    [InlineData("int MenuId = 0;", "Menu")]
+    [InlineData("SELECT menu_id FROM t", "menu")]
+    [InlineData("""activity?.SetTag("neavents.project_id", id);""", "neavents")]
+    [InlineData("-- scanned from a QR code", "QR")]
+    [InlineData("""{ "Name": "menus" }""", "menus")]
+    public void TheGuardWouldActuallyFail(string text, string expected)
+    {
+        Violations(text).Should().Contain(expected);
     }
 
     [Theory]
@@ -106,29 +101,11 @@ public class DomainVocabularyTests
     [InlineData("Description")]
     [InlineData("DataTable")]
     [InlineData("TableName")]
-    public void OrdinaryEnglishIsNotAViolation(string identifier)
+    [InlineData("revenue")]
+    [InlineData("MapPost")]
+    [InlineData("productivity")]
+    public void OrdinaryEnglishIsNotAViolation(string text)
     {
-        Segments(identifier)
-            .Where(segment => VerticalSet.Contains(segment))
-            .Where(segment => !string.Equals(segment, "table", StringComparison.OrdinalIgnoreCase))
-            .Should().BeEmpty("a guard that cries wolf is turned off within a week");
-    }
-
-    [Fact]
-    public void TheGuardWouldActuallyFail()
-    {
-        // A guard nobody has seen fail is a guard nobody has written.
-        Segments("MenuId").Should().Contain("Menu");
-        Segments("menu_id").Should().Contain("menu");
-        VerticalSet.Contains("Menu").Should().BeTrue();
-    }
-
-    [Fact]
-    public void ACommentMayUseANameAsAnExample()
-    {
-        const string permitted = "// A deployment declares menu_id here; the engine never sees it.";
-
-        CommentOrString.Replace(permitted, " ").Trim().Should().BeEmpty(
-            "explaining the mechanism needs an example, and the plan permits one in a comment");
+        Violations(text).Should().BeEmpty("a guard that cries wolf is turned off within a week");
     }
 }
