@@ -1,6 +1,6 @@
 services:
   clickhouse-bench:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:25.3
     container_name: nealytics-clickhouse-bench
     ports:
       - "9100:9000"

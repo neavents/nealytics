@@ -37,7 +37,7 @@ jobs:
     needs: build
     services:
       clickhouse:
-        image: clickhouse/clickhouse-server:latest
+        image: clickhouse/clickhouse-server:25.3
         ports:
           - 9000:9000
           - 8123:8123
@@ -83,7 +83,7 @@ jobs:
     timeout-minutes: 30
     services:
       clickhouse:
-        image: clickhouse/clickhouse-server:latest
+        image: clickhouse/clickhouse-server:25.3
         ports:
           - 9000:9000
           - 8123:8123

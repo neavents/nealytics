@@ -1,6 +1,6 @@
 services:
   clickhouse-test:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:25.3
     container_name: nealytics-clickhouse-test
     ports:
       - "9000:9000"

@@ -334,6 +334,12 @@ released tarball is that exact binary rather than a second build from the same i
 releases once shipped a binary that answered `202`, passed `/health` and `/ready`, and stored
 nothing. Every job carries a timeout so a hung job fails rather than spending the default six hours.
 
+**ClickHouse is pinned, not `latest`.** CI, the test and benchmark compose files and the example
+compose file run the version deployments run, so a ClickHouse release cannot turn the build red, or
+break a fresh `docker compose up`, between two commits that changed nothing. That happened with
+26.9, which defaults `network_compression_method` to ZSTD while the client library reads only LZ4.
+Moving the pin forward is a deliberate change with the suites run against the new version.
+
 **The benchmark's ClickHouse uses ports 9100 and 8223.** The integration suite and the smoke test
 use the default ports and finish with `docker compose down -v`, so a benchmark sharing them would
 destroy whatever else is running.

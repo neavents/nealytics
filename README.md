@@ -35,6 +35,11 @@ docker compose up -d
 
 That's it. ClickHouse starts, the schema gets created automatically from [`clickhouse-init.sql`](clickhouse-init.sql), and the API is live on port 5000.
 
+The compose files and CI pin ClickHouse **25.3**. Do not run the engine against 26.9 or later yet:
+26.9 compresses responses with ZSTD by default and the ClickHouse client the engine uses reads only
+LZ4, so every read fails with `An unexpected compression algorithm identifier was received`
+([Octonica/ClickHouseClient#114](https://github.com/Octonica/ClickHouseClient/issues/114)).
+
 ### Prebuilt binary (no SDK needed)
 
 Grab the latest binary from the [Releases](../../releases) page. We publish builds for Linux x64 and Linux ARM64. No .NET runtime required, it is fully self contained.

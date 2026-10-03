@@ -1,6 +1,6 @@
 services:
   telemetry-db:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:25.3
     container_name: global_telemetry_db
     ports:
       - "9000:9000"
