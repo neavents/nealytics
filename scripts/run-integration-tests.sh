@@ -9,11 +9,13 @@ cd "$(dirname "$0")/.."
 COMPOSE_FILE="docker-compose.test.yml"
 CH_CONTAINER="nealytics-clickhouse-test"
 CH_PORT=9000
+CH_HTTP_PORT=8123
 
 if [ "${INTEGRATION_ISOLATED:-0}" = "1" ]; then
   COMPOSE_FILE="docker-compose.bench.yml"
   CH_CONTAINER="nealytics-clickhouse-bench"
   CH_PORT=9100
+  CH_HTTP_PORT=8223
 fi
 
 KEEP_UP="${KEEP_CLICKHOUSE:-0}"
@@ -33,6 +35,16 @@ for i in $(seq 1 60); do
   status="$(docker inspect -f '{{.State.Health.Status}}' "$CH_CONTAINER" 2>/dev/null || echo starting)"
   if [ "$status" = "healthy" ]; then
     echo "ClickHouse ready after ${i}s"
+    break
+  fi
+  sleep 1
+done
+
+# The image runs clickhouse-init.sql on a temporary server that only listens inside the container,
+# and the health check can pass against that one. Connections from the host are then cut when it
+# restarts, so wait until the host itself sees the initialised table.
+for i in $(seq 1 60); do
+  if [ "$(curl -s "http://127.0.0.1:${CH_HTTP_PORT}/?query=EXISTS%20TABLE%20nealytics_core.global_events" 2>/dev/null)" = "1" ]; then
     break
   fi
   sleep 1
