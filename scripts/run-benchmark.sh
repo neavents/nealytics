@@ -7,6 +7,8 @@ cd "$(dirname "$0")/.."
 #   mode: noop | track | beacon | timeline | timeseries | active | top | all   (default: track)
 #         read   seeds one tenant, then measures every read endpoint against it, including the
 #                same breakdown answered from raw and from a rollup
+#         set    seeds 1,000 tenants in one set among 3,000 others, then measures questions asked
+#                over the whole set, from raw and from a tenant-attribute rollup
 # Env knobs:
 #   OVERDRIVE=1            crank concurrency + batch to find the limit
 #   BENCH_DURATION=15      seconds per level (0 => use BENCH_REQUESTS)
@@ -28,6 +30,15 @@ SEED_SECONDS="${BENCH_SEED_SECONDS:-30}"
 # them back out of the AggregatingMergeTree.
 if [ "$MODE" = "read" ]; then
   export TelemetryEngine__SchemaFile="$(pwd)/bench/bench-schema.json"
+fi
+
+# The set mode answers one question over a tenant set: BENCH_SET_TENANTS tenants share the parent
+# the token names, and BENCH_SET_NOISE_TENANTS more belong to other parents, so the measured query
+# has to prune them out of the same table rather than read a table that only holds the set.
+if [ "$MODE" = "set" ]; then
+  export TelemetryEngine__SchemaFile="$(pwd)/bench/bench-set-schema.json"
+  export TelemetryEngine__IngestionKeys__0__Key="bench-server-key"
+  export TelemetryEngine__IngestionKeys__0__Scope="server"
 fi
 
 if [ "${OVERDRIVE:-0}" = "1" ]; then
@@ -89,7 +100,7 @@ trap cleanup EXIT
 # a column no declaration mentions and that column has rows in it -- which is exactly what another
 # script leaves behind on this same container. Without this the benchmark dies at startup with a
 # message about someone else's columns, and the cause is three scripts away.
-if [ "$MODE" = "read" ]; then
+if [ "$MODE" = "read" ] || [ "$MODE" = "set" ]; then
   echo "== Resetting ClickHouse (a read run needs a table only bench-schema.json describes) =="
   docker compose -f "$COMPOSE_FILE" down -v >/dev/null 2>&1 || true
 fi
@@ -174,6 +185,49 @@ elif [ "$MODE" = "read" ]; then
 
   for m in breakdown breakdown-rollup breakdown-measure breakdown-measure-rollup timeseries top active timeline; do
     run_mode "$m" --read-tenant "$SEED_TENANT"
+  done
+elif [ "$MODE" = "set" ]; then
+  SET_TENANTS="${BENCH_SET_TENANTS:-1000}"
+  NOISE_TENANTS="${BENCH_SET_NOISE_TENANTS:-3000}"
+  EVENTS_PER_TENANT="${BENCH_SET_EVENTS_PER_TENANT:-400}"
+  ALL_TENANTS=$((SET_TENANTS + NOISE_TENANTS))
+
+  for i in $(seq 1 60); do
+    curl -sf "http://127.0.0.1:${PORT}/ready" >/dev/null 2>&1 && break
+    sleep 1
+  done
+
+  echo "== Declaring ${SET_TENANTS} tenants under parent org-bench and ${NOISE_TENANTS} under other parents =="
+  python3 - "$SET_TENANTS" "$ALL_TENANTS" > /tmp/nealytics-bench-attributes.json <<'PY'
+import json, sys
+in_set, total = int(sys.argv[1]), int(sys.argv[2])
+tenants = [{"tenantId": f"v{i}", "attributes": {"parent": "org-bench" if i < in_set else f"org-{i % 97}", "region": f"r{i % 8}"}} for i in range(total)]
+print(json.dumps({"projectId": "bench", "tenants": tenants}))
+PY
+  curl -sf -X POST "http://127.0.0.1:${PORT}/api/v1/tenants/attributes" \
+    -H "Content-Type: application/json" -H "X-Project-Key: bench-server-key" \
+    --data-binary @/tmp/nealytics-bench-attributes.json
+  echo
+
+  echo "== Seeding $((ALL_TENANTS * EVENTS_PER_TENANT)) sale events straight into ClickHouse =="
+  docker exec "$CH_CONTAINER" clickhouse-client -q "
+    INSERT INTO nealytics_core.global_events
+      (event_id, project_id, tenant_id, session_id, event_type, metadata_json, timestamp, currency, category_id, amount)
+    SELECT generateUUIDv4(), 'bench', concat('v', toString(number % ${ALL_TENANTS})),
+           concat('s', toString(intDiv(number, 3))), 'sale', '{}',
+           toDateTime64('2026-03-01 00:00:00', 3, 'UTC') + toIntervalSecond(number % (180 * 86400)),
+           if(number % 10 = 0, 'EUR', 'TRY'), concat('c', toString(number % 12)), toDecimal64(number % 500, 2) / 7
+    FROM numbers($((ALL_TENANTS * EVENTS_PER_TENANT)))"
+  docker exec "$CH_CONTAINER" clickhouse-client -q "OPTIMIZE TABLE nealytics_core.global_events FINAL" || true
+  echo "Seeded rows: $(docker exec "$CH_CONTAINER" clickhouse-client -q 'SELECT count() FROM nealytics_core.global_events')"
+  echo "Group rollup rows: $(docker exec "$CH_CONTAINER" clickhouse-client -q 'SELECT count() FROM nealytics_core.rollup_daily_by_org')"
+
+  CONCURRENCY="${BENCH_READ_CONCURRENCY:-1,4,16}"
+  DURATION="${BENCH_READ_DURATION:-10}"
+  WARMUP=0
+
+  for m in set-breakdown set-breakdown-group set-pivot-attribute set-timeseries; do
+    run_mode "$m" --read-set "parent:org-bench"
   done
 else
   run_mode "$MODE"

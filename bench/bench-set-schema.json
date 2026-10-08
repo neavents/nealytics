@@ -1,0 +1,32 @@
+{
+  "TelemetryEngine": {
+    "Dimensions": [
+      { "Name": "currency", "Type": "LowCardinality" },
+      { "Name": "category_id", "Type": "LowCardinality" }
+    ],
+
+    "Measures": [
+      { "Name": "amount", "Type": "Decimal", "Aggregations": "sum,avg,p95", "UnitDimension": "currency", "ServerOnly": true }
+    ],
+
+    "TenantAttributes": [
+      { "Name": "parent" },
+      { "Name": "region" }
+    ],
+
+    "ServerEventTypes": "sale",
+
+    "Rollups": [
+      { "Name": "daily_by_tenant", "Grain": "day",
+        "EventTypes": "sale",
+        "Dimensions": "currency,category_id",
+        "Measures": "amount:sum,amount:p95" },
+
+      { "Name": "daily_by_org", "Grain": "day",
+        "EventTypes": "sale",
+        "TenantAttributes": "parent,region",
+        "Dimensions": "currency",
+        "Measures": "amount:sum,amount:p95" }
+    ]
+  }
+}

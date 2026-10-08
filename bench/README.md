@@ -27,6 +27,7 @@ the WAL, or the DB. Measure them separately, on the same host, so they compose:
 | `track` | `run-benchmark.sh track` | single-event durable ingest (closed-loop) |
 | `beacon` | `run-benchmark.sh beacon` | batched durable ingest (the realistic path) |
 | `read` | `run-benchmark.sh read` | every read endpoint, plus the same breakdown answered from raw and from a rollup |
+| `set` | `run-benchmark.sh set` | a breakdown, pivot and time series over a 1,000-tenant set among 4,000 tenants, from raw and from a tenant-attribute rollup |
 
 See [`RESULTS.md`](RESULTS.md) for a worked example and the key finding: **group-commit only
 coalesces when appends are concurrently pending, so a closed-loop one-event-per-request client

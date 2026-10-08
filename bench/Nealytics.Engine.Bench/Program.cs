@@ -19,6 +19,9 @@ using Octonica.ClickHouseClient;
 //   timeline|timeseries|active|top   read endpoints (JWT)
 //   breakdown|breakdown-rollup       the same grouping answered from raw and from a rollup
 //   breakdown-measure|breakdown-measure-rollup   the same, for sum(amount)
+//   set-breakdown|set-breakdown-group|set-pivot-attribute|set-timeseries   one question over a
+//                    tenant set (a token carrying tenant_set instead of tenant_id), from raw and
+//                    from a tenant-attribute rollup; seeded by ./scripts/run-benchmark.sh set
 //
 // This tool is intentionally exempt from the engine's no-var and no-comment rules.
 
@@ -100,7 +103,7 @@ async Task<LevelResult> RunLevelAsync(HttpClient c, BenchOptions opt, int concur
         ? Task.CompletedTask
         : SampleQueueDepthAsync(c, opt.MetricsUrl, v => peakQueue = Math.Max(peakQueue, v), metricsCts.Token);
 
-    string? jwt = opt.NeedsJwt ? MakeJwt(opt.JwtKey, "bench", opt.ReadTenant ?? tenant) : null;
+    string? jwt = opt.NeedsJwt ? MakeJwt(opt.JwtKey, "bench", opt.ReadTenant ?? tenant, opt.ReadSet) : null;
 
     Stopwatch sw = Stopwatch.StartNew();
     Task[] workers = new Task[concurrency];
@@ -238,6 +241,10 @@ static string ReadUrl(string mode) => mode switch
     "breakdown-rollup" => "/api/v1/analytics/breakdown?groupBy=product_id&metric=events&eventType=bench&from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&limit=100",
     "breakdown-measure" => "/api/v1/analytics/breakdown?groupBy=product_id&metric=sum(amount)&eventType=bench&from=2026-01-01T00:00:01Z&to=2026-12-31T00:00:01Z&limit=100",
     "breakdown-measure-rollup" => "/api/v1/analytics/breakdown?groupBy=product_id&metric=sum(amount)&eventType=bench&from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&limit=100",
+    "set-breakdown" => "/api/v1/analytics/breakdown?groupBy=tenant_id&metric=sum(amount)&filter=currency:TRY&eventType=sale&from=2026-01-01T00:00:01Z&to=2026-12-31T00:00:01Z&limit=1000",
+    "set-breakdown-group" => "/api/v1/analytics/breakdown?groupBy=tenant.region&metric=sum(amount)&filter=currency:TRY&eventType=sale&from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&limit=100",
+    "set-pivot-attribute" => "/api/v1/analytics/pivot?groupBy=tenant.region&metric=events&metric=sessions&metric=sum(amount)&filter=currency:TRY&from=2026-01-01T00:00:01Z&to=2026-12-31T00:00:01Z&limit=100",
+    "set-timeseries" => "/api/v1/analytics/timeseries?from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&interval=day&eventType=sale",
     _ => throw new InvalidOperationException($"Unknown mode '{mode}'.")
 };
 
@@ -249,6 +256,8 @@ static string? ExpectedSource(string mode) => mode switch
     "breakdown" or "breakdown-measure" => "raw",
     "breakdown-rollup" => "rollup:",
     "breakdown-measure-rollup" => "rollup:",
+    "set-breakdown" or "set-pivot-attribute" => "raw",
+    "set-breakdown-group" => "rollup:daily_by_org",
     _ => null
 };
 
@@ -261,7 +270,7 @@ static async Task PreflightSourceAsync(HttpClient c, BenchOptions opt)
     }
 
     using HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get, ReadUrl(opt.Mode));
-    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", MakeJwt(opt.JwtKey, "bench", opt.ReadTenant ?? "bench"));
+    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", MakeJwt(opt.JwtKey, "bench", opt.ReadTenant ?? "bench", opt.ReadSet));
     using HttpResponseMessage res = await c.SendAsync(req);
     string body = await res.Content.ReadAsStringAsync();
 
@@ -404,11 +413,12 @@ static double Percentile(double[] sorted, double p)
     return sorted[lo] * (1 - frac) + sorted[hi] * frac;
 }
 
-static string MakeJwt(string key, string projectId, string tenantId)
+static string MakeJwt(string key, string projectId, string tenantId, string? tenantSet = null)
 {
     long exp = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds();
     string header = Base64Url(Encoding.UTF8.GetBytes("{\"alg\":\"HS256\",\"typ\":\"JWT\"}"));
-    string payload = Base64Url(Encoding.UTF8.GetBytes($"{{\"project_id\":\"{projectId}\",\"tenant_id\":\"{tenantId}\",\"exp\":{exp}}}"));
+    string scope = tenantSet is null ? $"\"tenant_id\":\"{tenantId}\"" : $"\"tenant_set\":\"{tenantSet}\"";
+    string payload = Base64Url(Encoding.UTF8.GetBytes($"{{\"project_id\":\"{projectId}\",{scope},\"exp\":{exp}}}"));
     string signingInput = header + "." + payload;
     using HMACSHA256 hmac = new HMACSHA256(Encoding.UTF8.GetBytes(key));
     string signature = Base64Url(hmac.ComputeHash(Encoding.UTF8.GetBytes(signingInput)));
@@ -480,6 +490,7 @@ sealed class BenchOptions
     public string OutFile { get; init; } = "bench/RESULTS.md";
     public string? MetricsUrl { get; init; }
     public string? ReadTenant { get; init; }
+    public string? ReadSet { get; init; }
 
     public bool Declared { get; init; }
     public string? SeedTenant { get; init; }
@@ -519,7 +530,8 @@ sealed class BenchOptions
             ClickHouseConnectionString = map.GetValueOrDefault("ch", Env("TelemetryEngine__ClickHouseConnectionString", "Host=127.0.0.1;Port=9000;Database=nealytics_core;User=default;Password=;")),
             OutFile = map.GetValueOrDefault("out", "bench/RESULTS.md"),
             MetricsUrl = map.GetValueOrDefault("metrics-url", Environment.GetEnvironmentVariable("BENCH_METRICS_URL") ?? "") is { Length: > 0 } m ? m : null,
-            ReadTenant = map.GetValueOrDefault("read-tenant", "") is { Length: > 0 } t ? t : null
+            ReadTenant = map.GetValueOrDefault("read-tenant", "") is { Length: > 0 } t ? t : null,
+            ReadSet = map.GetValueOrDefault("read-set", "") is { Length: > 0 } rs ? rs : null
         };
     }
 
