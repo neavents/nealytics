@@ -219,6 +219,43 @@ pipeline is deeply queued at that offered load, but no event is dropped and noth
 - **Next ceilings to chase**, in order: the ~32k HTTP round-trip cost (matters only for
   single-event `/track`; batch to avoid it), then the ~4 ms macOS `F_FULLFSYNC` (a Linux
   NVMe/tmpfs WAL is much faster), then ClickHouse insert/merge at sustained multi-100k/s.
+## Tenant sets, 2026-10-09 — same-host A/B against main, and the set modes
+
+Linux, ClickHouse 25.3 in Docker (`docker-compose.bench.yml`), a busy workstation. `main` (`e763553`) and this
+branch were run interleaved, base then branch, twice, with the same settings (`BENCH_DURATION=6`,
+concurrency 1/32/128 for writes, 1/16 for reads); each cell is the median of the runs. The two rounds of
+either side differed by more than base and branch differ, so the existing paths are within noise.
+
+| Mode | Clients | main events/s | branch events/s | main p50 ms | branch p50 ms | main p95 ms | branch p95 ms |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `track` | 1 | 194 | 344 | 5.22 | 1.70 | 6.39 | 5.22 |
+| `track` | 32 | 8,622 | 9,206 | 2.41 | 2.62 | 7.88 | 7.44 |
+| `track` | 128 | 40,194 | 39,456 | 2.80 | 2.78 | 4.67 | 5.55 |
+| `beacon` ×50 | 1 | 311 | 472 | 161.30 | 55.95 | 292.88 | 262.40 |
+| `beacon` ×50 | 32 | 7,912 | 9,120 | 116.07 | 251.31 | 514.84 | 375.75 |
+| `beacon` ×50 | 128 | 49,478 | 44,581 | 122.61 | 128.66 | 176.38 | 224.78 |
+| `breakdown` | 16 | 91 | 103 | 172.84 | 152.69 | 230.47 | 215.22 |
+| `breakdown-rollup` | 16 | 284 | 317 | 60.59 | 55.14 | 91.33 | 81.65 |
+| `breakdown-measure` | 16 | 86 | 99 | 184.58 | 158.21 | 248.97 | 228.07 |
+| `breakdown-measure-rollup` | 16 | 283 | 300 | 60.22 | 54.57 | 94.28 | 90.39 |
+| `timeseries` | 16 | 362 | 389 | 34.90 | 32.09 | 82.12 | 78.41 |
+| `top` | 16 | 378 | 394 | 33.84 | 32.12 | 78.38 | 77.11 |
+| `active` | 16 | 333 | 362 | 40.10 | 35.77 | 85.73 | 81.77 |
+| `timeline` | 16 | 144 | 236 | 105.88 | 62.24 | 176.12 | 114.34 |
+
+No request failed on either side. One branch `read` round seeded nothing and its first query answered 500 while
+ClickHouse was being recreated between modes; its repeat seeded 217,600 rows and is the branch's read column.
+
+The set modes ask one question over 1,000 tenants that share `parent:org-bench`, among 4,000 tenants and
+1.6 million sales seeded across the last sixty days:
+
+| Mode | Source | 1 client p50 / p95 ms | 4 clients p50 / p95 ms | 16 clients p50 / p95 ms |
+|---|---|---:|---:|---:|
+| `set-breakdown` (by tenant) | raw | 99.8 / 111.1 | 144.9 / 197.6 | 607.2 / 722.7 |
+| `set-breakdown-group` (by region) | `rollup_daily_by_org` | 56.0 / 59.2 | 48.9 / 62.4 | 69.4 / 102.9 |
+| `set-pivot-attribute` (3 metrics by region) | raw | 242.6 / 284.3 | 498.2 / 557.4 | 2,186.9 / 2,478.1 |
+| `set-timeseries` (by day) | raw | 44.4 / 66.0 | 59.2 / 77.9 | 153.0 / 211.6 |
+
 ## Run 2026-08-14 12:28:12 UTC — mode=`breakdown`, target=`http://127.0.0.1:5299`, git=`33467fe+dirty`
 
 - budget: 6s/level, events/request: 1, verify-loss: False
@@ -466,4 +503,248 @@ pipeline is deeply queued at that offered load, but no event is dropped and noth
 | 256 | 2048 | 0 | 181 | 36,168 | 1,418.38 | 2,445.11 | 2,455.84 | 2,466.7 | 409600/409600 ✅ | 0 |
 | 1024 | 9573 | 0 | 900 | 179,939 | 862.77 | 2,684.11 | 2,717.19 | 2,766.5 | 1914600/1914600 ✅ | 0 |
 | 2048 | 16384 | 0 | 1,592 | 318,448 | 1,186.24 | 1,840.70 | 1,855.12 | 1,871.4 | 3276800/3276800 ✅ | 0 |
+
+## Run 2026-10-08 22:04:15 UTC — mode=`track`, target=`http://127.0.0.1:5199`, git=`e39b670`
+
+- budget: 6s/level, events/request: 1, verify-loss: True
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 4441 | 0 | 740 | 740 | 1.24 | 1.81 | 2.29 | 65.1 | 4441/4441 ✅ | 0 |
+| 32 | 27578 | 0 | 4,590 | 4,590 | 9.53 | 11.38 | 14.93 | 66.0 | 27578/27578 ✅ | 0 |
+| 128 | 164826 | 0 | 27,461 | 27,461 | 2.92 | 8.72 | 13.25 | 73.7 | 164826/164826 ✅ | 0 |
+
+## Run 2026-10-08 22:04:58 UTC — mode=`beacon`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 6s/level, events/request: 50, verify-loss: True
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 59 | 0 | 10 | 488 | 105.16 | 149.22 | 200.58 | 256.6 | 2950/2950 ✅ | 0 |
+| 32 | 1024 | 0 | 161 | 8,060 | 114.28 | 571.18 | 630.54 | 630.8 | 51200/51200 ✅ | 0 |
+| 128 | 2176 | 0 | 361 | 18,028 | 398.28 | 646.69 | 651.47 | 655.7 | 108800/108800 ✅ | 0 |
+
+## Run 2026-10-08 22:05:46 UTC — mode=`breakdown`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 5s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 81 | 0 | 16 | 16 | 78.92 | 86.79 | 92.39 | 103.8 | n/a | 0 |
+| 16 | 385 | 0 | 75 | 75 | 193.65 | 300.00 | 512.66 | 531.8 | n/a | 0 |
+
+## Run 2026-10-08 22:05:57 UTC — mode=`breakdown-rollup`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 5s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 138 | 0 | 28 | 28 | 27.96 | 58.61 | 61.46 | 68.9 | n/a | 0 |
+| 16 | 1261 | 0 | 250 | 250 | 66.87 | 101.37 | 117.15 | 134.1 | n/a | 0 |
+
+## Run 2026-10-08 22:06:09 UTC — mode=`breakdown-measure`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 5s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 77 | 0 | 15 | 15 | 81.90 | 85.47 | 91.29 | 104.2 | n/a | 0 |
+| 16 | 363 | 0 | 71 | 71 | 209.77 | 308.23 | 552.53 | 598.0 | n/a | 0 |
+
+## Run 2026-10-08 22:06:20 UTC — mode=`breakdown-measure-rollup`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 5s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 140 | 0 | 28 | 28 | 20.09 | 57.48 | 59.25 | 60.1 | n/a | 0 |
+| 16 | 1219 | 0 | 241 | 241 | 66.63 | 106.36 | 126.69 | 375.9 | n/a | 0 |
+
+## Run 2026-10-08 22:06:32 UTC — mode=`timeseries`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 5s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 190 | 0 | 38 | 38 | 11.18 | 53.52 | 57.92 | 364.3 | n/a | 0 |
+| 16 | 1534 | 0 | 304 | 304 | 47.00 | 94.01 | 106.71 | 131.4 | n/a | 0 |
+
+## Run 2026-10-08 22:06:43 UTC — mode=`top`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 5s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 190 | 0 | 38 | 38 | 13.67 | 55.47 | 60.37 | 68.2 | n/a | 0 |
+| 16 | 1466 | 0 | 291 | 291 | 48.27 | 93.64 | 104.74 | 132.8 | n/a | 0 |
+
+## Run 2026-10-08 22:06:55 UTC — mode=`active`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 5s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 188 | 0 | 38 | 38 | 14.12 | 55.78 | 58.17 | 58.3 | n/a | 0 |
+| 16 | 1342 | 0 | 266 | 266 | 53.94 | 98.58 | 112.22 | 143.8 | n/a | 0 |
+
+## Run 2026-10-08 22:07:06 UTC — mode=`timeline`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 5s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 176 | 0 | 35 | 35 | 19.72 | 61.44 | 64.49 | 115.1 | n/a | 0 |
+| 16 | 644 | 0 | 127 | 127 | 120.88 | 191.47 | 224.96 | 263.9 | n/a | 0 |
+
+## Run 2026-10-08 22:07:52 UTC — mode=`set-breakdown`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 8s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 95 | 0 | 12 | 12 | 99.77 | 111.12 | 119.80 | 155.3 | n/a | 0 |
+| 4 | 222 | 0 | 27 | 27 | 144.94 | 197.56 | 237.55 | 257.2 | n/a | 0 |
+| 16 | 216 | 0 | 26 | 26 | 607.15 | 722.74 | 788.86 | 851.3 | n/a | 0 |
+
+## Run 2026-10-08 22:08:17 UTC — mode=`set-breakdown-group`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 8s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 215 | 0 | 27 | 27 | 56.00 | 59.16 | 60.53 | 66.7 | n/a | 0 |
+| 4 | 830 | 0 | 103 | 103 | 48.88 | 62.38 | 67.97 | 79.9 | n/a | 0 |
+| 16 | 1971 | 0 | 244 | 244 | 69.42 | 102.93 | 138.77 | 173.0 | n/a | 0 |
+
+## Run 2026-10-08 22:08:45 UTC — mode=`set-pivot-attribute`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 8s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 33 | 0 | 4 | 4 | 242.55 | 284.34 | 303.37 | 304.0 | n/a | 0 |
+| 4 | 67 | 0 | 8 | 8 | 498.15 | 557.35 | 579.36 | 599.0 | n/a | 0 |
+| 16 | 65 | 0 | 7 | 7 | 2,186.93 | 2,478.14 | 2,533.07 | 2,608.1 | n/a | 0 |
+
+## Run 2026-10-08 22:09:10 UTC — mode=`set-timeseries`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 8s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 190 | 0 | 24 | 24 | 44.36 | 65.99 | 67.22 | 102.9 | n/a | 0 |
+| 4 | 635 | 0 | 79 | 79 | 59.16 | 77.86 | 85.51 | 104.2 | n/a | 0 |
+| 16 | 838 | 0 | 103 | 103 | 152.97 | 211.58 | 242.31 | 317.6 | n/a | 0 |
+
+## Run 2026-10-08 22:33:57 UTC — mode=`track`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 6s/level, events/request: 1, verify-loss: True
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 1882 | 0 | 313 | 313 | 1.55 | 5.84 | 6.74 | 65.3 | 1882/1882 ✅ | 0 |
+| 32 | 35430 | 0 | 5,904 | 5,904 | 2.94 | 11.45 | 15.96 | 60.2 | 35430/35430 ✅ | 0 |
+| 128 | 230529 | 0 | 38,402 | 38,402 | 2.81 | 5.91 | 8.55 | 79.3 | 230529/230529 ✅ | 0 |
+
+## Run 2026-10-08 22:34:41 UTC — mode=`beacon`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 6s/level, events/request: 50, verify-loss: True
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 60 | 0 | 10 | 496 | 55.76 | 300.06 | 327.24 | 327.9 | 3000/3000 ✅ | 0 |
+| 32 | 576 | 0 | 95 | 4,736 | 388.50 | 597.82 | 599.45 | 599.7 | 28800/28800 ✅ | 0 |
+| 128 | 4992 | 0 | 819 | 40,939 | 130.54 | 277.94 | 430.04 | 433.4 | 249600/249600 ✅ | 0 |
+
+## Run 2026-10-08 22:40:40 UTC — mode=`track`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 6s/level, events/request: 1, verify-loss: True
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 2252 | 0 | 375 | 375 | 1.84 | 4.60 | 5.99 | 48.3 | 2252/2252 ✅ | 0 |
+| 32 | 75072 | 0 | 12,508 | 12,508 | 2.30 | 3.43 | 5.51 | 46.3 | 75072/75072 ✅ | 0 |
+| 128 | 243145 | 0 | 40,510 | 40,510 | 2.75 | 5.19 | 8.17 | 68.1 | 243145/243145 ✅ | 0 |
+
+## Run 2026-10-08 22:41:35 UTC — mode=`beacon`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 6s/level, events/request: 50, verify-loss: True
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 54 | 0 | 9 | 448 | 56.13 | 224.75 | 262.07 | 266.4 | 2700/2700 ✅ | 0 |
+| 32 | 1632 | 0 | 270 | 13,504 | 114.12 | 153.69 | 166.56 | 166.8 | 81600/81600 ✅ | 0 |
+| 128 | 5905 | 0 | 964 | 48,223 | 126.77 | 171.62 | 183.85 | 189.2 | 295250/295250 ✅ | 0 |
+
+## Run 2026-10-08 22:42:16 UTC — mode=`breakdown`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 5s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 93 | 0 | 18 | 18 | 71.94 | 76.22 | 84.50 | 94.2 | n/a | 0 |
+| 16 | 524 | 0 | 103 | 103 | 152.69 | 215.22 | 233.59 | 248.7 | n/a | 0 |
+
+## Run 2026-10-08 22:42:28 UTC — mode=`breakdown-rollup`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 5s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 143 | 0 | 29 | 29 | 53.29 | 56.36 | 58.72 | 61.4 | n/a | 0 |
+| 16 | 1600 | 0 | 317 | 317 | 55.14 | 81.65 | 100.48 | 124.8 | n/a | 0 |
+
+## Run 2026-10-08 22:42:39 UTC — mode=`breakdown-measure`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 5s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 90 | 0 | 18 | 18 | 39.11 | 79.46 | 101.31 | 150.7 | n/a | 0 |
+| 16 | 502 | 0 | 99 | 99 | 158.21 | 228.07 | 256.14 | 282.7 | n/a | 0 |
+
+## Run 2026-10-08 22:42:51 UTC — mode=`breakdown-measure-rollup`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 5s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 149 | 0 | 30 | 30 | 15.75 | 55.87 | 57.34 | 58.3 | n/a | 0 |
+| 16 | 1514 | 0 | 300 | 300 | 54.57 | 90.39 | 104.83 | 116.5 | n/a | 0 |
+
+## Run 2026-10-08 22:43:02 UTC — mode=`timeseries`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 5s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 215 | 0 | 43 | 43 | 10.38 | 51.68 | 52.48 | 108.8 | n/a | 0 |
+| 16 | 1960 | 0 | 389 | 389 | 32.09 | 78.41 | 99.03 | 132.8 | n/a | 0 |
+
+## Run 2026-10-08 22:43:14 UTC — mode=`top`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 5s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 212 | 0 | 42 | 42 | 10.15 | 51.92 | 52.52 | 53.4 | n/a | 0 |
+| 16 | 1988 | 0 | 394 | 394 | 32.12 | 77.11 | 86.69 | 109.8 | n/a | 0 |
+
+## Run 2026-10-08 22:43:25 UTC — mode=`active`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 5s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 211 | 0 | 42 | 42 | 10.73 | 52.70 | 54.19 | 55.3 | n/a | 0 |
+| 16 | 1826 | 0 | 362 | 362 | 35.77 | 81.77 | 93.26 | 129.5 | n/a | 0 |
+
+## Run 2026-10-08 22:43:37 UTC — mode=`timeline`, target=`http://127.0.0.1:5199`, git=`e39b670+dirty`
+
+- budget: 5s/level, events/request: 1, verify-loss: False
+
+| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 224 | 0 | 44 | 44 | 13.48 | 55.20 | 55.98 | 65.3 | n/a | 0 |
+| 16 | 1189 | 0 | 236 | 236 | 62.24 | 114.34 | 140.11 | 217.0 | n/a | 0 |
 
