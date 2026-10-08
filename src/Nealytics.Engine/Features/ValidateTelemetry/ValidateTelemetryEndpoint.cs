@@ -23,13 +23,14 @@ public static class ValidateTelemetryEndpoint
             MeasureSanitizer measureSanitizer,
             DimensionRegistry dimensions,
             MeasureRegistry measures,
+            IngestGate gate,
             CancellationToken cancellationToken) =>
         {
             string clientProjectKey = IngestValidation.ResolveProjectKey(
                 context.Request.Headers["X-Project-Key"],
                 context.Request.Query["k"]);
 
-            if (clientProjectKey.Length == 0 || !keyValidator.IsValid(clientProjectKey))
+            if (clientProjectKey.Length == 0 || !keyValidator.TryResolve(clientProjectKey, out IngestionKeyPolicy? policy))
             {
                 return Results.Unauthorized();
             }
@@ -52,13 +53,7 @@ public static class ValidateTelemetryEndpoint
                 });
             }
 
-            IngestRejection rejection = IngestValidation.Validate(payload, System.DateTime.UtcNow);
-
-            if (rejection == IngestRejection.None
-                && !keyValidator.MayWriteProject(clientProjectKey, payload!.ProjectId))
-            {
-                rejection = IngestRejection.ProjectNotPermittedForKey;
-            }
+            IngestRejection rejection = gate.Check(policy, payload, System.DateTime.UtcNow, out _);
 
             if (rejection != IngestRejection.None)
             {
@@ -135,6 +130,14 @@ public static class ValidateTelemetryEndpoint
             + "would land in a partition retention never reaches.",
         IngestRejection.ProjectNotPermittedForKey =>
             "this project key is not permitted to write to that projectId.",
+        IngestRejection.EventTypeNotPermittedForKey =>
+            "this key may not send that eventType: either the key lists the event types it may send, or "
+            + "the event type is declared under TelemetryEngine:ServerEventTypes and only a server key may send it.",
+        IngestRejection.ServerOnlyField =>
+            "only a server key may set this field: a measure declared ServerOnly, or a trafficClass other "
+            + "than normal on a public key.",
+        IngestRejection.AliasWithoutIdentity =>
+            "an alias event links its sessionId to a userId or an objectId, and this one carries neither.",
         _ => "accepted.",
     };
 }

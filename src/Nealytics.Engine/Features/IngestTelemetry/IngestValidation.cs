@@ -15,6 +15,9 @@ public enum IngestRejection
     FieldTooLong,
     TimestampTooFarAhead,
     ProjectNotPermittedForKey,
+    EventTypeNotPermittedForKey,
+    ServerOnlyField,
+    AliasWithoutIdentity,
 }
 
 public static class IngestValidation
@@ -41,7 +44,10 @@ public static class IngestValidation
     public static bool IsValidPayload(GlobalTelemetryPayload? payload) =>
         Validate(payload, DateTime.UtcNow) == IngestRejection.None;
 
-    public static IngestRejection Validate(GlobalTelemetryPayload? payload, DateTime utcNow)
+    public static IngestRejection Validate(GlobalTelemetryPayload? payload, DateTime utcNow) =>
+        Validate(payload, utcNow, sessionRequired: true);
+
+    public static IngestRejection Validate(GlobalTelemetryPayload? payload, DateTime utcNow, bool sessionRequired)
     {
         if (payload is null)
         {
@@ -50,12 +56,12 @@ public static class IngestValidation
 
         if (string.IsNullOrEmpty(payload.ProjectId)) return IngestRejection.MissingProjectId;
         if (string.IsNullOrEmpty(payload.TenantId)) return IngestRejection.MissingTenantId;
-        if (string.IsNullOrEmpty(payload.SessionId)) return IngestRejection.MissingSessionId;
+        if (sessionRequired && string.IsNullOrEmpty(payload.SessionId)) return IngestRejection.MissingSessionId;
         if (string.IsNullOrEmpty(payload.EventType)) return IngestRejection.MissingEventType;
 
         if (payload.ProjectId.Length > MaxIdentifierLength
             || payload.TenantId.Length > MaxIdentifierLength
-            || payload.SessionId.Length > MaxIdentifierLength
+            || payload.SessionId?.Length > MaxIdentifierLength
             || payload.EventType.Length > MaxEventTypeLength
             || payload.ObjectId?.Length > MaxIdentifierLength
             || payload.UserId?.Length > MaxIdentifierLength)
@@ -95,6 +101,9 @@ public static class IngestValidation
         IngestRejection.FieldTooLong => "field_too_long",
         IngestRejection.TimestampTooFarAhead => "timestamp_too_far_ahead",
         IngestRejection.ProjectNotPermittedForKey => "project_not_permitted_for_key",
+        IngestRejection.EventTypeNotPermittedForKey => "event_type_not_permitted_for_key",
+        IngestRejection.ServerOnlyField => "server_only_field",
+        IngestRejection.AliasWithoutIdentity => "alias_without_identity",
         _ => "none",
     };
 }

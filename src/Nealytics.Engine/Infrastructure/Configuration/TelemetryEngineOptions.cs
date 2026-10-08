@@ -24,6 +24,26 @@ public sealed class MeasureOptions
     public double? Maximum { get; set; }
 
     public bool Retired { get; set; }
+
+    public bool ServerOnly { get; set; }
+
+    public string UnitDimension { get; set; } = "";
+}
+
+public sealed class TenantAttributeOptions
+{
+    public string Name { get; set; } = "";
+}
+
+public sealed class IngestionKeyOptions
+{
+    public string Key { get; set; } = "";
+
+    public string Scope { get; set; } = "";
+
+    public string ProjectId { get; set; } = "";
+
+    public string EventTypes { get; set; } = "";
 }
 
 public sealed class ProjectKeyOptions
@@ -51,6 +71,8 @@ public sealed class RollupOptions
     public string Dimensions { get; set; } = "";
 
     public string Measures { get; set; } = "";
+
+    public string TenantAttributes { get; set; } = "";
 }
 
 public sealed class TelemetryEngineOptions
@@ -60,6 +82,32 @@ public sealed class TelemetryEngineOptions
     public List<MeasureOptions> Measures { get; set; } = [];
 
     public List<RollupOptions> Rollups { get; set; } = [];
+
+    public List<TenantAttributeOptions> TenantAttributes { get; set; } = [];
+
+    public List<IngestionKeyOptions> IngestionKeys { get; set; } = [];
+
+    public string ServerEventTypes { get; set; } = string.Empty;
+
+    public int PublicKeyTimestampToleranceSeconds { get; set; } = 300;
+
+    public int MaxTenantAttributeBatch { get; set; } = 10_000;
+
+    public string AliasEventType { get; set; } = string.Empty;
+
+    public string ClusterName { get; set; } = string.Empty;
+
+    public string JwtIssuer { get; set; } = string.Empty;
+
+    public string JwtAudience { get; set; } = string.Empty;
+
+    public string JwtPublicKeyPem { get; set; } = string.Empty;
+
+    public string JwtJwksUrl { get; set; } = string.Empty;
+
+    public int JwtJwksRefreshMinutes { get; set; } = 60;
+
+    public string ReadScopeClaim { get; set; } = string.Empty;
 
     public int MaxDimensions { get; set; } = 64;
 

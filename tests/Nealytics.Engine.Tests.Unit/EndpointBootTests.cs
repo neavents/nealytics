@@ -10,7 +10,7 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace Nealytics.Engine.Tests.Unit;
 
-public sealed class NoDatabaseWebFactory : WebApplicationFactory<Program>
+public class NoDatabaseWebFactory : WebApplicationFactory<Program>
 {
     public const string JwtKey = "unit-test-jwt-signing-key-at-least-32-bytes!!";
 

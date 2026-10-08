@@ -34,6 +34,7 @@ public static partial class BeaconTelemetryEndpoint
             DimensionSanitizer dimensionSanitizer,
             MeasureSanitizer measureSanitizer,
             ILoggerFactory loggerFactory,
+            IngestGate gate,
             IOptions<TelemetryEngineOptions> options) =>
         {
             using Activity? activity = TelemetryDiagnostics.Source.StartActivity("BeaconIngest");
@@ -42,7 +43,7 @@ public static partial class BeaconTelemetryEndpoint
                 null,
                 context.Request.Query["k"].ToString());
 
-            if (clientProjectKey.Length == 0 || !keyValidator.IsValid(clientProjectKey))
+            if (clientProjectKey.Length == 0 || !keyValidator.TryResolve(clientProjectKey, out IngestionKeyPolicy? policy))
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 return;
@@ -70,13 +71,7 @@ public static partial class BeaconTelemetryEndpoint
                         TelemetryAotContext.Default.GlobalTelemetryPayload,
                         context.RequestAborted))
                 {
-                    IngestRejection rejection = IngestValidation.Validate(payload, receivedAt);
-
-                    if (rejection == IngestRejection.None
-                        && !keyValidator.MayWriteProject(clientProjectKey, payload!.ProjectId))
-                    {
-                        rejection = IngestRejection.ProjectNotPermittedForKey;
-                    }
+                    IngestRejection rejection = gate.Check(policy, payload, receivedAt, out _);
 
                     if (rejection != IngestRejection.None)
                     {

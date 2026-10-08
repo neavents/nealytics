@@ -29,7 +29,12 @@ public sealed record Measure(
     FrozenSet<string> Aggregations,
     double? Minimum,
     double? Maximum,
-    bool Retired);
+    bool Retired)
+{
+    public string? UnitDimension { get; init; }
+
+    public bool ServerOnly { get; init; }
+}
 
 public sealed class MeasureRegistry
 {
@@ -174,6 +179,18 @@ public sealed class MeasureRegistry
                     + $"{maximum}, which rejects every value it will ever receive.");
             }
 
+            string? unitDimension = string.IsNullOrWhiteSpace(declaration.UnitDimension)
+                ? null
+                : declaration.UnitDimension.Trim();
+
+            if (unitDimension is not null && !dimensions.IsActive(unitDimension))
+            {
+                throw new InvalidOperationException(
+                    $"TelemetryEngine:Measures[{i}] ('{name}') declares UnitDimension '{unitDimension}', which "
+                    + "is not an active declared dimension. The unit must be a dimension every event carrying "
+                    + "the measure also carries, such as a currency code.");
+            }
+
             ordered.Add(new Measure(
                 name,
                 type,
@@ -182,7 +199,11 @@ public sealed class MeasureRegistry
                 FrozenSet.ToFrozenSet(aggregations, StringComparer.OrdinalIgnoreCase),
                 declaration.Minimum,
                 declaration.Maximum,
-                declaration.Retired));
+                declaration.Retired)
+            {
+                UnitDimension = unitDimension,
+                ServerOnly = declaration.ServerOnly,
+            });
         }
 
         Declared = ordered;
@@ -205,6 +226,8 @@ public sealed class MeasureRegistry
 
     public Measure? Find(string name) =>
         _active.TryGetValue(name, out Measure? measure) ? measure : null;
+
+    public bool HasServerOnly => Active.Any(measure => measure.ServerOnly);
 
     public bool TryResolveAggregation(
         string? requested, Measure measure, out string aggregationFunction, out string canonicalName)

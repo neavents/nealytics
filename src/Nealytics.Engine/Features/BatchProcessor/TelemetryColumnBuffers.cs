@@ -84,7 +84,7 @@ internal sealed class TelemetryColumnBuffers : IDisposable
             EventIds[i] = payload.EventId;
             ProjectIds[i] = payload.ProjectId;
             TenantIds[i] = payload.TenantId;
-            SessionIds[i] = payload.SessionId;
+            SessionIds[i] = payload.SessionId ?? string.Empty;
             UserIds[i] = payload.UserId;
             EventTypes[i] = payload.EventType;
             ObjectIds[i] = payload.ObjectId;

@@ -28,6 +28,7 @@ public static class IngestTelemetryEndpoint
             ApiKeyValidator keyValidator,
             DimensionSanitizer dimensionSanitizer,
             MeasureSanitizer measureSanitizer,
+            IngestGate gate,
             IOptions<TelemetryEngineOptions> options) =>
         {
             using Activity? activity = TelemetryDiagnostics.Source.StartActivity("IngestHttpRequest");
@@ -36,7 +37,7 @@ public static class IngestTelemetryEndpoint
                 context.Request.Headers["X-Project-Key"].ToString(),
                 context.Request.Query["k"].ToString());
 
-            if (clientProjectKey.Length == 0 || !keyValidator.IsValid(clientProjectKey))
+            if (clientProjectKey.Length == 0 || !keyValidator.TryResolve(clientProjectKey, out IngestionKeyPolicy? policy))
             {
                 return Results.StatusCode(StatusCodes.Status401Unauthorized);
             }
@@ -73,13 +74,7 @@ public static class IngestTelemetryEndpoint
                     bodyReader.AdvanceTo(buffer.Start, buffer.End);
                 }
 
-                IngestRejection rejection = IngestValidation.Validate(payload, DateTime.UtcNow);
-
-                if (rejection == IngestRejection.None
-                    && !keyValidator.MayWriteProject(clientProjectKey, payload!.ProjectId))
-                {
-                    rejection = IngestRejection.ProjectNotPermittedForKey;
-                }
+                IngestRejection rejection = gate.Check(policy, payload, DateTime.UtcNow, out bool timestampAdjusted);
 
                 if (rejection != IngestRejection.None)
                 {
@@ -99,6 +94,11 @@ public static class IngestTelemetryEndpoint
                 {
                     context.Response.Headers["X-Nealytics-Dropped"] =
                         string.Join(",", droppedDimensions.Concat(droppedMeasures));
+                }
+
+                if (timestampAdjusted)
+                {
+                    context.Response.Headers["X-Nealytics-Adjusted"] = "timestamp";
                 }
 
                 await wal.AppendAsync(payload!, context.RequestAborted);

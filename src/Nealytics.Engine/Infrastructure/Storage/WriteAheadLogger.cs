@@ -265,7 +265,6 @@ public sealed class WriteAheadLogger : IAsyncDisposable
                 if (payload is not null
                     && !string.IsNullOrEmpty(payload.ProjectId)
                     && !string.IsNullOrEmpty(payload.TenantId)
-                    && !string.IsNullOrEmpty(payload.SessionId)
                     && !string.IsNullOrEmpty(payload.EventType))
                 {
                     recovered.Add(payload);
