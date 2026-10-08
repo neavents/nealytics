@@ -215,7 +215,7 @@ PY
       (event_id, project_id, tenant_id, session_id, event_type, metadata_json, timestamp, currency, category_id, amount)
     SELECT generateUUIDv4(), 'bench', concat('v', toString(number % ${ALL_TENANTS})),
            concat('s', toString(intDiv(number, 3))), 'sale', '{}',
-           toDateTime64('2026-03-01 00:00:00', 3, 'UTC') + toIntervalSecond(number % (180 * 86400)),
+           now64(3, 'UTC') - toIntervalSecond(intHash32(number) % (60 * 86400)),
            if(number % 10 = 0, 'EUR', 'TRY'), concat('c', toString(number % 12)), toDecimal64(number % 500, 2) / 7
     FROM numbers($((ALL_TENANTS * EVENTS_PER_TENANT)))"
   docker exec "$CH_CONTAINER" clickhouse-client -q "OPTIMIZE TABLE nealytics_core.global_events FINAL" || true
