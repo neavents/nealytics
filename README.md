@@ -172,6 +172,42 @@ writes into a neighbour's data, and nothing objects. To close that:
 - **A pin naming a key that isn't in `AllowedProjectKeys` refuses the boot.** Dead security config
   is worse than none: in a review it reads as a control that is in force.
 
+### Scoped keys: public and server (optional)
+
+A key in `AllowedProjectKeys` may send anything a payload can carry, which is right for a key that
+only ever lives on your own servers and wrong for one shipped inside a web page, where anyone can read
+it and post whatever they like. Declare such keys under `IngestionKeys` with a scope instead:
+
+```jsonc
+"ServerEventTypes": "order.*,refund",
+"Measures": [ { "Name": "amount", "Type": "Decimal", "Aggregations": "sum,avg", "ServerOnly": true } ],
+"IngestionKeys": [
+  { "Key": "web:pk_123",    "Scope": "public" },
+  { "Key": "orders:sk_456", "Scope": "server", "ProjectId": "shop", "EventTypes": "order.*,refund" }
+]
+```
+
+| | `public` key | `server` key | key in `AllowedProjectKeys` |
+|---|---|---|---|
+| Event types listed in `ServerEventTypes` | refused | allowed | refused |
+| Measures declared `ServerOnly` | refused | allowed | refused |
+| `trafficClass` other than `normal` | refused | allowed | allowed |
+| `timestamp` more than `PublicKeyTimestampToleranceSeconds` (300) from arrival | replaced by the arrival time | kept | kept |
+| `sessionId` | required | optional, stored as `''` | required |
+| `EventTypes` on the key | limits it to those types | limits it to those types | n/a |
+
+- **Nothing changes until you declare something.** With no `ServerEventTypes`, no `ServerOnly`
+  measure and no `IngestionKeys`, every key behaves exactly as before. `ServerEventTypes` and
+  `ServerOnly` close those names to every key that is not a server key, including the unscoped ones,
+  which is the point: a browser must not be able to forge a sale.
+- Patterns are exact names or a prefix ending in `*`. A refusal is `400` with
+  `X-Nealytics-Rejected: event_type_not_permitted_for_key` or `server_only_field` on `/track`, and
+  counted on `nealytics_events_rejected_total` for `/beacon`. A replaced timestamp is answered with
+  `X-Nealytics-Adjusted: timestamp`.
+- **A server event without a session** is stored with an empty `session_id`. Session metrics count
+  that as one session, so scope them by event type when server events share the table.
+- `ProjectId` on a scoped key pins it exactly as `Projects` pins an unscoped one.
+
 Both endpoints are rate limited under the `"ingestion"` policy. You can tune the limits with `RateLimitPermitCount`, `RateLimitWindowSeconds` and `RateLimitQueueSize` in [`TelemetryEngineOptions.cs`](src/Nealytics.Engine/Infrastructure/Configuration/TelemetryEngineOptions.cs).
 
 ---
@@ -179,6 +215,37 @@ Both endpoints are rate limited under the `"ingestion"` policy. You can tune the
 ## Reading data back
 
 Read endpoints require a JWT token with `project_id` and `tenant_id` claims. The engine doesn't issue tokens, your auth service does. Nealytics just validates the signature and extracts the claims. This keeps the engine stateless and out of the identity business.
+
+### Tenant sets: one question over many tenants
+
+Every read is scoped to one tenant by the token. A deployment whose tenants belong to something larger
+(stores to a retailer, sites to a region) can also ask across them, without a token per tenant and
+without the engine learning what the grouping means.
+
+1. **Declare the attributes** a tenant can carry:
+   `"TenantAttributes": [ { "Name": "parent" }, { "Name": "region" } ]`.
+2. **Set them** with a server key. Values replace the previous ones; an empty value clears one.
+
+   ```bash
+   curl -X POST http://localhost:5000/api/v1/tenants/attributes \
+     -H "Content-Type: application/json" -H "X-Project-Key: orders:sk_456" \
+     -d '{ "projectId": "shop", "tenants": [
+           { "tenantId": "store-1", "attributes": { "parent": "acme", "region": "north" } },
+           { "tenantId": "store-2", "attributes": { "parent": "acme", "region": "south" } } ] }'
+   ```
+
+3. **Mint a token naming the set** instead of a tenant: `"tenant_set": "parent:acme"` in place of
+   `"tenant_id"`. Every read endpoint then answers over the tenants whose `parent` is `acme` at the
+   time of the query. `?tenant=store-1` narrows such a token to one member; a tenant outside the set
+   reads as empty, never as an error that confirms it exists. A token carrying both claims is refused.
+4. **Group by the tenant or an attribute**: `groupBy=tenant_id` or `groupBy=tenant.region` on
+   `/breakdown` and `/pivot`. The timeline adds each event's `tenantId` when the token is a set.
+
+The membership filter is `tenant_id IN (SELECT tenant_id FROM nealytics_core.tenant_attributes ...)`.
+ClickHouse builds that set before reading and applies it to the primary key, so a set of 1,000
+tenants reads those tenants' granules and skips everyone else's; the benchmark below measures it.
+Attributes live in a `ReplacingMergeTree` the engine creates once any attribute is declared, and an
+attribute write is synchronous, so the next query sees it.
 
 ### GET `/api/v1/telemetry/timeline`
 
@@ -193,6 +260,9 @@ Query params:
 - `limit` (default 100, capped by `MaxQueryLimit`)
 - `before` (ISO 8601 timestamp), cursor for backward pagination; returns events strictly older than this value
 - `eventType`, `sessionId`, `objectId`, optional exact match filters (each ≤ 256 chars), applied on top of the tenant scope
+- `userId`, only events carrying that user id. Add `stitched=true` (with `AliasEventType` set) to
+  include the events of every session aliased to that user, directly or through one entity, so an
+  identified user's history starts before they identified themselves.
 - `metaKey` + `metaValue`, optional metadata filter (both required together, each ≤ 256 chars). Matches events where `JSONExtractString(metadata_json, metaKey) = metaValue`. Note: `metadata_json` is unindexed, so this is a full scan over the time range, prefer narrowing with `before`/filters. Both are passed as parameters (never interpolated).
 
 ```bash
@@ -404,8 +474,8 @@ curl "http://localhost:5000/api/v1/analytics/funnel\
 Query params:
 - `step`, repeated, **2 to 10** of them, in order. Each is an event type, optionally with one
   filter: `step=item_view:section_id=01J...`. One step is a count, not a funnel, so one is refused.
-- `grain`, `sessions` (default) or `users`. Echoed back, so two widgets cannot disagree about what
-  they counted.
+- `grain`, `sessions` (default), `users`, or `identities` when `AliasEventType` is set (see
+  identity stitching below). Echoed back, so two widgets cannot disagree about what they counted.
 - `windowSeconds`, how long the whole sequence may take, default `1800`, max `86400`.
 - `breakdownBy`, a declared dimension or groupable core column. **This is where the value is.**
 - `from` / `to`, `traffic`, `tz` as elsewhere.
@@ -503,6 +573,54 @@ Query params:
 The median is the number to put on a dashboard. A mean session length is dragged around by the one
 tab somebody left open through dinner; the distribution shows that tab as the tail it is.
 
+### GET `/api/v1/analytics/retention`
+
+Cohorts by first activity, and how many of each cohort came back in every following period.
+
+```bash
+curl "http://localhost:5000/api/v1/analytics/retention?period=week&by=users&eventType=purchase\
+&from=2026-06-01T00:00:00Z&to=2026-08-01T00:00:00Z" -H "Authorization: Bearer <your-jwt>"
+```
+
+- `period`: `day`, `week` (default, Monday-starting) or `month`, in UTC.
+- `by`: `users` (default, events without a user id are ignored), `sessions`, or `identities`
+  (stitched, below).
+- `eventType`, `filter`, `traffic` restrict which events count as activity.
+- `from` / `to` default to the last eight periods; at most 120 periods are accepted.
+
+```jsonc
+{ "period": "week", "by": "users", "cohorts": [
+  { "cohort": "2026-06-01T00:00:00Z", "size": 120, "returning": [120, 41, 30], "rates": [1, 0.34, 0.25] } ] }
+```
+
+"First seen" means first seen **within the range**: someone active before `from` is counted in the
+cohort of their first period inside it. Widen the range to tell new from returning.
+
+### Identity stitching
+
+Set `AliasEventType` (for example `"alias"`) and send an event of that type to link an anonymous
+`sessionId` to a `userId`, or to an entity in `objectId`. A link can itself be linked once more, so a
+visit can become an order and the order a customer:
+
+```jsonc
+{ "eventType": "alias", "sessionId": "anon-7f3", "objectId": "order-118" }
+{ "eventType": "alias", "sessionId": "order-118", "userId": "customer-42" }
+```
+
+Funnels (`grain=identities`), retention (`by=identities`) and the timeline (`userId=` with
+`stitched=true`) then count each event under `userId` when it has one, otherwise under the identity
+its session resolves to, otherwise under the session. Links are read at query time from the alias
+events themselves, the latest link per session winning, so a late alias re-attributes history and
+nothing has to be rebuilt. An alias carrying neither `userId` nor `objectId` is refused with
+`alias_without_identity`.
+
+### Measures with a unit
+
+A measure can declare the dimension that holds its unit, `"UnitDimension": "currency"`. Any
+aggregation of it other than `count` is then refused unless the request groups by that dimension or
+filters it to one value, because a sum of euros and lira is a number that means nothing and looks
+fine. This applies to `/breakdown`, `/pivot` and `/distribution`.
+
 ### Filters
 
 Every read that takes `filter` takes it in the same grammar, repeated as often as needed:
@@ -523,6 +641,17 @@ The write path and read path use completely different auth mechanisms. This is b
 **Write path (ingestion):** API keys. Comma separated list in `AllowedProjectKeys`. Validated against a `FrozenSet<string>` for O(1) exact match lookups. No substring matching, no wildcards. Pass the key via `X-Project-Key` header or `?k=` query param.
 
 **Read path (queries):** JWT Bearer tokens. The engine validates the signature using the symmetric key in `JwtSymmetricKey` and extracts `project_id` and `tenant_id` from the token claims. These claims become mandatory WHERE filters on every query. There's no way to read another project's data even if you have a valid token.
+
+**Hardening (all optional, all off by default).**
+
+| Setting | Effect |
+|---|---|
+| `JwtIssuer` / `JwtAudience` | When set, a token must carry that `iss` / `aud`. |
+| `JwtPublicKeyPem` | An RSA or EC public key in PEM form; RS256/ES256 tokens it signed are accepted. `JwtSymmetricKey` may then be left empty. |
+| `JwtJwksUrl` | Signing keys fetched from a JWKS document (https, or http on loopback), refreshed every `JwtJwksRefreshMinutes` (60) and early when a token names an unknown `kid`. |
+| `ReadScopeClaim` | The claim listing which read endpoints a token may call, space separated: `timeline`, `sessions`, `timeseries`, `active`, `top`, `breakdown`, `funnel`, `pivot`, `distribution`, `retention`, `schema`, or `*`. When set, a token without the claim may call nothing. |
+
+A token may name a tenant set instead of a tenant, see *Tenant sets* above.
 
 The engine does not have a login endpoint, a user database, or any identity management. You bring your own auth service, mint JWTs with the right claims, and hand them to your frontend. Nealytics stays focused on analytics.
 
@@ -570,6 +699,15 @@ The engine ships knowing no column names beyond the core ones. A deployment decl
 | `RetentionDays` | `90` | Applied to the table's TTL at startup when it differs. |
 | `EventTypeRetention__N__EventType` / `Days` | _(none)_ | Keeps one event type for **less** time than the base. See below. |
 | `Projects__N__Key` / `ProjectId` | _(none)_ | Pins a key to one project. Empty ⇒ any valid key may write any project, as today. |
+| `Measures__N__UnitDimension` | _(none)_ | A declared dimension holding the measure's unit; aggregating across units is refused. |
+| `Measures__N__ServerOnly` | `false` | Only server keys may send this measure. |
+| `TenantAttributes__N__Name` | _(none)_ | An attribute a tenant can carry, `[a-z][a-z0-9_]{0,40}`, at most 16. |
+| `IngestionKeys__N__Key` / `Scope` / `ProjectId` / `EventTypes` | _(none)_ | A `public` or `server` key, optionally pinned and limited to event types. |
+| `ServerEventTypes` | _(empty)_ | Event types (or `prefix*`) only server keys may send. |
+| `PublicKeyTimestampToleranceSeconds` | `300` | How far a public key's timestamp may be from arrival before it is replaced. |
+| `AliasEventType` | _(empty)_ | The event type that links a session to an identity. Empty turns stitching off. |
+| `MaxTenantAttributeBatch` | `10000` | Tenants accepted per attribute write. |
+| `ClusterName` | _(empty)_ | Adds `ON CLUSTER '<name>'` to every statement the schema reconciler issues. |
 
 #### Per event type retention
 
@@ -611,7 +749,8 @@ which is the only way to answer someone disputing a figure.
 | `Rollups__N__Grain` | `day` | `hour` \| `day` \| `session` |
 | `Rollups__N__EventTypes` | _(all)_ | Comma separated. Empty means every event type. |
 | `Rollups__N__Dimensions` | _(none)_ | Comma separated declared dimensions to group by. |
-| `Rollups__N__Measures` | _(none)_ | Comma separated `measure:aggregation`, e.g. `dwell_ms:sum,dwell_ms:avg`. Percentiles are refused, they stay on the raw table. |
+| `Rollups__N__Measures` | _(none)_ | Comma separated `measure:aggregation`, e.g. `dwell_ms:sum,dwell_ms:p95`. Percentiles share one `quantilesState` column per measure. |
+| `Rollups__N__TenantAttributes` | _(none)_ | Comma separated tenant attributes. Makes it a group rollup keyed on them instead of the tenant. |
 | `BackfillRollups` | `true` | Aggregate the existing raw rows into a rollup when it is created. |
 
 #### Session rollups
@@ -674,9 +813,31 @@ A rollup answers a request only when all of these hold, and falls back to raw ot
 - The `groupBy` column and every `filter` column are stored in that rollup.
 - The request names an event type the rollup aggregated. A rollup restricted to some event types
   will never answer a request that spans all of them, because it would undercount.
-- For a measure metric, that exact `measure:aggregation` pair is stored. Percentiles never route.
+- For a measure metric, that exact `measure:aggregation` pair is stored. A percentile is read back
+  with `quantilesMerge` from the state the rollup keeps; like every ClickHouse quantile it is an
+  estimate, and the merged estimate can differ slightly from one computed over the raw rows.
+- A group rollup (below) answers only a set token on one of its attributes, not narrowed to a
+  tenant. A plain rollup answers a set token too, and `groupBy=tenant_id` or `tenant.<attribute>`.
 
-When several rollups match, the one with the fewest grouping columns wins.
+When several rollups match, a group rollup wins over a per tenant one, then the one with the fewest
+grouping columns.
+
+#### Group rollups
+
+`"TenantAttributes": "parent,region"` on a rollup stores it per attribute value instead of per
+tenant, so a question over a set of 1,000 tenants reads a few rows per day rather than a thousand:
+
+```jsonc
+{ "Name": "daily_by_parent", "Grain": "day", "EventTypes": "order",
+  "TenantAttributes": "parent,region", "Dimensions": "currency", "Measures": "amount:sum,amount:p95" }
+```
+
+**Events are attributed to the attribute values their tenant had when they arrived.** The
+materialized view joins each inserted block to `tenant_attributes`; moving a tenant to another parent
+later does not move its history, and events that arrive before a tenant has attributes are stored
+under `''`. The raw path, by contrast, uses membership at query time. If tenants move and history
+must follow, drop the rollup's view and table and let the next start rebuild it. Session rollups
+cannot group tenants.
 
 **A new rollup is backfilled.** When the engine creates a rollup it also aggregates every row already
 in the source table into it, one partition at a time, before it serves traffic. Without that a
@@ -917,9 +1078,12 @@ Three things to know before you do it:
 - **`uniqExact` does not distribute cheaply.** Exact distinct counting ships the whole hash set
   between nodes. Use `mode=approx` on `/breakdown` and `/active` for anything spanning many tenants, that is
   what the switch is for.
-- **The schema reconciler is not cluster aware.** It issues `ALTER TABLE` without `ON CLUSTER`, so
-  it widens the node it connects to and no other. Until that changes, run declared schema changes
-  against each node, or point the engine at a node and replicate the DDL yourself.
+- **Set `ClusterName` and the schema reconciler issues every statement `ON CLUSTER`**: the core and
+  declared columns, the retention TTL, rollup tables and views, and `tenant_attributes`. Tables it
+  creates use the engines shown here; on a replicated cluster, give the database a `Replicated`
+  engine (or create those tables yourself first) so their data is replicated, not only their DDL.
+  On a sharded layout the statements reach the local tables only when they share the name the engine
+  uses, so keep issuing the `_local` DDL yourself as above.
 
 The engine itself scales out already: each instance owns its own WAL and they all write to the same
 ClickHouse, so replicas are additive with no coordination. That path is architecturally clean and
@@ -1223,6 +1387,7 @@ with the rows proven identical.
 ```bash
 ./scripts/run-benchmark.sh all                    # noop, track, beacon
 ./scripts/run-benchmark.sh read                   # every read endpoint, raw vs rollup
+./scripts/run-benchmark.sh set                    # one question over 1,000 tenants among 4,000
 BENCH_ISOLATED=1 ./scripts/run-benchmark.sh all   # on its own ClickHouse, ports 9100/8223
 ```
 

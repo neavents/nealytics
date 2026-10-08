@@ -346,3 +346,35 @@ destroy whatever else is running.
 
 **The container image installs curl** for its `HEALTHCHECK`; the runtime base image ships no HTTP
 client, and without one Docker reports no health status at all.
+
+## Tenant sets, scoped keys and stitching
+
+**A set is a subquery, not a list in the token.** The token names an attribute and a value; the
+query filters `tenant_id IN (SELECT tenant_id FROM tenant_attributes FINAL ...)`. ClickHouse builds
+that set before reading and uses it against the primary key, so a thousand-tenant set prunes like a
+single tenant does, and the token stays the same size whether the set holds two tenants or ten
+thousand. Membership is read at query time, so moving a tenant takes effect on the next query.
+
+**Grouping by an attribute uses `transform` over one scalar subquery.** The attribute map is built
+once per query as two aligned arrays and applied with `transform`, which hashes the keys. A join
+would do the same work per block, and a `Map` lookup is a linear scan per row.
+
+**Group rollups attribute at insert.** Their view joins each inserted block to `tenant_attributes`,
+which is what makes them small. The price is that history keeps the attribution it was written
+with; the README says so where the option is declared, because the raw path does not behave that way.
+
+**New response fields are omitted when null.** The HTTP serializer does not inherit the source
+generated context's `WhenWritingNull`, so each field added for a new feature carries its own
+`JsonIgnore` condition. A deployment that uses none of the new features gets byte-identical responses.
+
+**A public key's timestamp is replaced, not refused.** Refusing it loses the event, and a browser
+whose clock is wrong is ordinary. Replacing it with the arrival time keeps the event and takes the
+power to backdate away from anyone holding a key that was published in a page.
+
+**Stitching reads links from the alias events at query time.** A table maintained by a view would
+need rebuilding whenever a late alias arrived; the alias events already sort first by project,
+tenant and event type, so reading them per query is a narrow range scan, and the latest link per
+session wins without any bookkeeping.
+
+**Sessionless server events store `''`.** Session metrics count it as one session. Filtering it out
+would change the definition of every rollup view and so mark every existing rollup as drifted.
