@@ -31,6 +31,10 @@ public sealed record Rollup(
     IReadOnlyList<RollupColumn> Dimensions,
     IReadOnlyList<RollupMeasure> Measures)
 {
+    public IReadOnlyList<string> TenantAttributes { get; init; } = [];
+
+    public bool IsGroupRollup => TenantAttributes.Count > 0;
+
     public bool CoversEventType(string? eventType) =>
         EventTypes.Count == 0 || (eventType is not null && EventTypes.Contains(eventType));
 
@@ -39,11 +43,63 @@ public sealed record Rollup(
         || string.Equals(column, RollupRegistry.TrafficColumn, StringComparison.Ordinal)
         || Dimensions.Any(dimension => string.Equals(dimension.Name, column, StringComparison.Ordinal));
 
+    public bool CoversTenantColumn(string column)
+    {
+        if (string.Equals(column, "tenant_id", StringComparison.Ordinal))
+        {
+            return !IsGroupRollup;
+        }
+
+        if (!TenantAttributeRegistry.IsGroupColumn(column))
+        {
+            return false;
+        }
+
+        return !IsGroupRollup || HoldsTenantAttribute(TenantAttributeRegistry.AttributeOf(column));
+    }
+
+    public bool HoldsTenantAttribute(string attribute)
+    {
+        foreach (string held in TenantAttributes)
+        {
+            if (string.Equals(held, attribute, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public string? MeasureColumn(string measure, string aggregation) =>
         Measures.FirstOrDefault(candidate =>
             string.Equals(candidate.Measure.Name, measure, StringComparison.Ordinal)
             && string.Equals(candidate.Aggregation, aggregation, StringComparison.OrdinalIgnoreCase))
             ?.ColumnName;
+
+    public string? MergeExpression(string measure, string aggregation, string? condition)
+    {
+        string? column = MeasureColumn(measure, aggregation);
+
+        if (column is null)
+        {
+            return null;
+        }
+
+        string canonical = aggregation.ToLowerInvariant();
+
+        if (RollupRegistry.QuantileIndex(canonical) is int index)
+        {
+            string merged = condition is null
+                ? $"quantilesMerge({RollupRegistry.QuantileLevels})({column})"
+                : $"quantilesMergeIf({RollupRegistry.QuantileLevels})({column}, {condition})";
+            return $"arrayElement({merged}, {index.ToString(System.Globalization.CultureInfo.InvariantCulture)})";
+        }
+
+        return condition is null
+            ? $"{canonical}Merge({column})"
+            : $"{canonical}MergeIf({column}, {condition})";
+    }
 }
 
 public sealed class RollupRegistry
@@ -53,8 +109,27 @@ public sealed class RollupRegistry
     public const string TrafficColumn = "traffic_class";
     private readonly ConcurrentDictionary<string, string> _unroutable = new(StringComparer.Ordinal);
 
+    public const string QuantileLevels = "0.5, 0.75, 0.9, 0.95, 0.99";
+    public const string TenantAttributeColumnPrefix = "tenant_attr_";
+
     public static readonly FrozenSet<string> SupportedAggregations =
-        FrozenSet.ToFrozenSet(["sum", "avg", "min", "max", "count"], StringComparer.OrdinalIgnoreCase);
+        FrozenSet.ToFrozenSet(
+            ["sum", "avg", "min", "max", "count", "p50", "p75", "p90", "p95", "p99"],
+            StringComparer.OrdinalIgnoreCase);
+
+    public static int? QuantileIndex(string aggregation) => aggregation.ToLowerInvariant() switch
+    {
+        "p50" => 1,
+        "p75" => 2,
+        "p90" => 3,
+        "p95" => 4,
+        "p99" => 5,
+        _ => null,
+    };
+
+    public static bool IsQuantile(string aggregation) => QuantileIndex(aggregation) is not null;
+
+    public static string TenantAttributeColumn(string attribute) => TenantAttributeColumnPrefix + attribute;
 
     private static readonly Dictionary<string, string> CoreGroupable = new(StringComparer.Ordinal)
     {
@@ -80,7 +155,19 @@ public sealed class RollupRegistry
     }
 
     public RollupRegistry(
-        TelemetryEngineOptions options, DimensionRegistry dimensions, MeasureRegistry measures)
+        IOptions<TelemetryEngineOptions> options,
+        DimensionRegistry dimensions,
+        MeasureRegistry measures,
+        TenantAttributeRegistry tenantAttributes)
+        : this(options.Value, dimensions, measures, tenantAttributes)
+    {
+    }
+
+    public RollupRegistry(
+        TelemetryEngineOptions options,
+        DimensionRegistry dimensions,
+        MeasureRegistry measures,
+        TenantAttributeRegistry? tenantAttributes = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(dimensions);
@@ -175,8 +262,7 @@ public sealed class RollupRegistry
                 {
                     throw new InvalidOperationException(
                         $"TelemetryEngine:Rollups[{i}] ('{name}') uses aggregation '{aggregation}', which "
-                        + $"a rollup cannot store. Supported: {string.Join(", ", SupportedAggregations.Order(StringComparer.Ordinal))}. "
-                        + "Percentiles stay on the raw table.");
+                        + $"a rollup cannot store. Supported: {string.Join(", ", SupportedAggregations.Order(StringComparer.Ordinal))}.");
                 }
 
                 if (!measure.Aggregations.Contains(aggregation))
@@ -187,8 +273,48 @@ public sealed class RollupRegistry
                         + $"{string.Join(", ", measure.Aggregations.Order(StringComparer.Ordinal))}.");
                 }
 
+                string canonical = aggregation.ToLowerInvariant();
+
                 rollupMeasures.Add(new RollupMeasure(
-                    measure, aggregation.ToLowerInvariant(), $"{measure.Name}_{aggregation.ToLowerInvariant()}"));
+                    measure,
+                    canonical,
+                    IsQuantile(canonical) ? $"{measure.Name}_quantiles" : $"{measure.Name}_{canonical}"));
+            }
+
+            List<string> rollupAttributes = [];
+
+            foreach (string attribute in Split(declaration.TenantAttributes))
+            {
+                if (tenantAttributes is null || !tenantAttributes.IsDeclared(attribute))
+                {
+                    throw new InvalidOperationException(
+                        $"TelemetryEngine:Rollups[{i}] ('{name}') groups tenants by '{attribute}', which is "
+                        + "not declared under TelemetryEngine:TenantAttributes.");
+                }
+
+                if (rollupAttributes.Contains(attribute))
+                {
+                    throw new InvalidOperationException(
+                        $"TelemetryEngine:Rollups[{i}] ('{name}') lists tenant attribute '{attribute}' twice.");
+                }
+
+                if (grain == RollupGrain.Session)
+                {
+                    throw new InvalidOperationException(
+                        $"TelemetryEngine:Rollups[{i}] ('{name}') is a session rollup and cannot group "
+                        + "tenants by an attribute. Use an hour or day grain.");
+                }
+
+                string column = TenantAttributeColumn(attribute);
+
+                if (rollupDimensions.Any(dimension => string.Equals(dimension.Name, column, StringComparison.Ordinal)))
+                {
+                    throw new InvalidOperationException(
+                        $"TelemetryEngine:Rollups[{i}] ('{name}') groups by dimension '{column}', which is "
+                        + "the column name a tenant attribute rollup reserves.");
+                }
+
+                rollupAttributes.Add(attribute);
             }
 
             declared.Add(new Rollup(
@@ -204,7 +330,10 @@ public sealed class RollupRegistry
                 },
                 FrozenSet.ToFrozenSet(Split(declaration.EventTypes), StringComparer.Ordinal),
                 rollupDimensions,
-                rollupMeasures));
+                rollupMeasures)
+            {
+                TenantAttributes = rollupAttributes,
+            });
         }
 
         Declared = declared;
@@ -246,17 +375,68 @@ public sealed class RollupRegistry
 
     private static bool IsSessionGrain(Rollup rollup) => rollup.Grain == RollupGrain.Session;
 
-    public static string BuildTableDdl(Rollup rollup)
+    public static string BuildTableDdl(Rollup rollup, string onCluster = "")
     {
         ArgumentNullException.ThrowIfNull(rollup);
 
-        return IsSessionGrain(rollup) ? BuildSessionTableDdl(rollup) : BuildBucketTableDdl(rollup);
+        return IsSessionGrain(rollup) ? BuildSessionTableDdl(rollup, onCluster) : BuildBucketTableDdl(rollup, onCluster);
     }
 
-    private static string BuildSessionTableDdl(Rollup rollup)
+    private static IEnumerable<RollupMeasure> StoredMeasures(Rollup rollup)
+    {
+        HashSet<string> seen = new(StringComparer.Ordinal);
+
+        foreach (RollupMeasure measure in rollup.Measures)
+        {
+            if (seen.Add(measure.ColumnName))
+            {
+                yield return measure;
+            }
+        }
+    }
+
+    private static void AppendMeasureColumns(StringBuilder sql, Rollup rollup)
+    {
+        foreach (RollupMeasure measure in StoredMeasures(rollup))
+        {
+            sql.Append(", ").Append(measure.ColumnName).Append(" AggregateFunction(");
+
+            if (IsQuantile(measure.Aggregation))
+            {
+                sql.Append("quantiles(").Append(QuantileLevels).Append(')');
+            }
+            else
+            {
+                sql.Append(measure.Aggregation);
+            }
+
+            sql.Append(", ").Append(measure.Measure.ClickHouseType).Append(')');
+        }
+    }
+
+    private static void AppendMeasureStates(StringBuilder sql, Rollup rollup, string source)
+    {
+        foreach (RollupMeasure measure in StoredMeasures(rollup))
+        {
+            sql.Append(", ");
+
+            if (IsQuantile(measure.Aggregation))
+            {
+                sql.Append("quantilesState(").Append(QuantileLevels).Append(")(");
+            }
+            else
+            {
+                sql.Append(measure.Aggregation).Append("State(");
+            }
+
+            sql.Append(source).Append(measure.Measure.Name).Append(") AS ").Append(measure.ColumnName);
+        }
+    }
+
+    private static string BuildSessionTableDdl(Rollup rollup, string onCluster)
     {
         StringBuilder sql = new(512);
-        sql.Append("CREATE TABLE IF NOT EXISTS ").Append(Database).Append('.').Append(rollup.TableName);
+        sql.Append("CREATE TABLE IF NOT EXISTS ").Append(Database).Append('.').Append(rollup.TableName).Append(onCluster);
         sql.Append(" (project_id LowCardinality(String), tenant_id String, event_date Date, ");
         sql.Append("session_id String, ").Append(TrafficColumn).Append(" LowCardinality(String)");
 
@@ -272,12 +452,7 @@ public sealed class RollupRegistry
         sql.Append(", users AggregateFunction(uniqExact, Nullable(String))");
         sql.Append(", event_types AggregateFunction(uniqExact, String)");
 
-        foreach (RollupMeasure measure in rollup.Measures)
-        {
-            sql.Append(", ").Append(measure.ColumnName)
-                .Append(" AggregateFunction(").Append(measure.Aggregation).Append(", ")
-                .Append(measure.Measure.ClickHouseType).Append(')');
-        }
+        AppendMeasureColumns(sql, rollup);
 
         sql.Append(") ENGINE = AggregatingMergeTree PARTITION BY toYYYYMM(event_date) ");
         sql.Append("ORDER BY (project_id, tenant_id, event_date, session_id, ").Append(TrafficColumn);
@@ -291,11 +466,25 @@ public sealed class RollupRegistry
         return sql.ToString();
     }
 
-    private static string BuildBucketTableDdl(Rollup rollup)
+    private static string BuildBucketTableDdl(Rollup rollup, string onCluster)
     {
         StringBuilder sql = new(512);
-        sql.Append("CREATE TABLE IF NOT EXISTS ").Append(Database).Append('.').Append(rollup.TableName);
-        sql.Append(" (project_id LowCardinality(String), tenant_id String, bucket DateTime('UTC'), ");
+        sql.Append("CREATE TABLE IF NOT EXISTS ").Append(Database).Append('.').Append(rollup.TableName).Append(onCluster);
+        sql.Append(" (project_id LowCardinality(String), ");
+
+        if (rollup.IsGroupRollup)
+        {
+            foreach (string attribute in rollup.TenantAttributes)
+            {
+                sql.Append(TenantAttributeColumn(attribute)).Append(" String, ");
+            }
+        }
+        else
+        {
+            sql.Append("tenant_id String, ");
+        }
+
+        sql.Append("bucket DateTime('UTC'), ");
         sql.Append("event_type LowCardinality(String), ").Append(TrafficColumn).Append(" LowCardinality(String)");
 
         foreach (RollupColumn dimension in rollup.Dimensions)
@@ -307,15 +496,10 @@ public sealed class RollupRegistry
         sql.Append(", sessions AggregateFunction(uniqExact, String)");
         sql.Append(", users AggregateFunction(uniqExact, Nullable(String))");
 
-        foreach (RollupMeasure measure in rollup.Measures)
-        {
-            sql.Append(", ").Append(measure.ColumnName)
-                .Append(" AggregateFunction(").Append(measure.Aggregation).Append(", ")
-                .Append(measure.Measure.ClickHouseType).Append(')');
-        }
+        AppendMeasureColumns(sql, rollup);
 
         sql.Append(") ENGINE = AggregatingMergeTree PARTITION BY toYYYYMM(bucket) ");
-        sql.Append("ORDER BY (project_id, tenant_id, bucket, event_type, ").Append(TrafficColumn);
+        sql.Append("ORDER BY (project_id, ").Append(TenantKey(rollup)).Append(", bucket, event_type, ").Append(TrafficColumn);
 
         foreach (RollupColumn dimension in rollup.Dimensions)
         {
@@ -326,17 +510,22 @@ public sealed class RollupRegistry
         return sql.ToString();
     }
 
-    public static string BuildViewDdl(Rollup rollup)
+    private static string TenantKey(Rollup rollup) =>
+        rollup.IsGroupRollup
+            ? string.Join(", ", rollup.TenantAttributes.Select(TenantAttributeColumn))
+            : "tenant_id";
+
+    public static string BuildViewDdl(Rollup rollup, string onCluster = "")
     {
         ArgumentNullException.ThrowIfNull(rollup);
 
-        return IsSessionGrain(rollup) ? BuildSessionViewDdl(rollup) : BuildBucketViewDdl(rollup);
+        return IsSessionGrain(rollup) ? BuildSessionViewDdl(rollup, onCluster) : BuildBucketViewDdl(rollup, onCluster);
     }
 
-    private static string BuildSessionViewDdl(Rollup rollup)
+    private static string BuildSessionViewDdl(Rollup rollup, string onCluster)
     {
         StringBuilder sql = new(768);
-        sql.Append("CREATE MATERIALIZED VIEW ").Append(Database).Append('.').Append(rollup.ViewName);
+        sql.Append("CREATE MATERIALIZED VIEW ").Append(Database).Append('.').Append(rollup.ViewName).Append(onCluster);
         sql.Append(" TO ").Append(Database).Append('.').Append(rollup.TableName);
         sql.Append(" AS ");
         AppendSessionSelect(sql, rollup, null);
@@ -359,11 +548,7 @@ public sealed class RollupRegistry
 
         sql.Append(", uniqExactState(event_type) AS event_types");
 
-        foreach (RollupMeasure measure in rollup.Measures)
-        {
-            sql.Append(", ").Append(measure.Aggregation).Append("State(")
-                .Append(measure.Measure.Name).Append(") AS ").Append(measure.ColumnName);
-        }
+        AppendMeasureStates(sql, rollup, string.Empty);
 
         AppendSourceAndScope(sql, rollup, partition);
         sql.Append(" GROUP BY project_id, tenant_id, event_date, session_id, ").Append(TrafficColumn);
@@ -374,10 +559,10 @@ public sealed class RollupRegistry
         }
     }
 
-    private static string BuildBucketViewDdl(Rollup rollup)
+    private static string BuildBucketViewDdl(Rollup rollup, string onCluster)
     {
         StringBuilder sql = new(768);
-        sql.Append("CREATE MATERIALIZED VIEW ").Append(Database).Append('.').Append(rollup.ViewName);
+        sql.Append("CREATE MATERIALIZED VIEW ").Append(Database).Append('.').Append(rollup.ViewName).Append(onCluster);
         sql.Append(" TO ").Append(Database).Append('.').Append(rollup.TableName);
         sql.Append(" AS ");
         AppendBucketSelect(sql, rollup, null);
@@ -386,6 +571,12 @@ public sealed class RollupRegistry
 
     private static void AppendBucketSelect(StringBuilder sql, Rollup rollup, string? partition)
     {
+        if (rollup.IsGroupRollup)
+        {
+            AppendGroupSelect(sql, rollup, partition);
+            return;
+        }
+
         sql.Append("SELECT project_id, tenant_id, ");
         sql.Append(rollup.BucketFunction).Append("(timestamp) AS bucket, event_type, ").Append(TrafficColumn);
 
@@ -398,14 +589,79 @@ public sealed class RollupRegistry
         sql.Append(", uniqExactState(session_id) AS sessions");
         sql.Append(", uniqExactState(user_id) AS users");
 
-        foreach (RollupMeasure measure in rollup.Measures)
-        {
-            sql.Append(", ").Append(measure.Aggregation).Append("State(")
-                .Append(measure.Measure.Name).Append(") AS ").Append(measure.ColumnName);
-        }
+        AppendMeasureStates(sql, rollup, string.Empty);
 
         AppendSourceAndScope(sql, rollup, partition);
         sql.Append(" GROUP BY project_id, tenant_id, bucket, event_type, ").Append(TrafficColumn);
+
+        foreach (RollupColumn dimension in rollup.Dimensions)
+        {
+            sql.Append(", ").Append(dimension.Name);
+        }
+    }
+
+    private static void AppendGroupSelect(StringBuilder sql, Rollup rollup, string? partition)
+    {
+        sql.Append("SELECT source.project_id AS project_id");
+
+        foreach (string attribute in rollup.TenantAttributes)
+        {
+            string column = TenantAttributeColumn(attribute);
+            sql.Append(", attributes.").Append(column).Append(" AS ").Append(column);
+        }
+
+        sql.Append(", ").Append(rollup.BucketFunction).Append("(source.timestamp) AS bucket");
+        sql.Append(", source.event_type AS event_type, source.").Append(TrafficColumn).Append(" AS ").Append(TrafficColumn);
+
+        foreach (RollupColumn dimension in rollup.Dimensions)
+        {
+            sql.Append(", ifNull(toString(source.").Append(dimension.Name).Append("), '') AS ").Append(dimension.Name);
+        }
+
+        sql.Append(", countState() AS events");
+        sql.Append(", uniqExactState(source.session_id) AS sessions");
+        sql.Append(", uniqExactState(source.user_id) AS users");
+
+        AppendMeasureStates(sql, rollup, "source.");
+
+        sql.Append(" FROM (SELECT * FROM ").Append(Database).Append('.').Append(SourceTable);
+        bool scoped = false;
+
+        if (partition is not null)
+        {
+            sql.Append(" WHERE toYYYYMM(timestamp) = ").Append(partition);
+            scoped = true;
+        }
+
+        if (rollup.EventTypes.Count > 0)
+        {
+            sql.Append(scoped ? " AND " : " WHERE ");
+            sql.Append("event_type IN (");
+            sql.Append(string.Join(", ", rollup.EventTypes.Order(StringComparer.Ordinal).Select(Quote)));
+            sql.Append(')');
+        }
+
+        sql.Append(") AS source LEFT ANY JOIN (SELECT project_id, tenant_id");
+
+        foreach (string attribute in rollup.TenantAttributes)
+        {
+            sql.Append(", anyIf(value, attribute = ").Append(Quote(attribute)).Append(") AS ")
+                .Append(TenantAttributeColumn(attribute));
+        }
+
+        sql.Append(" FROM ").Append(Database).Append('.').Append(TenantAttributeRegistry.Table);
+        sql.Append(" FINAL WHERE attribute IN (");
+        sql.Append(string.Join(", ", rollup.TenantAttributes.Select(Quote)));
+        sql.Append(") GROUP BY project_id, tenant_id) AS attributes");
+        sql.Append(" ON source.project_id = attributes.project_id AND source.tenant_id = attributes.tenant_id");
+        sql.Append(" GROUP BY project_id");
+
+        foreach (string attribute in rollup.TenantAttributes)
+        {
+            sql.Append(", ").Append(TenantAttributeColumn(attribute));
+        }
+
+        sql.Append(", bucket, event_type, ").Append(TrafficColumn);
 
         foreach (RollupColumn dimension in rollup.Dimensions)
         {

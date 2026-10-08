@@ -27,21 +27,23 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         }
     }
 
-    internal static readonly IReadOnlyList<string> CoreStatements =
-    [
-        $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS user_id Nullable(String)",
-        $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS object_id Nullable(String)",
-        $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS device_class LowCardinality(String) DEFAULT ''",
-        $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS os LowCardinality(String) DEFAULT ''",
-        $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS browser LowCardinality(String) DEFAULT ''",
-        $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS country LowCardinality(String) DEFAULT ''",
-        $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS seq UInt32 DEFAULT 0",
-        $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS traffic_class LowCardinality(String) DEFAULT 'normal'",
-        $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS page_path String DEFAULT ''",
-        $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS referrer LowCardinality(String) DEFAULT ''",
-        $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS ingested_at DateTime64(3, 'UTC') DEFAULT now64(3)",
+    internal static readonly IReadOnlyList<string> CoreStatements = CoreStatementsFor(string.Empty);
 
-        $"ALTER TABLE {Database}.{Table} ADD INDEX IF NOT EXISTS idx_object_id object_id TYPE bloom_filter(0.01) GRANULARITY 4",
+    internal static IReadOnlyList<string> CoreStatementsFor(string onCluster) =>
+    [
+        $"ALTER TABLE {Database}.{Table}{onCluster} ADD COLUMN IF NOT EXISTS user_id Nullable(String)",
+        $"ALTER TABLE {Database}.{Table}{onCluster} ADD COLUMN IF NOT EXISTS object_id Nullable(String)",
+        $"ALTER TABLE {Database}.{Table}{onCluster} ADD COLUMN IF NOT EXISTS device_class LowCardinality(String) DEFAULT ''",
+        $"ALTER TABLE {Database}.{Table}{onCluster} ADD COLUMN IF NOT EXISTS os LowCardinality(String) DEFAULT ''",
+        $"ALTER TABLE {Database}.{Table}{onCluster} ADD COLUMN IF NOT EXISTS browser LowCardinality(String) DEFAULT ''",
+        $"ALTER TABLE {Database}.{Table}{onCluster} ADD COLUMN IF NOT EXISTS country LowCardinality(String) DEFAULT ''",
+        $"ALTER TABLE {Database}.{Table}{onCluster} ADD COLUMN IF NOT EXISTS seq UInt32 DEFAULT 0",
+        $"ALTER TABLE {Database}.{Table}{onCluster} ADD COLUMN IF NOT EXISTS traffic_class LowCardinality(String) DEFAULT 'normal'",
+        $"ALTER TABLE {Database}.{Table}{onCluster} ADD COLUMN IF NOT EXISTS page_path String DEFAULT ''",
+        $"ALTER TABLE {Database}.{Table}{onCluster} ADD COLUMN IF NOT EXISTS referrer LowCardinality(String) DEFAULT ''",
+        $"ALTER TABLE {Database}.{Table}{onCluster} ADD COLUMN IF NOT EXISTS ingested_at DateTime64(3, 'UTC') DEFAULT now64(3)",
+
+        $"ALTER TABLE {Database}.{Table}{onCluster} ADD INDEX IF NOT EXISTS idx_object_id object_id TYPE bloom_filter(0.01) GRANULARITY 4",
     ];
 
     private static readonly Regex RetentionPattern = new(
@@ -64,6 +66,8 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
     private readonly int _retentionDays;
     private readonly List<EventTypeRetentionOptions> _eventTypeRetention;
     private readonly ILogger<ClickHouseSchemaMigrator> _logger;
+    private readonly TenantAttributeRegistry? _tenantAttributes;
+    private readonly string _onCluster;
 
     public ClickHouseSchemaMigrator(
         ClickHouseConnectionFactory connectionFactory,
@@ -71,8 +75,11 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         MeasureRegistry measures,
         RollupRegistry rollups,
         Microsoft.Extensions.Options.IOptions<TelemetryEngineOptions> options,
-        ILogger<ClickHouseSchemaMigrator> logger)
+        ILogger<ClickHouseSchemaMigrator> logger,
+        TenantAttributeRegistry? tenantAttributes = null)
     {
+        _tenantAttributes = tenantAttributes;
+        _onCluster = ClusterDdl.Clause(options.Value.ClusterName);
         _connectionFactory = connectionFactory;
         _registry = registry;
         _measures = measures;
@@ -207,7 +214,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         await using PooledClickHouseConnection pooled =
             await _connectionFactory.AcquireAsync(cancellationToken).ConfigureAwait(false);
 
-        foreach (string statement in CoreStatements)
+        foreach (string statement in CoreStatementsFor(_onCluster))
         {
             await ExecuteAsync(pooled, statement, cancellationToken).ConfigureAwait(false);
         }
@@ -230,7 +237,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
                 LogAddingDimension(_logger, dimension.Name, Database, Table, dimension.ClickHouseType);
 
                 string ddl =
-                    $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS "
+                    $"ALTER TABLE {Database}.{Table}{_onCluster} ADD COLUMN IF NOT EXISTS "
                     + $"{dimension.Name} {dimension.ClickHouseType}"
                     + (dimension.DefaultExpression is null ? string.Empty : $" DEFAULT {dimension.DefaultExpression}");
 
@@ -271,7 +278,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
 
                 await ExecuteAsync(
                     pooled,
-                    $"ALTER TABLE {Database}.{Table} ADD COLUMN IF NOT EXISTS "
+                    $"ALTER TABLE {Database}.{Table}{_onCluster} ADD COLUMN IF NOT EXISTS "
                     + $"{measure.Name} {measure.ClickHouseType}",
                     cancellationToken).ConfigureAwait(false);
 
@@ -298,6 +305,12 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         }
 
         await ReconcileRetentionAsync(pooled, cancellationToken).ConfigureAwait(false);
+
+        if (_tenantAttributes is { Enabled: true })
+        {
+            await ExecuteAsync(pooled, TenantAttributeRegistry.BuildTableDdl(_onCluster), cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         await ReconcileRollupsAsync(pooled, cancellationToken).ConfigureAwait(false);
 
@@ -359,7 +372,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
     {
         foreach (Rollup rollup in _rollups.Declared)
         {
-            string desiredView = RollupRegistry.BuildViewDdl(rollup);
+            string desiredView = RollupRegistry.BuildViewDdl(rollup, _onCluster);
 
             string? existing = await ReadCreateQueryAsync(
                 pooled, rollup.ViewName, cancellationToken).ConfigureAwait(false);
@@ -367,7 +380,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
             if (existing is null)
             {
                 await ExecuteAsync(
-                    pooled, RollupRegistry.BuildTableDdl(rollup), cancellationToken).ConfigureAwait(false);
+                    pooled, RollupRegistry.BuildTableDdl(rollup, _onCluster), cancellationToken).ConfigureAwait(false);
 
                 if (!await TryCreateViewAsync(pooled, desiredView, cancellationToken).ConfigureAwait(false))
                 {
@@ -463,6 +476,14 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
             return false;
         }
 
+        foreach (string attribute in rollup.TenantAttributes)
+        {
+            if (!storedCreateQuery.Contains(RollupRegistry.TenantAttributeColumn(attribute), StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
         foreach (RollupColumn dimension in rollup.Dimensions)
         {
             if (!storedCreateQuery.Contains(dimension.Name, StringComparison.Ordinal))
@@ -500,7 +521,11 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         BuildRetentionDdl(retentionDays, []);
 
     internal static string BuildRetentionDdl(
-        int retentionDays, IReadOnlyList<EventTypeRetentionOptions> perEventType)
+        int retentionDays, IReadOnlyList<EventTypeRetentionOptions> perEventType) =>
+        BuildRetentionDdl(retentionDays, perEventType, string.Empty);
+
+    internal static string BuildRetentionDdl(
+        int retentionDays, IReadOnlyList<EventTypeRetentionOptions> perEventType, string onCluster)
     {
         StringBuilder ttl = new(128);
 
@@ -512,7 +537,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
 
         ttl.Append("toDateTime(timestamp) + INTERVAL ").Append(retentionDays).Append(" DAY DELETE");
 
-        return $"ALTER TABLE {Database}.{Table} MODIFY TTL {ttl} "
+        return $"ALTER TABLE {Database}.{Table}{onCluster} MODIFY TTL {ttl} "
             + "SETTINGS materialize_ttl_after_modify = 0";
     }
 
@@ -662,7 +687,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
 
         LogRetentionDrift(_logger, Database, Table, Describe(actual), Describe(_retentionDays, _eventTypeRetention));
         await ExecuteAsync(
-            pooled, BuildRetentionDdl(_retentionDays, _eventTypeRetention), cancellationToken).ConfigureAwait(false);
+            pooled, BuildRetentionDdl(_retentionDays, _eventTypeRetention, _onCluster), cancellationToken).ConfigureAwait(false);
     }
 
     private static string Describe(List<(int Days, string? EventType)> rules) =>

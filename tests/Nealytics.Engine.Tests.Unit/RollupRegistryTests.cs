@@ -131,14 +131,30 @@ public class RollupRegistryTests
     }
 
     [Fact]
-    public void APercentile_IsRefused_BecauseARollupCannotStoreIt()
+    public void APercentile_IsStoredAsOneQuantilesStatePerMeasure()
     {
         RollupOptions options = Valid();
-        options.Measures = "dwell_ms:p95";
+        options.Measures = "dwell_ms:p95,dwell_ms:sum";
+
+        Rollup rollup = Build(options).Declared.Single();
+
+        rollup.MeasureColumn("dwell_ms", "p95").Should().Be("dwell_ms_quantiles");
+        RollupRegistry.BuildTableDdl(rollup).Should()
+            .Contain("dwell_ms_quantiles AggregateFunction(quantiles(0.5, 0.75, 0.9, 0.95, 0.99), Nullable(UInt32))");
+        RollupRegistry.BuildViewDdl(rollup).Should()
+            .Contain("quantilesState(0.5, 0.75, 0.9, 0.95, 0.99)(dwell_ms) AS dwell_ms_quantiles");
+        rollup.MergeExpression("dwell_ms", "p95", null).Should()
+            .Be("arrayElement(quantilesMerge(0.5, 0.75, 0.9, 0.95, 0.99)(dwell_ms_quantiles), 4)");
+    }
+
+    [Fact]
+    public void APercentileTheMeasureDoesNotDeclare_IsStillRefused()
+    {
+        RollupOptions options = Valid();
+        options.Measures = "dwell_ms:p99";
 
         Action build = () => Build(options);
-        build.Should().Throw<InvalidOperationException>()
-            .WithMessage("*a rollup cannot store*Percentiles stay on the raw table*");
+        build.Should().Throw<InvalidOperationException>().WithMessage("*does not declare it*");
     }
 
     [Fact]

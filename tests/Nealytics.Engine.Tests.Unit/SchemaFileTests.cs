@@ -147,7 +147,7 @@ public class SchemaFileTests : IDisposable
 
         DimensionRegistry dimensions = new(options);
         MeasureRegistry measures = new(options, dimensions);
-        RollupRegistry rollups = new(options, dimensions, measures);
+        RollupRegistry rollups = new(options, dimensions, measures, new TenantAttributeRegistry(options));
 
         // It boots. An example that refuses the boot teaches the wrong thing loudly, and a
         // benchmark schema that refuses it wastes a ClickHouse reset before saying so.
