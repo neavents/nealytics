@@ -1,7 +1,6 @@
 namespace Nealytics.Engine.Features.GetTopEvents;
 
 using System;
-using System.Security.Claims;
 using System.Threading;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -9,6 +8,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Security;
 using Nealytics.Engine.Infrastructure.Query;
 
 public static class GetTopEventsEndpoint
@@ -21,14 +21,21 @@ public static class GetTopEventsEndpoint
             QueryColumns columns,
             MeasureRegistry measures,
             IOptions<TelemetryEngineOptions> options,
+            TenantAttributeRegistry tenantAttributes,
             CancellationToken cancellationToken) =>
         {
-            ClaimsPrincipal user = context.User;
+            ReadIdentity identity = ReadClaims.Resolve(context, tenantAttributes);
+
+            if (identity.Rejected)
+            {
+                return identity.Rejection();
+            }
+
             TelemetryEngineOptions engineOptions = options.Value;
 
             TopEventsRequestResult parsed = TopEventsRequestFactory.Create(
-                user.FindFirst("project_id")?.Value,
-                user.FindFirst("tenant_id")?.Value,
+                identity.ProjectId,
+                identity.TenantId,
                 context.Request.Query["limit"].ToString(),
                 context.Request.Query["dimension"].ToString(),
                 columns,
@@ -39,7 +46,8 @@ public static class GetTopEventsEndpoint
                 context.Request.Query["exact"].ToString(),
                 engineOptions.MaxQueryLimit,
                 engineOptions.DefaultSessionQueryRangeHours,
-                DateTime.UtcNow);
+                DateTime.UtcNow,
+                identity.TenantSet);
 
             if (!parsed.Success)
             {
@@ -54,6 +62,7 @@ public static class GetTopEventsEndpoint
         })
         .WithName("GetTopEvents")
         .Produces<TopEventsResponse>(StatusCodes.Status200OK)
-        .RequireAuthorization();
+        .RequireAuthorization()
+        .RequireReadScope("top");
     }
 }

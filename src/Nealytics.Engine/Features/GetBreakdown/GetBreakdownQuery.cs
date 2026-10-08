@@ -50,6 +50,7 @@ public sealed partial class GetBreakdownQuery
     {
         List<KeyValuePair<string, object?>> parameters = ScopeClause.Parameters(request.Scope, 12);
         parameters.Add(new KeyValuePair<string, object?>("limit", request.Limit));
+        TenantGrouping.AddParameter(parameters, request.GroupByColumn, plan?.Rollup);
 
         if (plan is RollupPlan rollup)
         {
@@ -84,9 +85,10 @@ public sealed partial class GetBreakdownQuery
         };
 
         StringBuilder sql = new(768);
-        sql.Append("WITH grouped AS (SELECT ifNull(toString(");
-        sql.Append(request.GroupByColumn);
-        sql.Append("), '') AS key, ");
+        sql.Append(TenantGrouping.With(request.GroupByColumn, null));
+        sql.Append("grouped AS (SELECT ");
+        sql.Append(TenantGrouping.RawKey(request.GroupByColumn));
+        sql.Append(" AS key, ");
         sql.Append(aggregate);
         sql.Append(" AS value FROM nealytics_core.global_events");
         sql.Append(where);
@@ -212,7 +214,7 @@ public sealed partial class GetBreakdownQuery
         List<KeyValuePair<string, object?>> parameters)
     {
         StringBuilder where = new(256);
-        ScopeClause.AppendRollup(where, request.Scope, "bucket");
+        ScopeClause.AppendRollup(where, request.Scope, "bucket", plan.Rollup);
 
         string orderBy = request.Order switch
         {
@@ -223,8 +225,9 @@ public sealed partial class GetBreakdownQuery
         };
 
         StringBuilder sql = new(768);
-        sql.Append("WITH grouped AS (SELECT ");
-        sql.Append(request.GroupByColumn);
+        sql.Append(TenantGrouping.With(request.GroupByColumn, plan.Rollup));
+        sql.Append("grouped AS (SELECT ");
+        sql.Append(TenantGrouping.RollupKey(request.GroupByColumn, plan.Rollup));
         sql.Append(" AS key, ");
         sql.Append(plan.ValueExpression);
         sql.Append(" AS value FROM ");

@@ -8,6 +8,7 @@ public readonly struct EventTimeSeriesRequest
 {
     public string ProjectId { get; init; }
     public string TenantId { get; init; }
+    public TenantSet? TenantSet { get; init; }
     public DateTime From { get; init; }
     public DateTime To { get; init; }
     public TimeSeriesInterval Interval { get; init; }
@@ -24,6 +25,7 @@ public readonly struct EventTimeSeriesRequest
     {
         ProjectId = ProjectId,
         TenantId = TenantId,
+        TenantSet = TenantSet,
         From = From,
         To = To,
         TrafficClass = TrafficClass,

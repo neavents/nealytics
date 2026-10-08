@@ -12,6 +12,8 @@ using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Features.GetDistribution;
 using Nealytics.Engine.Features.GetPivot;
 using Nealytics.Engine.Features.GetFunnel;
+using Nealytics.Engine.Features.GetRetention;
+using Nealytics.Engine.Features.UpsertTenantAttributes;
 using Nealytics.Engine.Features.GetSchema;
 using Nealytics.Engine.Features.ValidateTelemetry;
 
@@ -96,6 +98,15 @@ public sealed class GlobalTelemetryPayload
 [JsonSerializable(typeof(List<DistributionQuantile>))]
 [JsonSerializable(typeof(DistributionBucket))]
 [JsonSerializable(typeof(List<DistributionBucket>))]
+[JsonSerializable(typeof(RetentionResponse))]
+[JsonSerializable(typeof(RetentionCohort))]
+[JsonSerializable(typeof(List<RetentionCohort>))]
+[JsonSerializable(typeof(long[]))]
+[JsonSerializable(typeof(TenantAttributesPayload))]
+[JsonSerializable(typeof(TenantAttributesEntry))]
+[JsonSerializable(typeof(List<TenantAttributesEntry>))]
+[JsonSerializable(typeof(Dictionary<string, string?>))]
+[JsonSerializable(typeof(TenantAttributesResponse))]
 public partial class TelemetryAotContext : JsonSerializerContext
 {
 }

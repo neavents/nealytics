@@ -48,18 +48,19 @@ public static class DistributionRequestFactory
         QueryColumns columns,
         MeasureRegistry measures,
         int defaultRangeHours,
-        DateTime nowUtc)
+        DateTime nowUtc,
+        TenantSet? tenantSet = null)
     {
         ArgumentNullException.ThrowIfNull(filtersRaw);
         ArgumentNullException.ThrowIfNull(columns);
         ArgumentNullException.ThrowIfNull(measures);
 
-        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(tenantId))
+        if (string.IsNullOrWhiteSpace(projectId) || (string.IsNullOrWhiteSpace(tenantId) && tenantSet is null))
         {
             return DistributionRequestResult.Fail(StatusForbidden, null);
         }
 
-        if (projectId.Length > MaxFieldLength || tenantId.Length > MaxFieldLength)
+        if (projectId.Length > MaxFieldLength || tenantId?.Length > MaxFieldLength)
         {
             return DistributionRequestResult.Fail(StatusBadRequest, "Project ID and Tenant ID must not exceed 256 characters.");
         }
@@ -114,6 +115,13 @@ public static class DistributionRequestFactory
                 StatusBadRequest, FilterRejection.Message(parsedFilters, columns, measures, MaxFieldLength));
         }
 
+        if (measureColumn is not null
+            && measures.Find(measureColumn) is Measure declared
+            && UnitSafety.Violation(declared, "distribution", null, parsedFilters.Filters) is string unitError)
+        {
+            return DistributionRequestResult.Fail(StatusBadRequest, unitError);
+        }
+
         if (!RequestParsing.TryParseRange(fromRaw, toRaw, defaultRangeHours, nowUtc, out DateTime fromUtc, out DateTime toUtc))
         {
             return DistributionRequestResult.Fail(StatusBadRequest, "'from' and 'to' must be ISO 8601 timestamps with 'from' before or equal to 'to'.");
@@ -148,7 +156,8 @@ public static class DistributionRequestFactory
         return DistributionRequestResult.Ok(new DistributionRequest
         {
             ProjectId = projectId,
-            TenantId = tenantId,
+            TenantId = tenantId ?? string.Empty,
+            TenantSet = tenantSet,
             Subject = subject,
             MeasureColumn = measureColumn,
             Wire = ofRaw!,

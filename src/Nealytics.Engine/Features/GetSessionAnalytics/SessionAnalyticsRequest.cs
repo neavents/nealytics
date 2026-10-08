@@ -8,6 +8,7 @@ public readonly struct SessionAnalyticsRequest
 {
     public string ProjectId { get; init; }
     public string TenantId { get; init; }
+    public TenantSet? TenantSet { get; init; }
     public DateTime From { get; init; }
     public DateTime To { get; init; }
     public int Limit { get; init; }
@@ -18,6 +19,7 @@ public readonly struct SessionAnalyticsRequest
     {
         ProjectId = ProjectId,
         TenantId = TenantId,
+        TenantSet = TenantSet,
         From = From,
         To = To,
         TrafficClass = TrafficClass,

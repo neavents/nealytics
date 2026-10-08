@@ -55,14 +55,15 @@ public static class BreakdownRequestFactory
         MeasureRegistry measures,
         int maxLimit,
         int defaultRangeHours,
-        DateTime nowUtc)
+        DateTime nowUtc,
+        TenantSet? tenantSet = null)
     {
-        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(tenantId))
+        if (string.IsNullOrWhiteSpace(projectId) || (string.IsNullOrWhiteSpace(tenantId) && tenantSet is null))
         {
             return BreakdownRequestResult.Fail(StatusForbidden, null);
         }
 
-        if (projectId.Length > MaxFieldLength || tenantId.Length > MaxFieldLength)
+        if (projectId.Length > MaxFieldLength || tenantId?.Length > MaxFieldLength)
         {
             return BreakdownRequestResult.Fail(
                 StatusBadRequest, "Project ID and Tenant ID must not exceed 256 characters.");
@@ -72,6 +73,8 @@ public static class BreakdownRequestFactory
         string metricWire = "events";
         string? measureColumn = null;
         string? measureFunction = null;
+        string? measureAggregation = null;
+        Measure? measureDeclaration = null;
 
         if (!string.IsNullOrEmpty(metricRaw))
         {
@@ -97,6 +100,8 @@ public static class BreakdownRequestFactory
                 metric = BreakdownMetric.Measure;
                 measureColumn = parsed.Column;
                 measureFunction = parsed.Function;
+                measureAggregation = parsed.Aggregation;
+                measureDeclaration = parsed.Declaration;
                 metricWire = parsed.Wire;
             }
         }
@@ -113,13 +118,13 @@ public static class BreakdownRequestFactory
         if (string.IsNullOrWhiteSpace(groupByRaw))
         {
             return BreakdownRequestResult.Fail(
-                StatusBadRequest, columns.RejectionMessage("groupBy", groupByRaw));
+                StatusBadRequest, columns.GroupByRejectionMessage("groupBy", groupByRaw));
         }
 
-        if (!columns.TryResolve(groupByRaw, out string groupByColumn))
+        if (!columns.TryResolveGroupBy(groupByRaw, out string groupByColumn))
         {
             return BreakdownRequestResult.Fail(
-                StatusBadRequest, columns.RejectionMessage("groupBy", groupByRaw));
+                StatusBadRequest, columns.GroupByRejectionMessage("groupBy", groupByRaw));
         }
 
         if (filtersRaw.Count > MaxFilters)
@@ -137,6 +142,12 @@ public static class BreakdownRequestFactory
         }
 
         IReadOnlyList<QueryFilter> filters = parsedFilters.Filters;
+
+        if (measureDeclaration is not null
+            && UnitSafety.Violation(measureDeclaration, measureAggregation!, groupByColumn, filters) is string unitError)
+        {
+            return BreakdownRequestResult.Fail(StatusBadRequest, unitError);
+        }
 
         string? eventType = string.IsNullOrWhiteSpace(eventTypeRaw) ? null : eventTypeRaw;
         if (eventType is not null && eventType.Length > MaxFieldLength)
@@ -192,13 +203,15 @@ public static class BreakdownRequestFactory
         return BreakdownRequestResult.Ok(new BreakdownRequest
         {
             ProjectId = projectId,
-            TenantId = tenantId,
+            TenantId = tenantId ?? string.Empty,
+            TenantSet = tenantSet,
             TrafficClass = trafficClass,
             Exact = string.Equals(exactRaw, "true", StringComparison.Ordinal),
             Approximate = string.Equals(modeRaw, "approx", StringComparison.Ordinal),
             Metric = metric,
             MeasureColumn = measureColumn,
             MeasureFunction = measureFunction,
+            MeasureAggregation = measureAggregation,
             MetricWire = metricWire,
             GroupByColumn = groupByColumn,
             EventType = eventType,
@@ -216,6 +229,8 @@ public static class BreakdownRequestFactory
         public string? ErrorMessage { get; init; }
         public string Column { get; init; }
         public string Function { get; init; }
+        public string Aggregation { get; init; }
+        public Measure? Declaration { get; init; }
         public string Wire { get; init; }
     }
 
@@ -264,6 +279,8 @@ public static class BreakdownRequestFactory
             Success = true,
             Column = measure.Name,
             Function = function,
+            Aggregation = canonicalAggregation,
+            Declaration = measure,
             Wire = $"{canonicalAggregation}({measure.Name})",
         };
     }

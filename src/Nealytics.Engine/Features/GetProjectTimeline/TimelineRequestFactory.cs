@@ -2,6 +2,7 @@ namespace Nealytics.Engine.Features.GetProjectTimeline;
 
 using System;
 using System.Globalization;
+using Nealytics.Engine.Infrastructure.Query;
 
 public readonly struct TimelineRequestResult
 {
@@ -39,14 +40,18 @@ public static class TimelineRequestFactory
         string? objectId,
         string? metaKey,
         string? metaValue,
-        int maxLimit)
+        int maxLimit,
+        string? userId = null,
+        string? stitchedRaw = null,
+        string? aliasEventType = null,
+        TenantSet? tenantSet = null)
     {
-        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(tenantId))
+        if (string.IsNullOrWhiteSpace(projectId) || (string.IsNullOrWhiteSpace(tenantId) && tenantSet is null))
         {
             return TimelineRequestResult.Fail(StatusForbidden, null);
         }
 
-        if (projectId.Length > MaxFieldLength || tenantId.Length > MaxFieldLength)
+        if (projectId.Length > MaxFieldLength || tenantId?.Length > MaxFieldLength)
         {
             return TimelineRequestResult.Fail(StatusBadRequest, "Project ID and Tenant ID must not exceed 256 characters.");
         }
@@ -69,12 +74,27 @@ public static class TimelineRequestFactory
         string? normalizedObjectId = Normalize(objectId);
         string? normalizedMetaKey = Normalize(metaKey);
         string? normalizedMetaValue = Normalize(metaValue);
+        string? normalizedUserId = Normalize(userId);
+        bool stitched = RequestParsing.IsFlag(stitchedRaw);
+
+        if (stitched && normalizedUserId is null)
+        {
+            return TimelineRequestResult.Fail(StatusBadRequest, "'stitched=true' needs a 'userId' to stitch to.");
+        }
+
+        if (stitched && string.IsNullOrEmpty(aliasEventType))
+        {
+            return TimelineRequestResult.Fail(
+                StatusBadRequest,
+                "'stitched=true' needs identity stitching, which is off: TelemetryEngine:AliasEventType is not set.");
+        }
 
         if (normalizedEventType?.Length > MaxFieldLength
             || normalizedSessionId?.Length > MaxFieldLength
             || normalizedObjectId?.Length > MaxFieldLength
             || normalizedMetaKey?.Length > MaxFieldLength
-            || normalizedMetaValue?.Length > MaxFieldLength)
+            || normalizedMetaValue?.Length > MaxFieldLength
+            || normalizedUserId?.Length > MaxFieldLength)
         {
             return TimelineRequestResult.Fail(StatusBadRequest, "Filter values must not exceed 256 characters.");
         }
@@ -84,7 +104,10 @@ public static class TimelineRequestFactory
         return TimelineRequestResult.Ok(new TimelineQueryRequest
         {
             ProjectId = projectId,
-            TenantId = tenantId,
+            TenantId = tenantId ?? string.Empty,
+            TenantSet = tenantSet,
+            UserId = normalizedUserId,
+            StitchedAliasEventType = stitched ? aliasEventType : null,
             Limit = limit,
             Before = cursor,
             EventType = normalizedEventType,

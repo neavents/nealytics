@@ -57,14 +57,15 @@ public static class SessionAnalyticsRequestFactory
         MeasureRegistry? measures,
         int maxLimit,
         int defaultRangeHours,
-        DateTime nowUtc)
+        DateTime nowUtc,
+        TenantSet? tenantSet = null)
     {
-        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(tenantId))
+        if (string.IsNullOrWhiteSpace(projectId) || (string.IsNullOrWhiteSpace(tenantId) && tenantSet is null))
         {
             return SessionAnalyticsRequestResult.Fail(StatusForbidden, null);
         }
 
-        if (projectId.Length > MaxFieldLength || tenantId.Length > MaxFieldLength)
+        if (projectId.Length > MaxFieldLength || tenantId?.Length > MaxFieldLength)
         {
             return SessionAnalyticsRequestResult.Fail(StatusBadRequest, "Project ID and Tenant ID must not exceed 256 characters.");
         }
@@ -123,7 +124,8 @@ public static class SessionAnalyticsRequestFactory
         return SessionAnalyticsRequestResult.Ok(new SessionAnalyticsRequest
         {
             ProjectId = projectId,
-            TenantId = tenantId,
+            TenantId = tenantId ?? string.Empty,
+            TenantSet = tenantSet,
             From = fromUtc,
             To = toUtc,
             Limit = limit,

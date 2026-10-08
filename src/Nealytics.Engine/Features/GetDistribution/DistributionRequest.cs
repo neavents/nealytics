@@ -15,6 +15,7 @@ public readonly struct DistributionRequest
 {
     public string ProjectId { get; init; }
     public string TenantId { get; init; }
+    public TenantSet? TenantSet { get; init; }
     public DistributionSubject Subject { get; init; }
     public string? MeasureColumn { get; init; }
     public string Wire { get; init; }
@@ -31,6 +32,7 @@ public readonly struct DistributionRequest
     {
         ProjectId = ProjectId,
         TenantId = TenantId,
+        TenantSet = TenantSet,
         From = From,
         To = To,
         TrafficClass = TrafficClass,

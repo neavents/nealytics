@@ -12,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Nealytics.Engine.Infrastructure.Diagnostics;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Storage;
 using Octonica.ClickHouseClient;
 
@@ -52,6 +53,8 @@ public sealed partial class GetProjectTimelineQuery
             new KeyValuePair<string, object?>("tenantId", request.TenantId)
         };
 
+        ScopeClause.AddTenantSetParameters(parameters, request.TenantSet);
+
         StringBuilder sql = new StringBuilder(
             "SELECT event_id, session_id, user_id, event_type, object_id, metadata_json, timestamp");
 
@@ -64,9 +67,13 @@ public sealed partial class GetProjectTimelineQuery
             }
         }
 
-        sql.Append(
-            " FROM nealytics_core.global_events " +
-            "WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String}");
+        if (request.TenantSet is not null)
+        {
+            sql.Append(", tenant_id");
+        }
+
+        sql.Append(" FROM nealytics_core.global_events");
+        ScopeClause.AppendProjectAndTenant(sql, request.TenantId, request.TenantSet);
 
         if (request.Before.HasValue)
         {
@@ -97,6 +104,23 @@ public sealed partial class GetProjectTimelineQuery
             sql.Append(" AND JSONExtractString(metadata_json, {metaKey:String}) = {metaValue:String}");
             parameters.Add(new KeyValuePair<string, object?>("metaKey", request.MetaKey));
             parameters.Add(new KeyValuePair<string, object?>("metaValue", request.MetaValue));
+        }
+
+        if (request.UserId is not null)
+        {
+            parameters.Add(new KeyValuePair<string, object?>("userId", request.UserId));
+
+            if (request.StitchedAliasEventType is null)
+            {
+                sql.Append(" AND user_id = {userId:String}");
+            }
+            else
+            {
+                parameters.Add(new KeyValuePair<string, object?>("aliasEventType", request.StitchedAliasEventType));
+                sql.Append(" AND (user_id = {userId:String} OR session_id IN (");
+                IdentityStitching.AppendAliasedSessions(sql, request.TenantId, request.TenantSet);
+                sql.Append("))");
+            }
         }
 
         sql.Append(" ORDER BY timestamp DESC LIMIT {limit:Int32}");
@@ -154,7 +178,10 @@ public sealed partial class GetProjectTimelineQuery
                     Timestamp = DateTime.SpecifyKind(reader.GetDateTime(6), DateTimeKind.Utc),
                     Dimensions = ReadDeclared(reader, CoreColumnCount, _dimensionColumns),
                     Measures = ReadDeclared(
-                        reader, CoreColumnCount + _dimensionColumns.Length, _measureColumns)
+                        reader, CoreColumnCount + _dimensionColumns.Length, _measureColumns),
+                    TenantId = request.TenantSet is null
+                        ? null
+                        : reader.GetString(CoreColumnCount + _declaredColumns.Length),
                 };
                 events.Add(item);
             }
@@ -166,6 +193,7 @@ public sealed partial class GetProjectTimelineQuery
             {
                 ProjectId = request.ProjectId,
                 TenantId = request.TenantId,
+                TenantSet = request.TenantSet?.Describe(),
                 Events = events
             };
         }

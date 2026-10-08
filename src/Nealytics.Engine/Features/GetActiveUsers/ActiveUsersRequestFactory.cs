@@ -50,14 +50,15 @@ public static class ActiveUsersRequestFactory
         MeasureRegistry measures,
         int maxLimit,
         int defaultRangeHours,
-        DateTime nowUtc)
+        DateTime nowUtc,
+        TenantSet? tenantSet = null)
     {
-        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(tenantId))
+        if (string.IsNullOrWhiteSpace(projectId) || (string.IsNullOrWhiteSpace(tenantId) && tenantSet is null))
         {
             return ActiveUsersRequestResult.Fail(StatusForbidden, null);
         }
 
-        if (projectId.Length > MaxFieldLength || tenantId.Length > MaxFieldLength)
+        if (projectId.Length > MaxFieldLength || tenantId?.Length > MaxFieldLength)
         {
             return ActiveUsersRequestResult.Fail(StatusBadRequest, "Project ID and Tenant ID must not exceed 256 characters.");
         }
@@ -141,7 +142,8 @@ public static class ActiveUsersRequestFactory
         return ActiveUsersRequestResult.Ok(new ActiveUsersRequest
         {
             ProjectId = projectId,
-            TenantId = tenantId,
+            TenantId = tenantId ?? string.Empty,
+            TenantSet = tenantSet,
             From = fromUtc,
             To = toUtc,
             TrafficClass = trafficClass,

@@ -6,10 +6,19 @@ using System.Globalization;
 using System.Text;
 using Nealytics.Engine.Infrastructure.Configuration;
 
+public readonly struct TenantSet
+{
+    public string Attribute { get; init; }
+    public string Value { get; init; }
+
+    public string Describe() => Attribute + ":" + Value;
+}
+
 public readonly struct QueryScope
 {
     public string ProjectId { get; init; }
     public string TenantId { get; init; }
+    public TenantSet? TenantSet { get; init; }
     public DateTime From { get; init; }
     public DateTime To { get; init; }
     public string? TrafficClass { get; init; }
@@ -34,6 +43,8 @@ public static class ScopeClause
             parameters.Add(new KeyValuePair<string, object?>("trafficClass", scope.TrafficClass));
         }
 
+        AddTenantSetParameters(parameters, scope.TenantSet);
+
         if (!string.IsNullOrEmpty(scope.EventType))
         {
             parameters.Add(new KeyValuePair<string, object?>("eventType", scope.EventType));
@@ -53,9 +64,52 @@ public static class ScopeClause
         return parameters;
     }
 
+    public static void AddTenantSetParameters(List<KeyValuePair<string, object?>> parameters, TenantSet? set)
+    {
+        if (set is TenantSet members)
+        {
+            parameters.Add(new KeyValuePair<string, object?>("tenantSetAttribute", members.Attribute));
+            parameters.Add(new KeyValuePair<string, object?>("tenantSetValue", members.Value));
+        }
+    }
+
+    public static string TenantMembers =>
+        "SELECT tenant_id FROM " + TenantAttributeRegistry.QualifiedTable
+        + " FINAL WHERE project_id = {projectId:String} AND attribute = {tenantSetAttribute:String}"
+        + " AND value = {tenantSetValue:String}";
+
+    public static void AppendProjectAndTenant(StringBuilder sql, string? tenantId, TenantSet? set)
+    {
+        sql.Append(" WHERE project_id = {projectId:String} AND ");
+        AppendTenant(sql, tenantId, set);
+    }
+
+    public static void AppendTenant(StringBuilder sql, string? tenantId, TenantSet? set)
+    {
+        if (set is null)
+        {
+            sql.Append("tenant_id = {tenantId:String}");
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(tenantId))
+        {
+            sql.Append("tenant_id = {tenantId:String} AND ");
+        }
+
+        sql.Append("tenant_id IN (").Append(TenantMembers).Append(')');
+    }
+
+    public static void AppendGroupRollupTenant(StringBuilder sql, TenantSet set)
+    {
+        sql.Append(" WHERE project_id = {projectId:String} AND ")
+            .Append(RollupRegistry.TenantAttributeColumn(set.Attribute))
+            .Append(" = {tenantSetValue:String}");
+    }
+
     public static void AppendRaw(StringBuilder sql, in QueryScope scope)
     {
-        sql.Append(" WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String}");
+        AppendProjectAndTenant(sql, scope.TenantId, scope.TenantSet);
         sql.Append(" AND timestamp >= {fromTimestamp:DateTime64} AND timestamp <= {toTimestamp:DateTime64}");
         sql.Append(TrafficFilter.Clause(scope.TrafficClass));
 
@@ -67,9 +121,20 @@ public static class ScopeClause
         AppendFilters(sql, scope.Filters, normalise: true);
     }
 
-    public static void AppendRollup(StringBuilder sql, in QueryScope scope, string bucketColumn)
+    public static void AppendRollup(StringBuilder sql, in QueryScope scope, string bucketColumn) =>
+        AppendRollup(sql, scope, bucketColumn, null);
+
+    public static void AppendRollup(StringBuilder sql, in QueryScope scope, string bucketColumn, Rollup? rollup)
     {
-        sql.Append(" WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String}");
+        if (rollup is { IsGroupRollup: true } && scope.TenantSet is TenantSet set)
+        {
+            AppendGroupRollupTenant(sql, set);
+        }
+        else
+        {
+            AppendProjectAndTenant(sql, scope.TenantId, scope.TenantSet);
+        }
+
         sql.Append(" AND ").Append(bucketColumn).Append(" >= {fromTimestamp:DateTime64} AND ")
             .Append(bucketColumn).Append(" < {toTimestamp:DateTime64}");
         sql.Append(TrafficFilter.Clause(scope.TrafficClass));

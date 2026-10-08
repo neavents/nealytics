@@ -54,6 +54,7 @@ public class EveryEndpointResolvesTests : IClassFixture<NoDatabaseWebFactory>
         "/api/v1/analytics/funnel?step=a&step=b",
         "/api/v1/analytics/pivot?groupBy=event_type&metric=events&metric=sessions:view",
         "/api/v1/analytics/distribution?of=session_duration",
+        "/api/v1/analytics/retention?period=week&by=sessions",
         "/api/v1/schema",
     ];
 

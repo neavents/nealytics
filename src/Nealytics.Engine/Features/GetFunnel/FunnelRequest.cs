@@ -1,12 +1,14 @@
 namespace Nealytics.Engine.Features.GetFunnel;
 
 using System;
+using Nealytics.Engine.Infrastructure.Query;
 using System.Collections.Generic;
 
 public enum FunnelGrain
 {
     Sessions,
     Users,
+    Identities,
 }
 
 public readonly struct FunnelStep
@@ -20,8 +22,10 @@ public readonly struct FunnelRequest
 {
     public string ProjectId { get; init; }
     public string TenantId { get; init; }
+    public TenantSet? TenantSet { get; init; }
     public IReadOnlyList<FunnelStep> Steps { get; init; }
     public FunnelGrain Grain { get; init; }
+    public string? AliasEventType { get; init; }
     public string? BreakdownColumn { get; init; }
     public int WindowSeconds { get; init; }
     public DateTime From { get; init; }

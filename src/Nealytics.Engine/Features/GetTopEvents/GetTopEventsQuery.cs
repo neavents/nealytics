@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Nealytics.Engine.Infrastructure.Diagnostics;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Storage;
 using Octonica.ClickHouseClient;
 
@@ -49,13 +50,15 @@ public sealed partial class GetTopEventsQuery
             parameters.Add(new KeyValuePair<string, object?>("trafficClass", request.TrafficClass));
         }
 
+        ScopeClause.AddTenantSetParameters(parameters, request.TenantSet);
+
         StringBuilder sql = new StringBuilder(256);
         sql.Append("SELECT ");
         sql.Append(dimColumn);
         sql.Append(request.Exact ? " AS key, uniqExact(event_id) AS event_count " : " AS key, count() AS event_count ");
-        sql.Append("FROM nealytics_core.global_events ");
-        sql.Append("WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String} ");
-        sql.Append("AND timestamp >= {fromTimestamp:DateTime64} AND timestamp <= {toTimestamp:DateTime64}");
+        sql.Append("FROM nealytics_core.global_events");
+        ScopeClause.AppendProjectAndTenant(sql, request.TenantId, request.TenantSet);
+        sql.Append(" AND timestamp >= {fromTimestamp:DateTime64} AND timestamp <= {toTimestamp:DateTime64}");
         sql.Append(TrafficFilter.Clause(request.TrafficClass));
 
         if (TopDimensionRules.ExcludesNull(request.DimensionColumn))

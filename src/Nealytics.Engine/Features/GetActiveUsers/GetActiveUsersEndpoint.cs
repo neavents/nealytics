@@ -2,13 +2,13 @@ namespace Nealytics.Engine.Features.GetActiveUsers;
 
 using System;
 using System.Linq;
-using System.Security.Claims;
 using System.Threading;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Security;
 using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Storage;
 
@@ -22,14 +22,21 @@ public static class GetActiveUsersEndpoint
             QueryColumns columns,
             MeasureRegistry measures,
             IOptions<TelemetryEngineOptions> options,
+            TenantAttributeRegistry tenantAttributes,
             CancellationToken cancellationToken) =>
         {
-            ClaimsPrincipal user = context.User;
+            ReadIdentity identity = ReadClaims.Resolve(context, tenantAttributes);
+
+            if (identity.Rejected)
+            {
+                return identity.Rejection();
+            }
+
             TelemetryEngineOptions engineOptions = options.Value;
 
             ActiveUsersRequestResult parsed = ActiveUsersRequestFactory.Create(
-                user.FindFirst("project_id")?.Value,
-                user.FindFirst("tenant_id")?.Value,
+                identity.ProjectId,
+                identity.TenantId,
                 limitRaw: context.Request.Query["limit"].ToString(),
                 intervalRaw: context.Request.Query["interval"].ToString(),
                 byRaw: context.Request.Query["by"].ToString(),
@@ -44,7 +51,8 @@ public static class GetActiveUsersEndpoint
                 measures: measures,
                 maxLimit: engineOptions.MaxQueryLimit,
                 defaultRangeHours: engineOptions.DefaultSessionQueryRangeHours,
-                nowUtc: DateTime.UtcNow);
+                nowUtc: DateTime.UtcNow,
+                tenantSet: identity.TenantSet);
 
             if (!parsed.Success)
             {
@@ -67,6 +75,7 @@ public static class GetActiveUsersEndpoint
         })
         .WithName("GetActiveUsers")
         .Produces<ActiveUsersResponse>(StatusCodes.Status200OK)
-        .RequireAuthorization();
+        .RequireAuthorization()
+        .RequireReadScope("active");
     }
 }

@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Routing;
 using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Query;
+using Nealytics.Engine.Infrastructure.Security;
 
 public static class GetSchemaEndpoint
 {
@@ -22,12 +23,21 @@ public static class GetSchemaEndpoint
             Microsoft.Extensions.Options.IOptions<TelemetryEngineOptions> engineOptions,
             GetEventTypesQuery eventTypes,
             GetColumnPopulationQuery population,
+            TenantAttributeRegistry tenantAttributes,
             System.Threading.CancellationToken cancellationToken) =>
         {
-            string? projectId = context.User.FindFirst("project_id")?.Value;
-            string? tenantId = context.User.FindFirst("tenant_id")?.Value;
+            ReadIdentity identity = ReadClaims.Resolve(context, tenantAttributes);
 
-            if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(tenantId))
+            if (identity.Rejected)
+            {
+                return identity.Rejection();
+            }
+
+            string? projectId = identity.ProjectId;
+            string tenantId = identity.TenantId ?? string.Empty;
+            TenantSet? tenantSet = identity.TenantSet;
+
+            if (string.IsNullOrWhiteSpace(projectId) || (string.IsNullOrWhiteSpace(tenantId) && tenantSet is null))
             {
                 return Results.Forbid();
             }
@@ -38,7 +48,7 @@ public static class GetSchemaEndpoint
             try
             {
                 counts = await population.ExecuteAsync(
-                    projectId, tenantId, System.DateTime.UtcNow, cancellationToken);
+                    projectId, tenantId, tenantSet, System.DateTime.UtcNow, cancellationToken);
                 populationAvailable = true;
             }
             catch (System.Exception)
@@ -88,6 +98,8 @@ public static class GetSchemaEndpoint
                     Maximum = measure.Maximum,
                     NonEmptyCount = nonEmpty,
                     Populated = populationAvailable && nonEmpty > 0,
+                    UnitDimension = measure.UnitDimension,
+                    ServerOnly = measure.ServerOnly ? true : null,
                 });
 
                 foreach (string aggregation in aggregations)
@@ -109,7 +121,7 @@ public static class GetSchemaEndpoint
             try
             {
                 observed = await eventTypes.ExecuteAsync(
-                    projectId, tenantId, System.DateTime.UtcNow, cancellationToken);
+                    projectId, tenantId, tenantSet, System.DateTime.UtcNow, cancellationToken);
                 observedAvailable = true;
             }
             catch (System.Exception)
@@ -129,10 +141,16 @@ public static class GetSchemaEndpoint
                 EventTypes = observed,
                 EventTypesAvailable = observedAvailable,
                 PopulationAvailable = populationAvailable,
+                TenantAttributes = tenantAttributes.Enabled ? columns.TenantGroupColumns : null,
+                TenantSet = tenantSet?.Describe(),
+                AliasEventType = string.IsNullOrEmpty(engineOptions.Value.AliasEventType)
+                    ? null
+                    : engineOptions.Value.AliasEventType,
             });
         })
         .WithName("GetSchema")
         .Produces<SchemaResponse>(StatusCodes.Status200OK)
-        .RequireAuthorization();
+        .RequireAuthorization()
+        .RequireReadScope("schema");
     }
 }

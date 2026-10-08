@@ -35,6 +35,7 @@ public readonly struct PivotRequest
 {
     public string ProjectId { get; init; }
     public string TenantId { get; init; }
+    public TenantSet? TenantSet { get; init; }
     public string GroupByColumn { get; init; }
     public IReadOnlyList<PivotMetric> Metrics { get; init; }
     public IReadOnlyList<QueryFilter> Filters { get; init; }
@@ -52,6 +53,7 @@ public readonly struct PivotRequest
     {
         ProjectId = ProjectId,
         TenantId = TenantId,
+        TenantSet = TenantSet,
         From = From,
         To = To,
         TrafficClass = TrafficClass,

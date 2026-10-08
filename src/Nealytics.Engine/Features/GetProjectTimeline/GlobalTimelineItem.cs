@@ -2,6 +2,7 @@ namespace Nealytics.Engine.Features.GetProjectTimeline;
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 public sealed class GlobalTimelineItem
 {
@@ -16,4 +17,7 @@ public sealed class GlobalTimelineItem
     public string? ObjectId { get; set; }
     public string MetadataJson { get; set; } = "{}";
     public DateTime Timestamp { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TenantId { get; set; }
 }

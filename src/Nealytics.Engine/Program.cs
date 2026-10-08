@@ -23,9 +23,11 @@ using Nealytics.Engine.Features.GetSchema;
 using Nealytics.Engine.Features.ValidateTelemetry;
 using Nealytics.Engine.Features.GetEventTimeSeries;
 using Nealytics.Engine.Features.GetProjectTimeline;
+using Nealytics.Engine.Features.GetRetention;
 using Nealytics.Engine.Features.GetSessionAnalytics;
 using Nealytics.Engine.Features.GetTopEvents;
 using Nealytics.Engine.Features.IngestTelemetry;
+using Nealytics.Engine.Features.UpsertTenantAttributes;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Diagnostics;
@@ -37,6 +39,7 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using Serilog;
 using Serilog.Events;
+using Serilog.Extensions.Logging;
 using Serilog.Formatting.Json;
 using Serilog.Sinks.OpenTelemetry;
 
@@ -54,10 +57,7 @@ IConfigurationSection configSection = builder.Configuration.GetSection("Telemetr
 builder.Services.Configure<TelemetryEngineOptions>(configSection);
 TelemetryEngineOptions engineOpts = configSection.Get<TelemetryEngineOptions>() ?? new TelemetryEngineOptions();
 
-if (string.IsNullOrWhiteSpace(engineOpts.JwtSymmetricKey) || Encoding.UTF8.GetByteCount(engineOpts.JwtSymmetricKey) < 32)
-{
-    throw new InvalidOperationException("TelemetryEngine:JwtSymmetricKey must be at least 32 bytes.");
-}
+ReadTokenKeys readTokenKeys = ReadTokenKeys.From(engineOpts);
 
 DimensionRegistry dimensionRegistry = new(engineOpts);
 builder.Services.AddSingleton(dimensionRegistry);
@@ -65,7 +65,10 @@ builder.Services.AddSingleton(dimensionRegistry);
 MeasureRegistry measureRegistry = new(engineOpts, dimensionRegistry);
 builder.Services.AddSingleton(measureRegistry);
 
-RollupRegistry rollupRegistry = new(engineOpts, dimensionRegistry, measureRegistry);
+TenantAttributeRegistry tenantAttributeRegistry = new(engineOpts);
+builder.Services.AddSingleton(tenantAttributeRegistry);
+
+RollupRegistry rollupRegistry = new(engineOpts, dimensionRegistry, measureRegistry, tenantAttributeRegistry);
 builder.Services.AddSingleton(rollupRegistry);
 
 builder.WebHost.ConfigureKestrel(serverOptions =>
@@ -158,19 +161,16 @@ builder.Services.AddCors(cors =>
     });
 });
 
+JwksKeyCache? jwksKeyCache = readTokenKeys.CreateJwksCache(
+    engineOpts, new SerilogLoggerFactory(Log.Logger).CreateLogger(nameof(JwksKeyCache)));
+
+if (jwksKeyCache is not null)
+{
+    builder.Services.AddHostedService(_ => jwksKeyCache);
+}
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = false,
-            ValidateAudience = false,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(engineOpts.JwtSymmetricKey)),
-            ClockSkew = TimeSpan.FromSeconds(engineOpts.JwtClockSkewSeconds)
-        };
-    });
+    .AddJwtBearer(options => readTokenKeys.Configure(options, engineOpts));
 builder.Services.AddAuthorization();
 
 if (engineOpts.EnableRequestDecompression)
@@ -194,6 +194,8 @@ builder.Services.AddSingleton<ClickHouseConnectionFactory>();
 builder.Services.AddSingleton<WriteAheadLogger>();
 builder.Services.AddSingleton<TelemetryChannelBroker>();
 builder.Services.AddSingleton<ApiKeyValidator>();
+builder.Services.AddSingleton<IngestGate>();
+builder.Services.AddSingleton<ITenantAttributeWriter, ClickHouseTenantAttributeWriter>();
 builder.Services.AddSingleton<DimensionSanitizer>();
 builder.Services.AddSingleton<MeasureSanitizer>();
 builder.Services.AddHostedService<ClickHouseSchemaMigrator>();
@@ -209,9 +211,10 @@ builder.Services.AddScoped<GetBreakdownQuery>();
 builder.Services.AddScoped<GetFunnelQuery>();
 builder.Services.AddScoped<GetPivotQuery>();
 builder.Services.AddScoped<GetDistributionQuery>();
+builder.Services.AddScoped<GetRetentionQuery>();
 builder.Services.AddSingleton<GetEventTypesQuery>();
 builder.Services.AddSingleton<GetColumnPopulationQuery>();
-builder.Services.AddSingleton(new QueryColumns(dimensionRegistry));
+builder.Services.AddSingleton(new QueryColumns(dimensionRegistry, tenantAttributeRegistry));
 
 static void ConfigureOtlp(OtlpExporterOptions options)
 {
@@ -288,6 +291,8 @@ app.MapGetSchema();
 app.MapGetFunnel();
 app.MapGetPivot();
 app.MapGetDistribution();
+app.MapGetRetention();
+app.MapUpsertTenantAttributes();
 app.MapValidateTelemetry();
 if (engineOpts.EnablePrometheusScrape)
 {

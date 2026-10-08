@@ -24,10 +24,17 @@ public sealed class QueryColumns
     ];
 
     private readonly Dictionary<string, string> _byName;
+    private readonly TenantAttributeRegistry? _tenantAttributes;
 
     public QueryColumns(DimensionRegistry registry)
+        : this(registry, null)
+    {
+    }
+
+    public QueryColumns(DimensionRegistry registry, TenantAttributeRegistry? tenantAttributes)
     {
         ArgumentNullException.ThrowIfNull(registry);
+        _tenantAttributes = tenantAttributes;
 
         _byName = new Dictionary<string, string>(StringComparer.Ordinal);
 
@@ -42,9 +49,37 @@ public sealed class QueryColumns
         }
 
         Allowed = [.. _byName.Keys.OrderBy(name => name, StringComparer.Ordinal)];
+        TenantGroupColumns = tenantAttributes is null
+            ? []
+            : [.. tenantAttributes.Declared.Select(name => TenantAttributeRegistry.GroupPrefix + name)];
     }
 
     public IReadOnlyList<string> Allowed { get; }
+
+    public IReadOnlyList<string> TenantGroupColumns { get; }
+
+    public bool TryResolveGroupBy(string? requested, out string column)
+    {
+        if (TryResolve(requested, out column))
+        {
+            return true;
+        }
+
+        if (_tenantAttributes is not null && _tenantAttributes.TryResolveGroupColumn(requested, out string attribute))
+        {
+            column = TenantAttributeRegistry.GroupPrefix + attribute;
+            return true;
+        }
+
+        column = string.Empty;
+        return false;
+    }
+
+    public string GroupByRejectionMessage(string parameterName, string? requested) =>
+        TenantGroupColumns.Count == 0
+            ? RejectionMessage(parameterName, requested)
+            : $"'{parameterName}' must be one of: {string.Join(", ", Allowed.Concat(TenantGroupColumns))}. "
+                + $"Got '{requested}', which is not a known column, an active dimension or a declared tenant attribute.";
 
     public bool TryResolve(string? requested, out string column)
     {

@@ -2,13 +2,13 @@ namespace Nealytics.Engine.Features.GetBreakdown;
 
 using System;
 using System.Linq;
-using System.Security.Claims;
 using System.Threading;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Security;
 using Nealytics.Engine.Infrastructure.Query;
 
 public static class GetBreakdownEndpoint
@@ -21,14 +21,21 @@ public static class GetBreakdownEndpoint
             QueryColumns columns,
             MeasureRegistry measures,
             IOptions<TelemetryEngineOptions> options,
+            TenantAttributeRegistry tenantAttributes,
             CancellationToken cancellationToken) =>
         {
-            ClaimsPrincipal user = context.User;
+            ReadIdentity identity = ReadClaims.Resolve(context, tenantAttributes);
+
+            if (identity.Rejected)
+            {
+                return identity.Rejection();
+            }
+
             TelemetryEngineOptions engineOptions = options.Value;
 
             BreakdownRequestResult parsed = BreakdownRequestFactory.Create(
-                user.FindFirst("project_id")?.Value,
-                user.FindFirst("tenant_id")?.Value,
+                identity.ProjectId,
+                identity.TenantId,
                 context.Request.Query["metric"].ToString(),
                 context.Request.Query["groupBy"].ToString(),
                 context.Request.Query["eventType"].ToString(),
@@ -44,7 +51,8 @@ public static class GetBreakdownEndpoint
                 measures,
                 engineOptions.MaxQueryLimit,
                 engineOptions.DefaultSessionQueryRangeHours,
-                DateTime.UtcNow);
+                DateTime.UtcNow,
+                identity.TenantSet);
 
             if (!parsed.Success)
             {
@@ -59,6 +67,7 @@ public static class GetBreakdownEndpoint
         })
         .WithName("GetBreakdown")
         .Produces<BreakdownResponse>(StatusCodes.Status200OK)
-        .RequireAuthorization();
+        .RequireAuthorization()
+        .RequireReadScope("breakdown");
     }
 }

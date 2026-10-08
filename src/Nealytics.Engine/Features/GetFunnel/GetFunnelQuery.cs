@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Nealytics.Engine.Infrastructure.Diagnostics;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Storage;
 using Octonica.ClickHouseClient;
 
@@ -49,7 +50,19 @@ public sealed partial class GetFunnelQuery
             new KeyValuePair<string, object?>("limit", request.Limit),
         ];
 
-        string unit = request.Grain == FunnelGrain.Users ? "user_id" : "session_id";
+        ScopeClause.AddTenantSetParameters(parameters, request.TenantSet);
+
+        if (request.AliasEventType is not null)
+        {
+            IdentityStitching.AddParameter(parameters, request.AliasEventType);
+        }
+
+        string unit = request.Grain switch
+        {
+            FunnelGrain.Users => "user_id",
+            FunnelGrain.Identities => IdentityStitching.StitchedColumn,
+            _ => "session_id",
+        };
 
         StringBuilder conditions = new(256);
         StringBuilder eventTypeFilter = new(128);
@@ -89,14 +102,26 @@ public sealed partial class GetFunnelQuery
 
         sql.Append("windowFunnel(").Append(request.WindowSeconds.ToString(CultureInfo.InvariantCulture));
         sql.Append(")(toDateTime(timestamp)").Append(conditions).Append(") AS level ");
-        sql.Append("FROM nealytics_core.global_events ");
-        sql.Append("WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String} ");
-        sql.Append("AND timestamp >= {fromTimestamp:DateTime64} AND timestamp <= {toTimestamp:DateTime64}");
-        sql.Append(eventTypeFilter);
+
+        StringBuilder where = new(256);
+        ScopeClause.AppendProjectAndTenant(where, request.TenantId, request.TenantSet);
+        where.Append(" AND timestamp >= {fromTimestamp:DateTime64} AND timestamp <= {toTimestamp:DateTime64}");
+        where.Append(eventTypeFilter);
 
         if (request.Grain == FunnelGrain.Users)
         {
-            sql.Append(" AND user_id IS NOT NULL");
+            where.Append(" AND user_id IS NOT NULL");
+        }
+
+        if (request.Grain == FunnelGrain.Identities)
+        {
+            sql.Append("FROM ");
+            IdentityStitching.AppendStitchedSource(sql, request.TenantId, request.TenantSet, where.ToString());
+        }
+        else
+        {
+            sql.Append("FROM nealytics_core.global_events");
+            sql.Append(where);
         }
 
         sql.Append(" GROUP BY ");
@@ -211,7 +236,12 @@ public sealed partial class GetFunnelQuery
 
             return new FunnelResponse
             {
-                Grain = request.Grain == FunnelGrain.Users ? "user" : "session",
+                Grain = request.Grain switch
+                {
+                    FunnelGrain.Users => "user",
+                    FunnelGrain.Identities => "identity",
+                    _ => "session",
+                },
                 BreakdownBy = request.BreakdownColumn,
                 WindowSeconds = request.WindowSeconds,
                 From = request.From,

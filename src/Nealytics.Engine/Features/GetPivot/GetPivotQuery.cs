@@ -42,6 +42,7 @@ public sealed partial class GetPivotQuery
     {
         List<KeyValuePair<string, object?>> parameters = ScopeClause.Parameters(request.Scope, 24);
         parameters.Add(new KeyValuePair<string, object?>("limit", request.Limit));
+        TenantGrouping.AddParameter(parameters, request.GroupByColumn, plan?.Rollup);
 
         for (int i = 0; i < request.Metrics.Count; i++)
         {
@@ -74,7 +75,7 @@ public sealed partial class GetPivotQuery
         if (plan is PivotRollupPlan routed)
         {
             source = RollupRegistry.Database + "." + routed.Rollup.TableName;
-            ScopeClause.AppendRollup(where, request.Scope, "bucket");
+            ScopeClause.AppendRollup(where, request.Scope, "bucket", routed.Rollup);
         }
         else
         {
@@ -83,8 +84,11 @@ public sealed partial class GetPivotQuery
         }
 
         StringBuilder sql = new(1024);
-        sql.Append("WITH grouped AS (SELECT ");
-        sql.Append(plan is null ? "ifNull(toString(" + request.GroupByColumn + "), '')" : request.GroupByColumn);
+        sql.Append(TenantGrouping.With(request.GroupByColumn, plan?.Rollup));
+        sql.Append("grouped AS (SELECT ");
+        sql.Append(plan is PivotRollupPlan keyed
+            ? TenantGrouping.RollupKey(request.GroupByColumn, keyed.Rollup)
+            : TenantGrouping.RawKey(request.GroupByColumn));
         sql.Append(" AS key, ").Append(aggregates).Append(" FROM ").Append(source).Append(where).Append(" GROUP BY key),");
         sql.Append(" totals AS (SELECT ").Append(aggregates).Append(" FROM ").Append(source).Append(where).Append(')');
         sql.Append(" SELECT key");
@@ -145,6 +149,18 @@ public sealed partial class GetPivotQuery
 
     private static string RollupExpression(in PivotMetric metric, string stateColumn, int index)
     {
+        int quantileAt = stateColumn.IndexOf(':', StringComparison.Ordinal);
+
+        if (quantileAt > 0)
+        {
+            string level = RollupRegistry.QuantileIndex(stateColumn[..quantileAt])!.Value.ToString(CultureInfo.InvariantCulture);
+            string column = stateColumn[(quantileAt + 1)..];
+            string merged = metric.EventType is null
+                ? $"quantilesMerge({RollupRegistry.QuantileLevels})({column})"
+                : $"quantilesMergeIf({RollupRegistry.QuantileLevels})({column}, {Condition(index)})";
+            return $"arrayElement({merged}, {level})";
+        }
+
         string function = metric.Kind switch
         {
             PivotMetricKind.Events => "count",

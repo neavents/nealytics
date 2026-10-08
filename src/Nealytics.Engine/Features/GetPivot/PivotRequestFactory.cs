@@ -47,26 +47,27 @@ public static class PivotRequestFactory
         MeasureRegistry measures,
         int maxLimit,
         int defaultRangeHours,
-        DateTime nowUtc)
+        DateTime nowUtc,
+        TenantSet? tenantSet = null)
     {
         ArgumentNullException.ThrowIfNull(metricsRaw);
         ArgumentNullException.ThrowIfNull(filtersRaw);
         ArgumentNullException.ThrowIfNull(columns);
         ArgumentNullException.ThrowIfNull(measures);
 
-        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(tenantId))
+        if (string.IsNullOrWhiteSpace(projectId) || (string.IsNullOrWhiteSpace(tenantId) && tenantSet is null))
         {
             return PivotRequestResult.Fail(StatusForbidden, null);
         }
 
-        if (projectId.Length > MaxFieldLength || tenantId.Length > MaxFieldLength)
+        if (projectId.Length > MaxFieldLength || tenantId?.Length > MaxFieldLength)
         {
             return PivotRequestResult.Fail(StatusBadRequest, "Project ID and Tenant ID must not exceed 256 characters.");
         }
 
-        if (string.IsNullOrWhiteSpace(groupByRaw) || !columns.TryResolve(groupByRaw, out string groupBy))
+        if (string.IsNullOrWhiteSpace(groupByRaw) || !columns.TryResolveGroupBy(groupByRaw, out string groupBy))
         {
-            return PivotRequestResult.Fail(StatusBadRequest, columns.RejectionMessage("groupBy", groupByRaw));
+            return PivotRequestResult.Fail(StatusBadRequest, columns.GroupByRejectionMessage("groupBy", groupByRaw));
         }
 
         List<string> specs = metricsRaw.Where(m => !string.IsNullOrWhiteSpace(m)).ToList();
@@ -109,6 +110,16 @@ public static class PivotRequestFactory
         {
             return PivotRequestResult.Fail(
                 StatusBadRequest, FilterRejection.Message(parsedFilters, columns, measures, MaxFieldLength));
+        }
+
+        foreach (PivotMetric metric in metrics)
+        {
+            if (metric.Kind == PivotMetricKind.Measure
+                && measures.Find(metric.Column!) is Measure declared
+                && UnitSafety.Violation(declared, metric.CanonicalAggregation!, groupBy, parsedFilters.Filters) is string unitError)
+            {
+                return PivotRequestResult.Fail(StatusBadRequest, unitError);
+            }
         }
 
         if (!RequestParsing.TryParseRange(fromRaw, toRaw, defaultRangeHours, nowUtc, out DateTime fromUtc, out DateTime toUtc))
@@ -158,7 +169,8 @@ public static class PivotRequestFactory
         return PivotRequestResult.Ok(new PivotRequest
         {
             ProjectId = projectId,
-            TenantId = tenantId,
+            TenantId = tenantId ?? string.Empty,
+            TenantSet = tenantSet,
             GroupByColumn = groupBy,
             Metrics = metrics,
             Filters = parsedFilters.Filters,

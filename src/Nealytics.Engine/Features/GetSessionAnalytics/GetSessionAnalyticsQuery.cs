@@ -95,7 +95,7 @@ public sealed partial class GetSessionAnalyticsQuery
         {
             sql.Append("minMerge(started_at) AS first_seen, maxMerge(ended_at) AS last_seen, countMerge(events) AS event_count");
             sql.Append(" FROM ").Append(RollupRegistry.Database).Append('.').Append(rollup.TableName);
-            sql.Append(" WHERE project_id = {projectId:String} AND tenant_id = {tenantId:String}");
+            ScopeClause.AppendProjectAndTenant(sql, request.TenantId, request.TenantSet);
             sql.Append(" AND event_date >= toDate({fromTimestamp:DateTime64}) AND event_date < toDate({toTimestamp:DateTime64})");
             sql.Append(TrafficFilter.Clause(request.TrafficClass));
             AppendRollupFilters(sql, request.Filters);

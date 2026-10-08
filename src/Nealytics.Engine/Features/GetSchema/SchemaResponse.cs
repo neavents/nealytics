@@ -2,6 +2,7 @@ namespace Nealytics.Engine.Features.GetSchema;
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 using System.Linq;
 
 public sealed class SchemaDimension
@@ -23,6 +24,10 @@ public sealed class SchemaMeasure
     public double? Maximum { get; init; }
     public long NonEmptyCount { get; init; }
     public bool Populated { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UnitDimension { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ServerOnly { get; init; }
 }
 
 public sealed class SchemaRollup
@@ -36,6 +41,9 @@ public sealed class SchemaRollup
     public IReadOnlyList<string> Dimensions { get; init; } = Array.Empty<string>();
 
     public IReadOnlyList<string> Measures { get; init; } = Array.Empty<string>();
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? TenantAttributes { get; init; }
 
     public static SchemaRollup From(Nealytics.Engine.Infrastructure.Configuration.Rollup rollup)
     {
@@ -53,6 +61,7 @@ public sealed class SchemaRollup
             EventTypes = [.. rollup.EventTypes.Order(StringComparer.Ordinal)],
             Dimensions = [.. rollup.Dimensions.Select(dimension => dimension.Name)],
             Measures = [.. rollup.Measures.Select(measure => $"{measure.Measure.Name}:{measure.Aggregation}")],
+            TenantAttributes = rollup.IsGroupRollup ? rollup.TenantAttributes : null,
         };
     }
 }
@@ -84,4 +93,13 @@ public sealed class SchemaResponse
     public bool EventTypesAvailable { get; init; }
 
     public bool PopulationAvailable { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? TenantAttributes { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TenantSet { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AliasEventType { get; init; }
 }

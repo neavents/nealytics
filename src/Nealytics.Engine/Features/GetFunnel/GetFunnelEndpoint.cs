@@ -2,7 +2,6 @@ namespace Nealytics.Engine.Features.GetFunnel;
 
 using System;
 using System.Linq;
-using System.Security.Claims;
 using System.Threading;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -10,6 +9,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Security;
 using Nealytics.Engine.Infrastructure.Query;
 
 public static class GetFunnelEndpoint
@@ -22,14 +22,21 @@ public static class GetFunnelEndpoint
             QueryColumns columns,
             MeasureRegistry measures,
             IOptions<TelemetryEngineOptions> options,
+            TenantAttributeRegistry tenantAttributes,
             CancellationToken cancellationToken) =>
         {
-            ClaimsPrincipal user = context.User;
+            ReadIdentity identity = ReadClaims.Resolve(context, tenantAttributes);
+
+            if (identity.Rejected)
+            {
+                return identity.Rejection();
+            }
+
             TelemetryEngineOptions engineOptions = options.Value;
 
             FunnelRequestResult parsed = FunnelRequestFactory.Create(
-                user.FindFirst("project_id")?.Value,
-                user.FindFirst("tenant_id")?.Value,
+                identity.ProjectId,
+                identity.TenantId,
                 context.Request.Query["step"].ToArray().Where(v => v is not null).Select(v => v!).ToArray(),
                 context.Request.Query["grain"].ToString(),
                 context.Request.Query["breakdownBy"].ToString(),
@@ -41,7 +48,9 @@ public static class GetFunnelEndpoint
                 measures,
                 engineOptions.MaxQueryLimit,
                 engineOptions.DefaultSessionQueryRangeHours,
-                DateTime.UtcNow);
+                DateTime.UtcNow,
+                identity.TenantSet,
+                engineOptions.AliasEventType);
 
             if (!parsed.Success)
             {
@@ -56,6 +65,7 @@ public static class GetFunnelEndpoint
         })
         .WithName("GetFunnel")
         .Produces<FunnelResponse>(StatusCodes.Status200OK)
-        .RequireAuthorization();
+        .RequireAuthorization()
+        .RequireReadScope("funnel");
     }
 }

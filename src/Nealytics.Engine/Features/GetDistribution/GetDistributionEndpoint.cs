@@ -2,13 +2,13 @@ namespace Nealytics.Engine.Features.GetDistribution;
 
 using System;
 using System.Linq;
-using System.Security.Claims;
 using System.Threading;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Security;
 using Nealytics.Engine.Infrastructure.Query;
 
 public static class GetDistributionEndpoint
@@ -21,14 +21,21 @@ public static class GetDistributionEndpoint
             QueryColumns columns,
             MeasureRegistry measures,
             IOptions<TelemetryEngineOptions> options,
+            TenantAttributeRegistry tenantAttributes,
             CancellationToken cancellationToken) =>
         {
-            ClaimsPrincipal user = context.User;
+            ReadIdentity identity = ReadClaims.Resolve(context, tenantAttributes);
+
+            if (identity.Rejected)
+            {
+                return identity.Rejection();
+            }
+
             TelemetryEngineOptions engineOptions = options.Value;
 
             DistributionRequestResult parsed = DistributionRequestFactory.Create(
-                user.FindFirst("project_id")?.Value,
-                user.FindFirst("tenant_id")?.Value,
+                identity.ProjectId,
+                identity.TenantId,
                 context.Request.Query["of"].ToString(),
                 context.Request.Query["eventType"].ToString(),
                 context.Request.Query["filter"].ToArray().Where(v => v is not null).Select(v => v!).ToArray(),
@@ -41,7 +48,8 @@ public static class GetDistributionEndpoint
                 columns,
                 measures,
                 engineOptions.DefaultSessionQueryRangeHours,
-                DateTime.UtcNow);
+                DateTime.UtcNow,
+                identity.TenantSet);
 
             if (!parsed.Success)
             {
@@ -55,6 +63,7 @@ public static class GetDistributionEndpoint
         })
         .WithName("GetDistribution")
         .Produces<DistributionResponse>(StatusCodes.Status200OK)
-        .RequireAuthorization();
+        .RequireAuthorization()
+        .RequireReadScope("distribution");
     }
 }

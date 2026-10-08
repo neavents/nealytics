@@ -53,12 +53,17 @@ public static class RollupPlanner
                 continue;
             }
 
+            if (!ServesScope(candidate, request.TenantId, request.TenantSet))
+            {
+                continue;
+            }
+
             if (!candidate.CoversEventType(request.EventType))
             {
                 continue;
             }
 
-            if (!candidate.CoversColumn(request.GroupByColumn))
+            if (!CoversGroup(candidate, request.GroupByColumn, request.TenantSet))
             {
                 continue;
             }
@@ -86,7 +91,7 @@ public static class RollupPlanner
                 continue;
             }
 
-            if (best is null || candidate.Dimensions.Count < best.Dimensions.Count)
+            if (best is null || Ranks(candidate, best))
             {
                 best = candidate;
                 valueExpression = expression;
@@ -106,6 +111,43 @@ public static class RollupPlanner
         };
     }
 
+    public static bool ServesScope(Rollup rollup, string? tenantId, TenantSet? set)
+    {
+        if (!rollup.IsGroupRollup)
+        {
+            return true;
+        }
+
+        return set is TenantSet members
+            && string.IsNullOrEmpty(tenantId)
+            && rollup.HoldsTenantAttribute(members.Attribute);
+    }
+
+    public static bool CoversGroup(Rollup rollup, string column, TenantSet? set)
+    {
+        if (rollup.CoversColumn(column))
+        {
+            return true;
+        }
+
+        if (string.Equals(column, "tenant_id", StringComparison.Ordinal) && set is null)
+        {
+            return false;
+        }
+
+        return rollup.CoversTenantColumn(column);
+    }
+
+    public static bool Ranks(Rollup candidate, Rollup best)
+    {
+        if (candidate.IsGroupRollup != best.IsGroupRollup)
+        {
+            return candidate.IsGroupRollup;
+        }
+
+        return candidate.Dimensions.Count < best.Dimensions.Count;
+    }
+
     private static string? ValueExpressionFor(in BreakdownRequest request, Rollup rollup)
     {
         switch (request.Metric)
@@ -120,19 +162,19 @@ public static class RollupPlanner
                 return "uniqExactMerge(users)";
 
             case BreakdownMetric.Measure:
-                if (request.MeasureColumn is null || request.MeasureFunction is null)
+                string? aggregation = request.MeasureAggregation ?? request.MeasureFunction;
+
+                if (request.MeasureColumn is null || aggregation is null)
                 {
                     return null;
                 }
 
-                if (!RollupRegistry.SupportedAggregations.Contains(request.MeasureFunction))
+                if (!RollupRegistry.SupportedAggregations.Contains(aggregation))
                 {
                     return null;
                 }
 
-                string? column = rollup.MeasureColumn(request.MeasureColumn, request.MeasureFunction);
-
-                return column is null ? null : $"{request.MeasureFunction}Merge({column})";
+                return rollup.MergeExpression(request.MeasureColumn, aggregation, null);
 
             default:
                 return null;

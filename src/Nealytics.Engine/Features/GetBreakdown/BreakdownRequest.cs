@@ -28,11 +28,14 @@ public readonly struct BreakdownRequest
 {
     public string ProjectId { get; init; }
     public string TenantId { get; init; }
+    public TenantSet? TenantSet { get; init; }
     public BreakdownMetric Metric { get; init; }
 
     public string? MeasureColumn { get; init; }
 
     public string? MeasureFunction { get; init; }
+
+    public string? MeasureAggregation { get; init; }
 
     public string MetricWire { get; init; }
 
@@ -53,6 +56,7 @@ public readonly struct BreakdownRequest
     {
         ProjectId = ProjectId,
         TenantId = TenantId,
+        TenantSet = TenantSet,
         From = From,
         To = To,
         TrafficClass = TrafficClass,

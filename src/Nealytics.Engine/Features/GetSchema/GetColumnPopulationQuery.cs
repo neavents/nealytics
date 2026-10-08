@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Storage;
 using Octonica.ClickHouseClient;
 
@@ -67,10 +68,23 @@ public sealed class GetColumnPopulationQuery
             + " AND timestamp >= {fromTimestamp:DateTime64}";
     }
 
-    public async Task<IReadOnlyDictionary<string, long>> ExecuteAsync(
-        string projectId, string tenantId, DateTime nowUtc, CancellationToken cancellationToken)
+    internal string BuildSql(TenantSet? set)
     {
-        string key = projectId + " " + tenantId;
+        string sql = BuildSql();
+
+        return set is null || sql.Length == 0
+            ? sql
+            : sql.Replace("tenant_id = {tenantId:String}", "tenant_id IN (" + ScopeClause.TenantMembers + ")", StringComparison.Ordinal);
+    }
+
+    public Task<IReadOnlyDictionary<string, long>> ExecuteAsync(
+        string projectId, string tenantId, DateTime nowUtc, CancellationToken cancellationToken) =>
+        ExecuteAsync(projectId, tenantId, null, nowUtc, cancellationToken);
+
+    public async Task<IReadOnlyDictionary<string, long>> ExecuteAsync(
+        string projectId, string tenantId, TenantSet? set, DateTime nowUtc, CancellationToken cancellationToken)
+    {
+        string key = projectId + " " + (set is TenantSet members ? "\0set " + members.Describe() : tenantId);
 
         if (_cache.TryGetValue(key, out (DateTime ExpiresAt, IReadOnlyDictionary<string, long> Counts) cached)
             && cached.ExpiresAt > nowUtc)
@@ -78,7 +92,7 @@ public sealed class GetColumnPopulationQuery
             return cached.Counts;
         }
 
-        string sql = BuildSql();
+        string sql = BuildSql(set);
         Dictionary<string, long> counts = new(StringComparer.Ordinal);
 
         if (sql.Length == 0)
@@ -94,6 +108,12 @@ public sealed class GetColumnPopulationQuery
         command.CommandText = sql;
         command.Parameters.Add(new ClickHouseParameter { ParameterName = "projectId", Value = projectId });
         command.Parameters.Add(new ClickHouseParameter { ParameterName = "tenantId", Value = tenantId });
+
+        if (set is TenantSet scoped)
+        {
+            command.Parameters.Add(new ClickHouseParameter { ParameterName = "tenantSetAttribute", Value = scoped.Attribute });
+            command.Parameters.Add(new ClickHouseParameter { ParameterName = "tenantSetValue", Value = scoped.Value });
+        }
         command.Parameters.Add(new ClickHouseParameter
         {
             ParameterName = "fromTimestamp",

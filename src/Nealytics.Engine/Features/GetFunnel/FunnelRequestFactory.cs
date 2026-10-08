@@ -53,9 +53,11 @@ public static class FunnelRequestFactory
         MeasureRegistry measures,
         int maxLimit,
         int defaultRangeHours,
-        DateTime nowUtc)
+        DateTime nowUtc,
+        TenantSet? tenantSet = null,
+        string? aliasEventType = null)
     {
-        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(tenantId))
+        if (string.IsNullOrWhiteSpace(projectId) || (string.IsNullOrWhiteSpace(tenantId) && tenantSet is null))
         {
             return FunnelRequestResult.Fail(StatusForbidden, null);
         }
@@ -139,9 +141,23 @@ public static class FunnelRequestFactory
                 case "users":
                     grain = FunnelGrain.Users;
                     break;
+                case "identities":
+                    if (string.IsNullOrEmpty(aliasEventType))
+                    {
+                        return FunnelRequestResult.Fail(
+                            StatusBadRequest,
+                            "'grain=identities' needs identity stitching, which is off: "
+                            + "TelemetryEngine:AliasEventType is not set.");
+                    }
+
+                    grain = FunnelGrain.Identities;
+                    break;
                 default:
                     return FunnelRequestResult.Fail(
-                        StatusBadRequest, "'grain' must be one of: sessions, users.");
+                        StatusBadRequest,
+                        string.IsNullOrEmpty(aliasEventType)
+                            ? "'grain' must be one of: sessions, users."
+                            : "'grain' must be one of: sessions, users, identities.");
             }
         }
 
@@ -216,9 +232,11 @@ public static class FunnelRequestFactory
         return FunnelRequestResult.Ok(new FunnelRequest
         {
             ProjectId = projectId,
-            TenantId = tenantId,
+            TenantId = tenantId ?? string.Empty,
+            TenantSet = tenantSet,
             Steps = steps,
             Grain = grain,
+            AliasEventType = grain == FunnelGrain.Identities ? aliasEventType : null,
             BreakdownColumn = breakdownColumn,
             WindowSeconds = windowSeconds,
             From = fromUtc,

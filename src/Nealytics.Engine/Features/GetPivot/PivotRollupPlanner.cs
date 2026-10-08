@@ -30,7 +30,8 @@ public static class PivotRollupPlanner
         {
             if (candidate.Grain == RollupGrain.Session
                 || !RollupPlanner.IsAligned(request.From, request.To, candidate.Grain)
-                || !candidate.CoversColumn(request.GroupByColumn)
+                || !RollupPlanner.ServesScope(candidate, request.TenantId, request.TenantSet)
+                || !RollupPlanner.CoversGroup(candidate, request.GroupByColumn, request.TenantSet)
                 || !FiltersCovered(request.Filters, candidate))
             {
                 continue;
@@ -43,7 +44,7 @@ public static class PivotRollupPlanner
                 continue;
             }
 
-            if (best is null || candidate.Dimensions.Count < best.Dimensions.Count)
+            if (best is null || RollupPlanner.Ranks(candidate, best))
             {
                 best = candidate;
                 bestColumns = columns;
@@ -102,7 +103,9 @@ public static class PivotRollupPlanner
                         return null;
                     }
 
-                    columns.Add(stored);
+                    columns.Add(RollupRegistry.IsQuantile(metric.CanonicalAggregation)
+                        ? metric.CanonicalAggregation.ToLowerInvariant() + ":" + stored
+                        : stored);
                     break;
                 default:
                     return null;
