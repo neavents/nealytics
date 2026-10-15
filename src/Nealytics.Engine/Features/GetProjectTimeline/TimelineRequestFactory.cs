@@ -64,7 +64,7 @@ public static class TimelineRequestFactory
 
         DateTime? cursor = null;
         if (!string.IsNullOrEmpty(beforeRaw)
-            && DateTime.TryParse(beforeRaw, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTime parsedCursor))
+            && DateTime.TryParse(beforeRaw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTime parsedCursor))
         {
             cursor = parsedCursor;
         }

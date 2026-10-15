@@ -35,6 +35,9 @@ public static class TelemetryInsertMath
 
     public static DateTimeOffset ToClickHouseTimestamp(DateTime timestamp)
     {
-        return new DateTimeOffset(DateTime.SpecifyKind(timestamp, DateTimeKind.Utc), TimeSpan.Zero);
+        DateTime utc = timestamp.Kind == DateTimeKind.Local
+            ? timestamp.ToUniversalTime()
+            : DateTime.SpecifyKind(timestamp, DateTimeKind.Utc);
+        return new DateTimeOffset(utc, TimeSpan.Zero);
     }
 }

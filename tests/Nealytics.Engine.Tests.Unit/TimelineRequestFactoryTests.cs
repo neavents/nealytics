@@ -70,6 +70,17 @@ public class TimelineRequestFactoryTests
             .Should().Be(new DateTime(2026, 5, 1, 8, 0, 0, DateTimeKind.Utc));
     }
 
+    [Theory]
+    [InlineData("2026-05-01T11:00:00+03:00")]
+    [InlineData("2026-05-01T08:00:00")]
+    public void Create_BeforeCursorWithAnOffsetOrNone_IsTheUtcInstant(string before)
+    {
+        TimelineRequestResult result = Create(before: before);
+
+        result.Request.Before!.Value.Kind.Should().Be(DateTimeKind.Utc);
+        result.Request.Before!.Value.Should().Be(new DateTime(2026, 5, 1, 8, 0, 0, DateTimeKind.Utc));
+    }
+
     [Fact]
     public void Create_InvalidBeforeCursor_IsIgnored()
     {

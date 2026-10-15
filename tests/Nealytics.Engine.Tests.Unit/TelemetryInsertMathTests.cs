@@ -72,12 +72,33 @@ public class TelemetryInsertMathTests
     }
 
     [Fact]
-    public void ToClickHouseTimestamp_PreservesWallClock_RegardlessOfInputKind()
+    public void ToClickHouseTimestamp_KeepsAUtcInstantAsItIs()
     {
         DateTime asUtc = new DateTime(2026, 3, 1, 9, 30, 0, DateTimeKind.Utc);
-        DateTime asLocal = DateTime.SpecifyKind(asUtc, DateTimeKind.Local);
 
-        TelemetryInsertMath.ToClickHouseTimestamp(asUtc).UtcDateTime
-            .Should().Be(TelemetryInsertMath.ToClickHouseTimestamp(asLocal).UtcDateTime);
+        TelemetryInsertMath.ToClickHouseTimestamp(asUtc).UtcDateTime.Should().Be(asUtc);
+    }
+
+    [Theory]
+    [InlineData("2026-03-01T09:30:00+03:00", "2026-03-01T06:30:00Z")]
+    [InlineData("2026-03-01T01:30:00-05:00", "2026-03-01T06:30:00Z")]
+    [InlineData("2026-10-25T03:30:00+03:00", "2026-10-25T00:30:00Z")]
+    public void ToClickHouseTimestamp_StoresTheInstantOfALocalTime_WhateverTheHostZone(string sent, string stored)
+    {
+        DateTime local = DateTimeOffset.Parse(sent, System.Globalization.CultureInfo.InvariantCulture).LocalDateTime;
+
+        TelemetryInsertMath.ToClickHouseTimestamp(local).Should()
+            .Be(DateTimeOffset.Parse(stored, System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public void ToClickHouseTimestamp_StoresTheInstantAPayloadWasSentWithAnOffset()
+    {
+        Nealytics.Engine.Infrastructure.Serialization.GlobalTelemetryPayload payload = System.Text.Json.JsonSerializer.Deserialize(
+            "{\"timestamp\":\"2026-03-01T09:30:00+03:00\"}",
+            Nealytics.Engine.Infrastructure.Serialization.TelemetryAotContext.Default.GlobalTelemetryPayload)!;
+
+        TelemetryInsertMath.ToClickHouseTimestamp(payload.Timestamp).UtcDateTime
+            .Should().Be(new DateTime(2026, 3, 1, 6, 30, 0, DateTimeKind.Utc));
     }
 }

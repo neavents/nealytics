@@ -72,6 +72,27 @@ public class PivotAndDistributionIntegrationTests : IntegrationTestBase, IAsyncL
     }
 
     [Fact]
+    public async Task AnEventSentWithAnOffset_IsStoredAtItsInstant_WhateverTheEnginesZone()
+    {
+        string tenant = $"t-{Guid.NewGuid():N}";
+        DateTime instant = DateTime.UtcNow.Date.AddDays(-2).AddHours(9);
+        string sent = new DateTimeOffset(instant).ToOffset(TimeSpan.FromHours(3)).ToString("yyyy-MM-ddTHH:mm:ss.fffzzz", System.Globalization.CultureInfo.InvariantCulture);
+        var payload = new { projectId = Project, tenantId = tenant, sessionId = "s1", eventType = "offset", timestamp = sent, metadataJson = "{}" };
+
+        (await Client.PostAsJsonAsync("/api/v1/telemetry/track?k=test-key-1", payload)).StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        string all = $"/api/v1/analytics/pivot?groupBy=event_type&metric=events{Range}";
+        for (int attempt = 0; attempt < 100 && (await Get(tenant, all)).GetProperty("rows").GetArrayLength() == 0; attempt++)
+        {
+            await Task.Delay(100);
+        }
+
+        string window = $"&from={instant.AddSeconds(-1):yyyy-MM-ddTHH:mm:ssZ}&to={instant.AddSeconds(1):yyyy-MM-ddTHH:mm:ssZ}";
+        JsonElement pivot = await Get(tenant, $"/api/v1/analytics/pivot?groupBy=event_type&metric=events{window}");
+        pivot.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("key").GetString()).Should().Equal("offset");
+    }
+
+    [Fact]
     public async Task Pivot_AnswersSeveralScopedMetricsPerKeyInOneRead()
     {
         string tenant = await SeedAsync();
