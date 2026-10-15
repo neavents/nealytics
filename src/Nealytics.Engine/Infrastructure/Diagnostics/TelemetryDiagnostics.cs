@@ -33,6 +33,9 @@ public static class TelemetryDiagnostics
     public static readonly Counter<long> EventsRejected =
         EngineMeter.CreateCounter<long>("nealytics_events_rejected_total");
 
+    public static readonly Counter<long> ReadsRefusedStorageUnavailable =
+        EngineMeter.CreateCounter<long>("nealytics_reads_storage_unavailable_total");
+
     public static readonly Histogram<double> StorageWriteDuration =
         EngineMeter.CreateHistogram<double>("nealytics_storage_write_duration_seconds");
 

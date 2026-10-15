@@ -85,6 +85,20 @@ public sealed class ClickHouseConnectionFactory : IAsyncDisposable
         }
     }
 
+    public int EvictIdle()
+    {
+        int evicted = 0;
+
+        while (_idleConnections.TryDequeue(out IdleConnection idle))
+        {
+            Interlocked.Decrement(ref _totalCreated);
+            idle.Connection.Dispose();
+            evicted++;
+        }
+
+        return evicted;
+    }
+
     internal void Evict(ClickHouseConnection connection)
     {
         try

@@ -275,6 +275,7 @@ if (engineOpts.EnableRequestDecompression)
 }
 
 app.UseCors();
+app.UseMiddleware<StorageUnavailableMiddleware>();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
