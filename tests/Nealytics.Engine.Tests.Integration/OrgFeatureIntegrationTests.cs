@@ -397,7 +397,7 @@ public class OrgFeatureIntegrationTests : IAsyncLifetime
 
         response.GroupCount.Should().Be(inSet);
         response.Rows.Should().HaveCount(inSet);
-        stopwatch.ElapsedMilliseconds.Should().BeLessThan(1500, "the plan's budget for an org-wide question over 1,000 venues is 1.5 s");
+        stopwatch.ElapsedMilliseconds.Should().BeLessThan(1500, "a question over a set of 1,000 tenants answers within 1.5 s");
 
         await using ClickHouseConnection connection = new(ClickHouseTestSupport.ConnectionString);
         await connection.OpenAsync();
