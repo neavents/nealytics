@@ -105,4 +105,29 @@ public class UnitSafetyTests
         Action act = () => new MeasureRegistry(options, new DimensionRegistry(options));
         act.Should().Throw<InvalidOperationException>().WithMessage("*UnitDimension 'currency_code'*");
     }
+
+    private static PivotRequestResult PivotOf(string groupBy, string[] metrics, params string[] filters)
+    {
+        (QueryColumns columns, MeasureRegistry measures) = Registries();
+        return PivotRequestFactory.Create(
+            "p", "t", groupBy, metrics, filters, null, null, null, null, null, null, null, null, columns, measures, 100, 24, Now);
+    }
+
+    [Fact]
+    public void APivotByTheUnit_MarksEachUnitBearingMetricAsPerUnit()
+    {
+        PivotRequestResult result = PivotOf("currency", ["sum(amount)", "avg(amount)", "count(amount)", "events", "sum(dwell_ms)"]);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Request.Metrics.Select(m => m.PerUnit).Should().Equal(true, true, false, false, false);
+    }
+
+    [Fact]
+    public void APivotFilteredToOneUnit_AddsUpAsItAlwaysDid()
+    {
+        PivotRequestResult result = PivotOf("currency", ["sum(amount)"], "currency:EUR");
+
+        result.Request.Metrics.Single().PerUnit.Should().BeFalse();
+    }
 }
+

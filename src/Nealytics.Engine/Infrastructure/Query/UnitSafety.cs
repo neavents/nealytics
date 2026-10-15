@@ -6,6 +6,39 @@ using Nealytics.Engine.Infrastructure.Configuration;
 
 public static class UnitSafety
 {
+    public static bool SplitsByUnit(
+        Measure measure, string aggregation, string? groupByColumn, IReadOnlyList<QueryFilter>? filters)
+    {
+        ArgumentNullException.ThrowIfNull(measure);
+
+        string? unit = measure.UnitDimension;
+
+        return unit is not null
+            && !string.Equals(aggregation, "count", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(groupByColumn, unit, StringComparison.Ordinal)
+            && !FiltersOneUnit(unit, filters);
+    }
+
+    private static bool FiltersOneUnit(string unit, IReadOnlyList<QueryFilter>? filters)
+    {
+        if (filters is null)
+        {
+            return false;
+        }
+
+        foreach (QueryFilter filter in filters)
+        {
+            if (!filter.IsMeasure
+                && filter.Comparison == FilterComparison.Equal
+                && string.Equals(filter.Column, unit, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static string? Violation(
         Measure measure, string aggregation, string? groupByColumn, IReadOnlyList<QueryFilter>? filters)
     {
@@ -23,17 +56,9 @@ public static class UnitSafety
             return null;
         }
 
-        if (filters is not null)
+        if (FiltersOneUnit(unit, filters))
         {
-            foreach (QueryFilter filter in filters)
-            {
-                if (!filter.IsMeasure
-                    && filter.Comparison == FilterComparison.Equal
-                    && string.Equals(filter.Column, unit, StringComparison.Ordinal))
-                {
-                    return null;
-                }
-            }
+            return null;
         }
 
         return $"'{measure.Name}' is measured in units of '{unit}', so {aggregation}({measure.Name}) across "

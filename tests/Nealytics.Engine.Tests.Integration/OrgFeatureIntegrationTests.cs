@@ -222,6 +222,60 @@ public class OrgFeatureIntegrationTests : IAsyncLifetime
         routedPivot.Totals[1].Should().Be(40, "the other org's tenant is not in the set");
     }
 
+    private PivotRequest SalesPivot(DateTime from, IReadOnlyList<QueryFilter> filters) => new()
+    {
+        ProjectId = _project,
+        TenantId = string.Empty,
+        TenantSet = Org,
+        GroupByColumn = Currency,
+        Metrics =
+        [
+            new PivotMetric { Kind = PivotMetricKind.Measure, Wire = $"sum({Amount}):sale", Column = Amount, AggregationName = "sum", CanonicalAggregation = "sum", EventType = "sale", PerUnit = true },
+            new PivotMetric { Kind = PivotMetricKind.Events, Wire = "events:sale", EventType = "sale" },
+        ],
+        Filters = filters,
+        TrafficClass = "normal",
+        From = from,
+        To = To,
+        Limit = 10,
+        OrderByKey = true,
+    };
+
+    [Fact]
+    public async Task APivotByCurrency_AddsNoMoneyAcrossCurrencies_AndSlicesBySetMembers()
+    {
+        await AssignAsync(("a1", _org, "west"), ("a2", _org, "east"), ("b1", "other-org", "west"));
+        await InsertAsync(
+            Row("a1", "s1", "sale", At(Day, 10), "TRY", "10"),
+            Row("a1", "s2", "sale", At(Day, 11), "EUR", "3"),
+            Row("a2", "s3", "sale", At(Day, 12), "TRY", "20"),
+            Row("b1", "s4", "sale", At(Day, 13), "TRY", "1000"));
+        GetPivotQuery query = new(_connections, _rollups, NullLogger<GetPivotQuery>.Instance);
+
+        foreach (DateTime from in new[] { From, From.AddSeconds(1) })
+        {
+            PivotResponse both = await query.ExecuteAsync(SalesPivot(from, []), CancellationToken.None);
+            both.Rows.Select(r => (r.Key, r.Values[0])).Should().Equal(("EUR", 3d), ("TRY", 30d));
+            both.Totals[0].Should().BeNull("3 EUR and 30 TRY add up to nothing");
+            both.Totals[1].Should().Be(3);
+
+            PivotResponse west = await query.ExecuteAsync(
+                SalesPivot(from, [QueryFilter.Equals("tenant.region", "west")]), CancellationToken.None);
+            west.Rows.Select(r => (r.Key, r.Values[0])).Should().Equal(("EUR", 3d), ("TRY", 10d));
+
+            PivotResponse westTry = await query.ExecuteAsync(
+                SalesPivot(from, [QueryFilter.Equals("tenant.region", "west"), QueryFilter.Equals(Currency, "TRY")]), CancellationToken.None);
+            westTry.Rows.Should().ContainSingle();
+            westTry.Totals[0].Should().Be(10, "one currency is one currency, whether filtered or the only one sold");
+        }
+
+        PivotResponse routed = await query.ExecuteAsync(
+            SalesPivot(From, [QueryFilter.Equals("tenant.region", "east")]), CancellationToken.None);
+        routed.Source.Should().Be("rollup:" + _rollup);
+        routed.Rows.Select(r => (r.Key, r.Values[0])).Should().Equal(("TRY", 20d));
+        routed.Totals[0].Should().Be(20);
+    }
+
     [Fact]
     public async Task RetentionCountsReturningUsersPerWeek()
     {

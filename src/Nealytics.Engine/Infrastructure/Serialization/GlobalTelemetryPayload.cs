@@ -93,6 +93,7 @@ public sealed class GlobalTelemetryPayload
 [JsonSerializable(typeof(PivotMetricDescriptor))]
 [JsonSerializable(typeof(List<PivotMetricDescriptor>))]
 [JsonSerializable(typeof(double[]))]
+[JsonSerializable(typeof(double?[]))]
 [JsonSerializable(typeof(DistributionResponse))]
 [JsonSerializable(typeof(DistributionQuantile))]
 [JsonSerializable(typeof(List<DistributionQuantile>))]

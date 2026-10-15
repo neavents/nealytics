@@ -232,6 +232,13 @@ public sealed partial class GetPivotQuery
                 rows.Add(new PivotRow { Key = reader.IsDBNull(0) ? string.Empty : reader.GetString(0), Values = values });
             }
 
+            double?[] reported = new double?[metricCount];
+
+            for (int i = 0; i < metricCount; i++)
+            {
+                reported[i] = request.Metrics[i].PerUnit && groupCount > 1 ? null : totals[i];
+            }
+
             bool truncated = groupCount > rows.Count;
             activity?.SetTag("nealytics.records_returned", rows.Count);
             activity?.SetTag("nealytics.truncated", truncated);
@@ -251,7 +258,7 @@ public sealed partial class GetPivotQuery
                 From = request.From,
                 To = request.To,
                 Source = plan is PivotRollupPlan used ? "rollup:" + used.Rollup.Name : "raw",
-                Totals = totals,
+                Totals = reported,
                 GroupCount = groupCount,
                 Truncated = truncated,
                 Rows = rows,

@@ -112,13 +112,23 @@ public static class PivotRequestFactory
                 StatusBadRequest, FilterRejection.Message(parsedFilters, columns, measures, MaxFieldLength));
         }
 
-        foreach (PivotMetric metric in metrics)
+        for (int i = 0; i < metrics.Count; i++)
         {
-            if (metric.Kind == PivotMetricKind.Measure
-                && measures.Find(metric.Column!) is Measure declared
-                && UnitSafety.Violation(declared, metric.CanonicalAggregation!, groupBy, parsedFilters.Filters) is string unitError)
+            PivotMetric metric = metrics[i];
+
+            if (metric.Kind != PivotMetricKind.Measure || measures.Find(metric.Column!) is not Measure declared)
+            {
+                continue;
+            }
+
+            if (UnitSafety.Violation(declared, metric.CanonicalAggregation!, groupBy, parsedFilters.Filters) is string unitError)
             {
                 return PivotRequestResult.Fail(StatusBadRequest, unitError);
+            }
+
+            if (UnitSafety.SplitsByUnit(declared, metric.CanonicalAggregation!, groupBy, parsedFilters.Filters))
+            {
+                metrics[i] = metric with { PerUnit = true };
             }
         }
 

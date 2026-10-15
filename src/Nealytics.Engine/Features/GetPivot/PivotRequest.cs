@@ -22,6 +22,7 @@ public readonly struct PivotMetric
     public string? AggregationName { get; init; }
     public string? AggregationParameters { get; init; }
     public string? CanonicalAggregation { get; init; }
+    public bool PerUnit { get; init; }
 
     public string Grain => Kind switch
     {
@@ -82,7 +83,7 @@ public sealed class PivotResponse
     public DateTime From { get; init; }
     public DateTime To { get; init; }
     public string Source { get; init; } = "raw";
-    public double[] Totals { get; init; } = [];
+    public double?[] Totals { get; init; } = [];
     public long GroupCount { get; init; }
     public bool Truncated { get; init; }
     public IReadOnlyList<PivotRow> Rows { get; init; } = Array.Empty<PivotRow>();
