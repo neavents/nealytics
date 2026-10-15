@@ -203,4 +203,25 @@ public class RollupBackfillIntegrationTests : IAsyncLifetime
         raw.Rows.Should().ContainSingle().Which.Values.Should().Equal(4, 1, 3);
         routed.Totals.Should().Equal(raw.Totals);
     }
+
+    [Fact]
+    public async Task ASessionRollupBackfilledInSlicesHoldsEverySessionOnce()
+    {
+        await SeedAsync();
+        RollupOptions declaration = new() { Name = _name, Grain = "session", EventTypes = "", Dimensions = "", Measures = "" };
+        TelemetryEngineOptions options = Options(declaration);
+        options.BackfillSessionsPerSlice = 1;
+        (ClickHouseSchemaMigrator migrator, RollupRegistry registry, _) = Build(options);
+
+        await migrator.StartAsync(CancellationToken.None);
+
+        registry.IsRoutable(registry.Declared[0]).Should().BeTrue();
+        string table = $"nealytics_core.rollup_{_name}";
+        (await ScalarAsync($"SELECT count() FROM (SELECT session_id, event_date FROM {table} WHERE tenant_id = '{_tenant}' GROUP BY session_id, event_date)"))
+            .Should().Be(6, "s1, s2 on two days, s3 and the bot on two days are one row per session day");
+        (await ScalarAsync($"SELECT countMerge(events) FROM {table} WHERE tenant_id = '{_tenant}'"))
+            .Should().Be(7, "no session was left out of a slice or written by two");
+        (await ScalarAsync($"SELECT count() FROM {table} WHERE tenant_id = '{_tenant}'"))
+            .Should().Be(6, "each session day was written by exactly one slice");
+    }
 }

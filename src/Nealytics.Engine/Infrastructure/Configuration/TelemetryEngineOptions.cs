@@ -117,6 +117,8 @@ public sealed class TelemetryEngineOptions
 
     public bool BackfillRollups { get; set; } = true;
 
+    public int BackfillSessionsPerSlice { get; set; } = 50_000;
+
     public List<EventTypeRetentionOptions> EventTypeRetention { get; set; } = [];
 
     public List<ProjectKeyOptions> Projects { get; set; } = [];

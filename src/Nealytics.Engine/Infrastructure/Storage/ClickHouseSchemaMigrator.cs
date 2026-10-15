@@ -63,6 +63,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
     private readonly MeasureRegistry _measures;
     private readonly RollupRegistry _rollups;
     private readonly bool _backfillRollups;
+    private readonly int _backfillSessionsPerSlice;
     private readonly int _retentionDays;
     private readonly List<EventTypeRetentionOptions> _eventTypeRetention;
     private readonly ILogger<ClickHouseSchemaMigrator> _logger;
@@ -86,6 +87,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         _rollups = rollups;
         _retentionDays = options.Value.RetentionDays;
         _backfillRollups = options.Value.BackfillRollups;
+        _backfillSessionsPerSlice = options.Value.BackfillSessionsPerSlice;
         _eventTypeRetention = options.Value.EventTypeRetention ?? [];
         ValidateEventTypeRetention(_retentionDays, _eventTypeRetention);
         _logger = logger;
@@ -396,7 +398,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
                     continue;
                 }
 
-                int partitions = await BackfillRollupAsync(pooled, rollup, cancellationToken).ConfigureAwait(false);
+                int partitions = await BackfillRollupAsync(pooled, rollup, _backfillSessionsPerSlice, cancellationToken).ConfigureAwait(false);
                 LogRollupCreated(_logger, rollup.Name, Database, rollup.TableName, partitions);
                 _rollups.MarkRoutable(rollup);
                 continue;
@@ -430,15 +432,23 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
     }
 
     private static async Task<int> BackfillRollupAsync(
-        PooledClickHouseConnection pooled, Rollup rollup, CancellationToken cancellationToken)
+        PooledClickHouseConnection pooled, Rollup rollup, int sessionsPerSlice, CancellationToken cancellationToken)
     {
         List<string> partitions = await ReadSourcePartitionsAsync(pooled, cancellationToken).ConfigureAwait(false);
 
         foreach (string partition in partitions)
         {
             string? scope = RollupRegistry.IsPartitionId(partition) ? partition : null;
-            await ExecuteAsync(pooled, RollupRegistry.BuildBackfillSql(rollup, scope), cancellationToken)
-                .ConfigureAwait(false);
+            int slices = rollup.Grain == RollupGrain.Session
+                ? RollupRegistry.BackfillSlices(
+                    await CountSessionsAsync(pooled, scope, cancellationToken).ConfigureAwait(false), sessionsPerSlice)
+                : 1;
+
+            for (int slice = 0; slice < slices; slice++)
+            {
+                await ExecuteAsync(pooled, RollupRegistry.BuildBackfillSql(rollup, scope, slice, slices), cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             if (scope is null)
             {
@@ -447,6 +457,27 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         }
 
         return partitions.Count;
+    }
+
+    private static async Task<long> CountSessionsAsync(
+        PooledClickHouseConnection pooled, string? partition, CancellationToken cancellationToken)
+    {
+        await using ClickHouseCommand command = pooled.Connection.CreateCommand(
+            partition is null
+                ? "SELECT uniq(session_id) FROM " + Database + "." + Table
+                : "SELECT uniq(session_id) FROM " + Database + "." + Table + " WHERE toYYYYMM(timestamp) = {partition:UInt32}");
+
+        if (partition is not null)
+        {
+            command.Parameters.Add(new ClickHouseParameter
+            {
+                ParameterName = "partition",
+                Value = uint.Parse(partition, System.Globalization.CultureInfo.InvariantCulture),
+            });
+        }
+
+        object? raw = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return Convert.ToInt64(raw, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static async Task<List<string>> ReadSourcePartitionsAsync(

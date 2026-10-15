@@ -535,7 +535,10 @@ public sealed class RollupRegistry
         return sql.ToString();
     }
 
-    private static void AppendSessionSelect(StringBuilder sql, Rollup rollup, string? partition)
+    private static void AppendSessionSelect(StringBuilder sql, Rollup rollup, string? partition) =>
+        AppendSessionSelect(sql, rollup, partition, 0, 1);
+
+    private static void AppendSessionSelect(StringBuilder sql, Rollup rollup, string? partition, int slice, int slices)
     {
         sql.Append("SELECT project_id, tenant_id, toDate(timestamp) AS event_date, session_id, ").Append(TrafficColumn);
 
@@ -554,6 +557,14 @@ public sealed class RollupRegistry
         AppendMeasureStates(sql, rollup, string.Empty);
 
         AppendSourceAndScope(sql, rollup, partition);
+
+        if (slices > 1)
+        {
+            sql.Append(partition is null && rollup.EventTypes.Count == 0 ? " WHERE " : " AND ")
+                .Append("cityHash64(session_id) % ").Append(slices.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                .Append(" = ").Append(slice.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
         sql.Append(" GROUP BY project_id, tenant_id, event_date, session_id, ").Append(TrafficColumn);
 
         foreach (RollupColumn dimension in rollup.Dimensions)
@@ -692,7 +703,15 @@ public sealed class RollupRegistry
         }
     }
 
-    public static string BuildBackfillSql(Rollup rollup, string? partition)
+    public static string BuildBackfillSql(Rollup rollup, string? partition) =>
+        BuildBackfillSql(rollup, partition, 0, 1);
+
+    public static int BackfillSlices(long sessions, int sessionsPerSlice) =>
+        sessionsPerSlice <= 0 || sessions <= sessionsPerSlice
+            ? 1
+            : (int)Math.Min(4096, (sessions + sessionsPerSlice - 1) / sessionsPerSlice);
+
+    public static string BuildBackfillSql(Rollup rollup, string? partition, int slice, int slices)
     {
         ArgumentNullException.ThrowIfNull(rollup);
 
@@ -701,12 +720,17 @@ public sealed class RollupRegistry
             throw new ArgumentException($"'{partition}' is not a toYYYYMM partition id.", nameof(partition));
         }
 
+        if (slices < 1 || slice < 0 || slice >= slices || (slices > 1 && !IsSessionGrain(rollup)))
+        {
+            throw new ArgumentOutOfRangeException(nameof(slice), "A backfill slice is one of 1..slices of a session rollup.");
+        }
+
         StringBuilder sql = new(768);
         sql.Append("INSERT INTO ").Append(Database).Append('.').Append(rollup.TableName).Append(' ');
 
         if (IsSessionGrain(rollup))
         {
-            AppendSessionSelect(sql, rollup, partition);
+            AppendSessionSelect(sql, rollup, partition, slice, slices);
         }
         else
         {

@@ -192,6 +192,69 @@ public class SessionRollupTests
         ddl.Should().Contain("PARTITION BY toYYYYMM(bucket)");
         RollupRegistry.BuildViewDdl(daily).Should().Contain("toStartOfDay(timestamp) AS bucket");
     }
+
+    [Theory]
+    [InlineData(0, 50_000, 1)]
+    [InlineData(50_000, 50_000, 1)]
+    [InlineData(50_001, 50_000, 2)]
+    [InlineData(1_300_000, 50_000, 26)]
+    [InlineData(1_300_000, 0, 1)]
+    [InlineData(long.MaxValue, 1, 4096)]
+    public void ASessionBackfillIsCutIntoSlicesOfBoundedSessions(long sessions, int perSlice, int expected)
+    {
+        RollupRegistry.BackfillSlices(sessions, perSlice).Should().Be(expected);
+    }
+
+    [Fact]
+    public void ASlicedBackfillTakesOneHashBucketOfSessionsInsideThePartition()
+    {
+        string sql = RollupRegistry.BuildBackfillSql(Sessions(), "202609", 2, 4);
+
+        sql.Should().Contain("WHERE toYYYYMM(timestamp) = 202609 AND cityHash64(session_id) % 4 = 2 GROUP BY");
+    }
+
+    [Fact]
+    public void ASlicedBackfillOfAnUnpartitionedTableOpensTheWhereClause()
+    {
+        string sql = RollupRegistry.BuildBackfillSql(Sessions(), null, 0, 3);
+
+        sql.Should().Contain("FROM nealytics_core.global_events WHERE cityHash64(session_id) % 3 = 0 GROUP BY");
+    }
+
+    [Fact]
+    public void ASingleSliceIsTheWholePartition()
+    {
+        RollupRegistry.BuildBackfillSql(Sessions(), "202609", 0, 1)
+            .Should().Be(RollupRegistry.BuildBackfillSql(Sessions(), "202609"))
+            .And.NotContain("cityHash64");
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(4, 4)]
+    [InlineData(-1, 4)]
+    public void ASliceOutsideItsRangeIsRefused(int slice, int slices)
+    {
+        Action act = () => RollupRegistry.BuildBackfillSql(Sessions(), "202609", slice, slices);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void OnlyASessionRollupIsSliced()
+    {
+        TelemetryEngineOptions options = new()
+        {
+            Rollups = [new RollupOptions { Name = "daily", Grain = "day" }],
+        };
+        DimensionRegistry dimensions = new(options);
+        Rollup daily = new RollupRegistry(options, dimensions, new MeasureRegistry(options, dimensions)).Declared[0];
+
+        Action act = () => RollupRegistry.BuildBackfillSql(daily, "202609", 0, 2);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+        RollupRegistry.BuildBackfillSql(daily, "202609", 0, 1).Should().NotContain("cityHash64");
+    }
 }
 
 /// <summary>
