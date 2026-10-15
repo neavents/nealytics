@@ -58,7 +58,7 @@ public static class PivotRollupPlanner
     {
         foreach (QueryFilter filter in filters)
         {
-            if (!rollup.CoversColumn(filter.Column))
+            if (!rollup.CoversFilter(filter.Column))
             {
                 return false;
             }

@@ -18,8 +18,8 @@ public static class FilterRejection
                     + $"=, !=, <, <=, >, >=. Got '{result.Offender}'.";
             case FilterParser.Outcome.UnknownColumn:
                 return measures is null || measures.Active.Count == 0
-                    ? columns.RejectionMessage("filter", result.Column)
-                    : columns.RejectionMessage("filter", result.Column)
+                    ? columns.GroupByRejectionMessage("filter", result.Column)
+                    : columns.GroupByRejectionMessage("filter", result.Column)
                         + $" Declared measures, for a comparison filter: "
                         + $"{string.Join(", ", measures.Active.Select(m => m.Name).Order(StringComparer.Ordinal))}.";
             case FilterParser.Outcome.ValueTooLong:

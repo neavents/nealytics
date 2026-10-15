@@ -43,6 +43,9 @@ public sealed record Rollup(
         || string.Equals(column, RollupRegistry.TrafficColumn, StringComparison.Ordinal)
         || Dimensions.Any(dimension => string.Equals(dimension.Name, column, StringComparison.Ordinal));
 
+    public bool CoversFilter(string column) =>
+        TenantAttributeRegistry.IsGroupColumn(column) ? CoversTenantColumn(column) : CoversColumn(column);
+
     public bool CoversTenantColumn(string column)
     {
         if (string.Equals(column, "tenant_id", StringComparison.Ordinal))

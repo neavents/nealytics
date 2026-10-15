@@ -72,7 +72,7 @@ public static class RollupPlanner
 
             foreach (QueryFilter filter in request.Filters)
             {
-                if (filter.IsMeasure || !candidate.CoversColumn(filter.Column))
+                if (filter.IsMeasure || !candidate.CoversFilter(filter.Column))
                 {
                     filtersCovered = false;
                     break;

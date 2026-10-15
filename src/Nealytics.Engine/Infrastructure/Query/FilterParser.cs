@@ -59,7 +59,7 @@ public static class FilterParser
                 string name = entry[..separator];
                 string value = entry[(separator + 1)..];
 
-                if (!columns.TryResolve(name, out string column))
+                if (!columns.TryResolveGroupBy(name, out string column))
                 {
                     return Fail(Outcome.UnknownColumn, entry, name);
                 }

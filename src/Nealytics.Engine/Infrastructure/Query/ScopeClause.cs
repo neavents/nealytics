@@ -59,6 +59,12 @@ public static class ScopeClause
                 ? double.Parse(filter.Value, NumberStyles.Float, CultureInfo.InvariantCulture)
                 : filter.Value;
             parameters.Add(new KeyValuePair<string, object?>(FilterParameter(i), value));
+
+            if (TenantAttributeRegistry.IsGroupColumn(filter.Column))
+            {
+                parameters.Add(new KeyValuePair<string, object?>(
+                    FilterAttributeParameter(i), TenantAttributeRegistry.AttributeOf(filter.Column)));
+            }
         }
 
         return parameters;
@@ -118,7 +124,7 @@ public static class ScopeClause
             sql.Append(" AND event_type = {eventType:String}");
         }
 
-        AppendFilters(sql, scope.Filters, normalise: true);
+        AppendFilters(sql, scope.Filters, normalise: true, null);
     }
 
     public static void AppendRollup(StringBuilder sql, in QueryScope scope, string bucketColumn) =>
@@ -144,7 +150,7 @@ public static class ScopeClause
             sql.Append(" AND event_type = {eventType:String}");
         }
 
-        AppendFilters(sql, scope.Filters, normalise: false);
+        AppendFilters(sql, scope.Filters, normalise: false, rollup);
     }
 
     public static bool HasMeasureFilter(IReadOnlyList<QueryFilter>? filters)
@@ -165,7 +171,7 @@ public static class ScopeClause
         return false;
     }
 
-    private static void AppendFilters(StringBuilder sql, IReadOnlyList<QueryFilter>? filters, bool normalise)
+    private static void AppendFilters(StringBuilder sql, IReadOnlyList<QueryFilter>? filters, bool normalise, Rollup? rollup)
     {
         if (filters is null)
         {
@@ -184,6 +190,12 @@ public static class ScopeClause
                 continue;
             }
 
+            if (TenantAttributeRegistry.IsGroupColumn(filter.Column))
+            {
+                AppendTenantAttributeFilter(sql, filter.Column, i, rollup);
+                continue;
+            }
+
             if (normalise)
             {
                 sql.Append("toString(").Append(filter.Column).Append(')');
@@ -196,6 +208,26 @@ public static class ScopeClause
             sql.Append(" = {").Append(FilterParameter(i)).Append(":String}");
         }
     }
+
+    private static void AppendTenantAttributeFilter(StringBuilder sql, string column, int index, Rollup? rollup)
+    {
+        string attribute = TenantAttributeRegistry.AttributeOf(column);
+
+        if (rollup is { IsGroupRollup: true } && rollup.HoldsTenantAttribute(attribute))
+        {
+            sql.Append(RollupRegistry.TenantAttributeColumn(attribute))
+                .Append(" = {").Append(FilterParameter(index)).Append(":String}");
+            return;
+        }
+
+        sql.Append("tenant_id IN (SELECT tenant_id FROM ").Append(TenantAttributeRegistry.QualifiedTable)
+            .Append(" FINAL WHERE project_id = {projectId:String} AND attribute = {")
+            .Append(FilterAttributeParameter(index)).Append(":String} AND value = {")
+            .Append(FilterParameter(index)).Append(":String})");
+    }
+
+    private static string FilterAttributeParameter(int index) =>
+        string.Create(CultureInfo.InvariantCulture, $"filter{index}Attribute");
 
     private static string FilterParameter(int index) =>
         string.Create(CultureInfo.InvariantCulture, $"filter{index}");
