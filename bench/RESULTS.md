@@ -256,6 +256,62 @@ The set modes ask one question over 1,000 tenants that share `parent:org-bench`,
 | `set-pivot-attribute` (3 metrics by region) | raw | 242.6 / 284.3 | 498.2 / 557.4 | 2,186.9 / 2,478.1 |
 | `set-timeseries` (by day) | raw | 44.4 / 66.0 | 59.2 / 77.9 | 153.0 / 211.6 |
 
+## Engine fixes, 2026-10-15: same-host A/B against main
+
+Linux, ClickHouse 25.3 in Docker (`docker-compose.bench.yml`), on a workstation that shared the run with
+two other build and test jobs (load average 19 to 26). `main` (`ec24509`) and this branch were run
+interleaved, main then branch: three rounds of every mode, two more of `track` and `read`, and five more
+of `track` alone at 1 and 32 clients. Each cell is the median of the rounds that completed. Settings as
+before: `BENCH_DURATION=6`, 1/32/128 clients for writes, 1/16 for reads, 1/4/16 for the set modes.
+
+| Mode | Clients | runs main/branch | main events/s | branch events/s | main p50 ms | branch p50 ms | main p95 ms | branch p95 ms |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `track` | 1 | 10/10 | 522 | 250 | 1.38 | 2.00 | 5.30 | 7.96 |
+| `track` | 32 | 10/10 | 7,363 | 6,962 | 3.32 | 3.62 | 9.81 | 10.40 |
+| `track` | 128 | 5/5 | 15,521 | 22,519 | 7.82 | 4.82 | 15.83 | 10.26 |
+| `beacon` ×200 | 1 | 2/2 | 426 | 892 | 167.75 | 54.25 | 218.26 | 77.17 |
+| `beacon` ×200 | 32 | 2/2 | 7,816 | 1,774 | 140.72 | 1529.85 | 530.10 | 2349.60 |
+| `beacon` ×200 | 128 | 2/2 | 31,507 | 25,252 | 304.70 | 267.76 | 428.60 | 984.01 |
+| `breakdown` | 1 | 5/4 | 16 | 14 | 71.89 | 82.23 | 95.40 | 103.22 |
+| `breakdown` | 16 | 5/4 | 72 | 58 | 214.53 | 268.43 | 291.72 | 372.23 |
+| `breakdown-rollup` | 1 | 5/4 | 27 | 22 | 53.59 | 46.02 | 59.49 | 72.11 |
+| `breakdown-rollup` | 16 | 5/4 | 232 | 135 | 71.15 | 104.91 | 109.79 | 170.88 |
+| `breakdown-measure` | 1 | 5/4 | 16 | 12 | 53.61 | 78.06 | 88.68 | 114.22 |
+| `breakdown-measure` | 16 | 5/4 | 78 | 60 | 201.50 | 269.50 | 274.93 | 372.02 |
+| `breakdown-measure-rollup` | 1 | 5/4 | 26 | 25 | 52.86 | 55.47 | 61.97 | 66.85 |
+| `breakdown-measure-rollup` | 16 | 5/4 | 151 | 158 | 66.75 | 99.25 | 169.43 | 158.38 |
+| `timeseries` | 1 | 5/4 | 36 | 30 | 14.86 | 22.28 | 57.57 | 65.28 |
+| `timeseries` | 16 | 5/4 | 238 | 187 | 61.98 | 82.84 | 114.88 | 138.74 |
+| `top` | 1 | 5/4 | 39 | 30 | 12.68 | 20.88 | 54.48 | 66.54 |
+| `top` | 16 | 5/4 | 271 | 238 | 52.76 | 71.81 | 105.71 | 140.00 |
+| `active` | 1 | 5/4 | 38 | 36 | 13.87 | 15.88 | 55.88 | 58.14 |
+| `active` | 16 | 5/4 | 204 | 288 | 72.62 | 52.00 | 128.94 | 104.81 |
+| `timeline` | 1 | 5/4 | 33 | 32 | 22.77 | 22.65 | 65.19 | 66.21 |
+| `timeline` | 16 | 5/4 | 117 | 116 | 131.00 | 131.74 | 232.50 | 242.36 |
+| `set-breakdown` | 1 | 3/4 | 10 | 8 | 104.07 | 120.72 | 144.66 | 168.85 |
+| `set-breakdown` | 4 | 3/4 | 17 | 18 | 223.73 | 225.09 | 315.01 | 296.48 |
+| `set-breakdown` | 16 | 3/4 | 20 | 23 | 752.17 | 687.74 | 1125.51 | 881.85 |
+| `set-breakdown-group` | 1 | 3/4 | 27 | 27 | 37.29 | 26.31 | 60.51 | 64.24 |
+| `set-breakdown-group` | 4 | 3/4 | 90 | 88 | 56.30 | 57.02 | 70.25 | 75.71 |
+| `set-breakdown-group` | 16 | 3/4 | 145 | 132 | 107.08 | 120.44 | 178.04 | 180.59 |
+| `set-pivot-attribute` | 1 | 3/4 | 4 | 4 | 273.19 | 260.76 | 319.24 | 304.97 |
+| `set-pivot-attribute` | 4 | 3/4 | 6 | 8 | 618.82 | 553.90 | 1183.16 | 724.66 |
+| `set-pivot-attribute` | 16 | 3/4 | 8 | 6 | 2111.07 | 2870.36 | 2300.66 | 3555.62 |
+| `set-timeseries` | 1 | 3/4 | 23 | 18 | 60.03 | 61.92 | 66.89 | 85.06 |
+| `set-timeseries` | 4 | 3/4 | 51 | 58 | 76.53 | 69.44 | 124.17 | 106.44 |
+| `set-timeseries` | 16 | 3/4 | 54 | 80 | 290.94 | 205.07 | 400.55 | 298.17 |
+
+No request failed on either side. Three `set` runs (two on main, one on the branch) stopped before
+measuring, when the attribute upload met an engine that was not ready within the script's 60 seconds,
+and one branch `read` run seeded nothing and stopped at its first query; they are left out.
+
+Main's own rounds differed by up to 3x in the same cell (`track` at 32 clients ran from 646 to 10,526
+events/s on main, `breakdown-rollup` at 16 from 77 to 279 requests/s), more than any difference between
+the columns, and the cells lean neither way: the branch is ahead at `track` 128, `active` 16 and the set
+time series, behind at the raw breakdowns. Every read sends the same SQL as on main unless it asks for
+a tenant-attribute filter, and the only per-request addition is the storage-fault middleware's frame,
+so these paths are within noise. A quiet host would narrow the band.
+
 ## Run 2026-08-14 12:28:12 UTC — mode=`breakdown`, target=`http://127.0.0.1:5299`, git=`33467fe+dirty`
 
 - budget: 6s/level, events/request: 1, verify-loss: False
