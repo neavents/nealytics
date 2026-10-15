@@ -81,6 +81,12 @@ GET http://localhost:5000/ready    # readiness, dependencies reachable (SELECT 1
 
 No auth required. `/health` always returns `200` while the process is running, use it for a liveness probe so an orchestrator does not restart a healthy pod during a ClickHouse blip. `/ready` returns `200` when ClickHouse is reachable and `503` when it is not, use it for a readiness/traffic gate.
 
+A read that ClickHouse could not serve for a reason that passes, a memory limit, too many
+simultaneous queries, a timeout or a connection that went stale in the pool, answers `503` with
+`Retry-After: 5` and a `storage_unavailable` problem body rather than `500`, and is counted on
+`nealytics_reads_storage_unavailable_total`. A connection fault also empties the idle pool, so the
+retry opens a fresh connection instead of drawing the next stale one.
+
 > **Note (v1.2.0):** `/health` was previously the dependency check. It is now liveness only; the dependency check moved to `/ready`. Update any alerting that treated `/health` as "database up".
 
 ---
@@ -240,6 +246,9 @@ without the engine learning what the grouping means.
    reads as empty, never as an error that confirms it exists. A token carrying both claims is refused.
 4. **Group by the tenant or an attribute**: `groupBy=tenant_id` or `groupBy=tenant.region` on
    `/breakdown` and `/pivot`. The timeline adds each event's `tenantId` when the token is a set.
+5. **Filter by an attribute**: `filter=tenant.region:north` keeps the members whose `region` is
+   `north`, on every read that takes `filter`, so one product mix can be cut by any grouping the
+   attributes describe without minting another token.
 
 The membership filter is `tenant_id IN (SELECT tenant_id FROM nealytics_core.tenant_attributes ...)`.
 ClickHouse builds that set before reading and applies it to the primary key, so a set of 1,000
@@ -530,7 +539,9 @@ Query params:
 ```
 
 `totals` is each metric over everything in scope, not the sum of the returned rows, so a distinct
-count and an average stay meaningful when the list is cut. A pivot routes to a rollup under the same
+count and an average stay meaningful when the list is cut. A metric of a measure with a unit,
+grouped by that unit, has a `null` total when the rows hold more than one unit: euros and lira do
+not add up to anything. A pivot routes to a rollup under the same
 rules as a breakdown, with one more: every metric's event type has to be stored there, and an
 unscoped metric only routes to a rollup that aggregates every event type.
 
@@ -629,6 +640,7 @@ Every read that takes `filter` takes it in the same grammar, repeated as often a
 |---|---|
 | `filter=column:value` | a core column or declared dimension equals `value`. Split on the first colon only, so `page_path:/a?x=1:2` keeps its value whole. |
 | `filter=measure>=number` | a declared measure compared with `=`, `!=`, `<`, `<=`, `>` or `>=`. `result_count=0` is every search that found nothing. |
+| `filter=tenant.attribute:value` | the tenants whose declared attribute holds `value`, read from the attribute table at query time. A group rollup keyed on that attribute answers it from its own column. |
 
 Column names are matched against the allowlist and never reach the SQL as caller text; values are
 bound parameters. A request carrying a measure comparison is answered from the raw table, since a
@@ -752,6 +764,7 @@ which is the only way to answer someone disputing a figure.
 | `Rollups__N__Measures` | _(none)_ | Comma separated `measure:aggregation`, e.g. `dwell_ms:sum,dwell_ms:p95`. Percentiles share one `quantilesState` column per measure. |
 | `Rollups__N__TenantAttributes` | _(none)_ | Comma separated tenant attributes. Makes it a group rollup keyed on them instead of the tenant. |
 | `BackfillRollups` | `true` | Aggregate the existing raw rows into a rollup when it is created. |
+| `BackfillSessionsPerSlice` | `50000` | A session rollup's backfill reads a partition in slices of about this many sessions, so its memory stays bounded by the slice rather than the month. `0` reads each partition whole. |
 
 #### Session rollups
 
@@ -844,6 +857,12 @@ in the source table into it, one partition at a time, before it serves traffic. 
 day-aligned 30 day window would route to a rollup three days old and read low for 27 of those days
 while looking healthy. Set `BackfillRollups` to `false` to skip it on a deployment whose raw table is
 too large to sweep at boot; the rollup then aggregates forward only, and the log says so.
+
+A session rollup's backfill groups by session, and ClickHouse holds every session of the partition
+in memory while it does: about 3 KB each, so 1.3 million sessions in a month needed more than a 2 GiB
+server allows. The engine counts a partition's sessions first and reads it in
+`cityHash64(session_id) % N` slices of `BackfillSessionsPerSlice` sessions, each slice a complete set
+of sessions, so no session is split across two inserts.
 
 **Every rollup is keyed on `traffic_class`.** Reads exclude bots by default, and a rollup that did
 not store the class could only have answered `traffic=all`. Existing rollups created before this
@@ -1136,6 +1155,7 @@ Source: [`TelemetryDiagnostics.cs`](src/Nealytics.Engine/Infrastructure/Diagnost
 | `nealytics_storage_write_duration_seconds` | Histogram | Time spent per batch insert (including retries) |
 | `nealytics_query_read_duration_seconds` | Histogram | Time spent per read query |
 | `nealytics_queue_depth_current` | Gauge | Current number of events in the in memory channel |
+| `nealytics_reads_storage_unavailable_total` | Counter | Reads answered `503` because ClickHouse was briefly unable to serve them |
 
 And the four that exist so that nothing the engine discards is invisible. Every one of them is
 tagged, and a nonzero reading on any of them means data you sent is not data you can query:
