@@ -2,6 +2,11 @@
 
 Thanks for your interest in improving Nealytics. This guide covers how to build, test, and keep changes consistent with the engine's design.
 
+Follow the owner's [engineering rules and branch policy](docs/engineering-rules.md) and the
+[bounded work packages](docs/work-packages.md). Customizability, performance, a low memory
+footprint, a domain-agnostic engine, and single-binary delivery are required. Use feature branches
+and keep all implementation work off main until the owner authorizes integration.
+
 ## Prerequisites
 
 - .NET 10 SDK
@@ -58,10 +63,18 @@ The engine follows a deliberately strict style. Please match it in `src/`:
 - **Sealed by default.** Response models, payloads, and infrastructure classes are sealed (also enforced by `ArchitectureTests`).
 - Keep the parsing/validation logic out of endpoint lambdas and in a testable request factory, and keep I/O behind an interface where it helps testing (see `ITelemetryBatchWriter`).
 
-Test projects may use `var` and comments freely.
+Test projects may use `var` and short, useful comments. Prefer descriptive test names to long
+commentary. Production code, SQL, and configuration remain comment-free.
 
 ## Pull requests
 
 - Add or update tests for any behavioral change. If a test fails, fix the implementation rather than weakening the test.
 - Run `dotnet build` (must be warning-free) and both test suites before opening a PR.
-- CI runs the build, unit tests, and integration tests against a ClickHouse service on every push and PR.
+- Cover all new/changed maintained production lines and branches, report repository-wide coverage,
+  and run Stryker.NET mutation checks for changed managed logic. Investigate every survivor,
+  uncovered mutant, and timeout; do not weaken tests or hide coverage gaps.
+- Verify relevant end-to-end, published-artifact, failure/recovery, Linux-native, and performance
+  behavior. Never report a suite or target as passing when it was not run.
+- Current CI runs the build, unit, integration, and smoke checks on pushes to main and pull requests
+  targeting main. Feature-branch checks, coverage gates, and mutation automation need explicit
+  verification-foundation setup; creating a feature branch does not enable those jobs by itself.
