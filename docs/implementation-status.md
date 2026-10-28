@@ -9,7 +9,7 @@ checks, platform requirements, and applicable coverage/mutation gates have passe
 | Requirement | Status | Evidence / remaining work |
 | --- | --- | --- |
 | A1 reproducible latency, offered load, resource and visibility baseline | Implemented; qualification open | 61 benchmark unit cases and four real-Kestrel/ClickHouse cases passed; sustained final-revision runs and harness-wide changed-line coverage remain |
-| A2 HTTP compatibility and durability/failure fixtures | Pending | Existing unit baseline: 1,303 passed, zero skipped; expand failure and real-Kestrel coverage |
+| A2 HTTP compatibility and durability/failure fixtures | In progress | Nine additional real-Kestrel contract cases passed; deterministic write/flush-fault cases follow the B1 seam |
 | A3 bounded pending WAL and flush groups | Pending | Current pending channel is unbounded |
 | Streaming recovery | Pending | Current replay materializes the sealed WAL |
 | Replay-safe rollups and explicit delivery bounds | Pending | Persisted insert identity and pinned-server failure tests required |
@@ -34,7 +34,8 @@ Known baseline observations:
 - Unit tests passed with coverage collection. Overall collector totals are 9,347/17,363 lines and
   2,340/4,058 branches; these are not a claim about maintained-code-only or combined coverage.
 - Integration restore reports vulnerable transitive SSH.NET 2025.1.0 dependencies. Resolve the
-  dependency in a separate verification-foundation change; do not suppress the warnings.
+  dependency in the verification foundation. A2 now pins patched SSH.NET 2026.0.0 in the test
+  project; restore no longer reports those advisories. No audit suppression was added.
 - Archy deterministic checks are unavailable because configured layer rules are absent; the
   existing executable architecture/source guards remain required.
 
@@ -54,3 +55,9 @@ A1 evidence recorded 2026-10-29:
 - An initial 30-second, 100-request/second track check accepted and stored 3,000 events without
   errors. It was a local functional measurement before final instrumentation, not a performance
   comparison or final reference result. Repeat both modes at the committed revision for B6.
+
+A2 contract fixtures now cover credential precedence, durable track acknowledgment, rejected
+beacon elements, malformed streamed tails, accepted prefixes after disconnect and incomplete
+track bodies. These run through real Kestrel with the database consumer disabled so the durable
+WAL and broker can be asserted directly. Feature branches now trigger CI build, tests and helper
+mutation checks; no image is published from a feature branch. Remote CI has not been run yet.
