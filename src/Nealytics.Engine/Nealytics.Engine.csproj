@@ -7,6 +7,8 @@
     <PublishAot>false</PublishAot>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <InvariantGlobalization>true</InvariantGlobalization>
@@ -31,6 +33,16 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Nealytics.Engine.Tests.Unit" />
     <InternalsVisibleTo Include="Nealytics.Engine.Tests.Integration" />
+    <InternalsVisibleTo Include="Nealytics.Engine.Tests.Native" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(NealyticsNativeLibrary)' != ''">
+    <Content Include="$(NealyticsNativeLibrary)" Link="libnealytics_wal.so"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Infrastructure/Storage/Wal/Native/liburing.LICENSE" />
   </ItemGroup>
 
 </Project>

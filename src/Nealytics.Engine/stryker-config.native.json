@@ -1,0 +1,25 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj",
+      "../../tests/Nealytics.Engine.Tests.Native/Nealytics.Engine.Tests.Native.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~NativeWal|FullyQualifiedName~NativeFileIntegrationTests",
+    "mutate": [
+      "Infrastructure/Storage/Wal/Native/**/*.cs"
+    ],
+    "mutation-level": "Complete",
+    "concurrency": 2,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    }
+  }
+}
