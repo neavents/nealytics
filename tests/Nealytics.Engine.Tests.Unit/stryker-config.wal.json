@@ -1,0 +1,23 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "Nealytics.Engine.Tests.Unit.csproj"
+    ],
+    "mutate": [
+      "Infrastructure/Storage/Wal/ManagedWalFile.cs"
+    ],
+    "mutation-level": "Complete",
+    "concurrency": 2,
+    "reporters": [
+      "progress",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    }
+  }
+}

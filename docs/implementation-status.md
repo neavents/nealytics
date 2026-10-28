@@ -14,7 +14,7 @@ checks, platform requirements, and applicable coverage/mutation gates have passe
 | Streaming recovery | Pending | Current replay materializes the sealed WAL |
 | Replay-safe rollups and explicit delivery bounds | Pending | Persisted insert identity and pinned-server failure tests required |
 | Reserved read/write/probe capacity and bounded admission | Pending | Current connection factory is shared |
-| B1 shared WAL I/O contract with managed baseline | Pending | Extract without changing persistence or caller behavior |
+| B1 shared WAL I/O contract with managed baseline | Implemented; aggregate qualification open | Managed file class: 100% line/branch coverage, six executable mutants killed; 42 focused WAL/HTTP cases passed |
 | B2 native io_uring backend and packaging | Pending | Real Linux x64/ARM64 execution and standalone published artifact required |
 | B3 native integration and operator fallback | Pending | Native/managed parity, unsupported-host and crash tests required |
 | B4 bounded beacon microbatches | Pending | Preserve accepted-prefix, rejection and cancellation semantics |
@@ -61,3 +61,12 @@ beacon elements, malformed streamed tails, accepted prefixes after disconnect an
 track bodies. These run through real Kestrel with the database consumer disabled so the durable
 WAL and broker can be asserted directly. Feature branches now trigger CI build, tests and helper
 mutation checks; no image is published from a feature branch. Remote CI has not been run yet.
+
+B1 now isolates append, durable flush, truncation and disposal behind an internal file boundary.
+Gated tests establish no acknowledgment before the durability barrier and propagation of write,
+flush and truncation failures. An instrumented FileStream verifies that the managed barrier waits
+for buffered writes and requests a disk flush. Physical-file tests verify byte framing, reopening,
+truncation and appending without gaps. Native I/O is not implemented by this extraction.
+The warning-free build, all 1,327 unit cases and six real-ClickHouse/HTTP recovery and benchmark
+cases passed after extraction, with zero skips. The full integration and published-artifact
+qualification will also be repeated after the remaining A/B changes.

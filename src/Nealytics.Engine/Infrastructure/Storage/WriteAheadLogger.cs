@@ -12,12 +12,13 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Serialization;
+using Nealytics.Engine.Infrastructure.Storage.Wal;
 
 public sealed class WriteAheadLogger : IAsyncDisposable
 {
     private readonly string _logFilePath;
     private readonly string _sealedFilePath;
-    private readonly FileStream _fileStream;
+    private readonly IWalFile _file;
     private readonly SemaphoreSlim _fileLock;
     private readonly Channel<PendingAppend> _pending;
     private readonly Task _flushLoop;
@@ -30,6 +31,11 @@ public sealed class WriteAheadLogger : IAsyncDisposable
     private static ArrayBufferWriter<byte>? _threadBuffer;
 
     public WriteAheadLogger(IOptions<TelemetryEngineOptions> options)
+        : this(options, null)
+    {
+    }
+
+    internal WriteAheadLogger(IOptions<TelemetryEngineOptions> options, IWalFile? file)
     {
         TelemetryEngineOptions engineOptions = options.Value;
         string directory = engineOptions.WriteAheadLogDirectory;
@@ -45,13 +51,7 @@ public sealed class WriteAheadLogger : IAsyncDisposable
 
         int bufferSize = engineOptions.WalFileBufferBytes > 0 ? engineOptions.WalFileBufferBytes : 65_536;
 
-        _fileStream = new FileStream(
-            _logFilePath,
-            FileMode.Append,
-            FileAccess.Write,
-            FileShare.Read,
-            bufferSize,
-            FileOptions.Asynchronous);
+        _file = file ?? new ManagedWalFile(_logFilePath, bufferSize);
 
         _fileLock = new SemaphoreSlim(1, 1);
         _uncommittedRecords = 0;
@@ -162,11 +162,10 @@ public sealed class WriteAheadLogger : IAsyncDisposable
             for (int i = 0; i < group.Count; i++)
             {
                 PendingAppend entry = group[i];
-                await _fileStream.WriteAsync(entry.Buffer.AsMemory(0, entry.Length));
+                await _file.AppendAsync(entry.Buffer.AsMemory(0, entry.Length));
             }
 
-            await _fileStream.FlushAsync();
-            _fileStream.Flush(true);
+            await _file.FlushAsync();
 
             Interlocked.Add(ref _uncommittedRecords, group.Count);
             Interlocked.Increment(ref _flushGroupCount);
@@ -210,8 +209,7 @@ public sealed class WriteAheadLogger : IAsyncDisposable
             if (remaining <= 0)
             {
                 Interlocked.Exchange(ref _uncommittedRecords, 0);
-                _fileStream.SetLength(0);
-                await _fileStream.FlushAsync();
+                await _file.TruncateAsync();
             }
         }
         finally
@@ -225,8 +223,7 @@ public sealed class WriteAheadLogger : IAsyncDisposable
         await _fileLock.WaitAsync();
         try
         {
-            _fileStream.SetLength(0);
-            await _fileStream.FlushAsync();
+            await _file.TruncateAsync();
             Interlocked.Exchange(ref _uncommittedRecords, 0);
         }
         finally
@@ -298,7 +295,7 @@ public sealed class WriteAheadLogger : IAsyncDisposable
         {
         }
 
-        await _fileStream.DisposeAsync();
+        await _file.DisposeAsync();
         _fileLock.Dispose();
     }
 
