@@ -155,6 +155,27 @@ public sealed class WalBudgetTests
     }
 
     [Fact]
+    public async Task EveryBlockedWaiterIsWokenWhenCapacityChanges()
+    {
+        WalAdmission admission = new(1, 10);
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
+        await admission.ReserveAsync(10, timeout.Token);
+        Task first = admission.ReserveAsync(10, timeout.Token).AsTask();
+        Task second = admission.ReserveAsync(10, timeout.Token).AsTask();
+        Assert.False(first.IsCompleted);
+        Assert.False(second.IsCompleted);
+
+        admission.Release(10);
+        Task winner = await Task.WhenAny(first, second).WaitAsync(timeout.Token);
+        await winner;
+        admission.Release(10);
+        await Task.WhenAll(first, second).WaitAsync(timeout.Token);
+        admission.Release(10);
+        Assert.Equal(0, admission.PendingRecords);
+        Assert.Equal(0, admission.PendingBytes);
+    }
+
+    [Fact]
     public void LimitsPreserveEveryConfiguredCapacity()
     {
         WalLimits limits = new(new TelemetryEngineOptions
@@ -219,5 +240,26 @@ public sealed class WalBudgetTests
     {
         WalLimits limits = new(new TelemetryEngineOptions { WalFileBufferBytes = requested });
         Assert.Equal(expected, limits.FileBufferBytes);
+    }
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(255, 255)]
+    [InlineData(256, 256)]
+    [InlineData(257, 256)]
+    [InlineData(int.MaxValue, 256)]
+    public void InitialGroupAllocationStaysSmallRegardlessOfTheConfiguredRecordLimit(int records, int expected)
+    {
+        WalLimits limits = new(new TelemetryEngineOptions
+        {
+            WalMaxPendingRecords = records,
+            WalMaxFlushRecords = records
+        });
+        Assert.Equal(expected, limits.InitialGroupCapacity);
+        System.Threading.Channels.BoundedChannelOptions channel = limits.CreateChannelOptions();
+        Assert.Equal(records, channel.Capacity);
+        Assert.True(channel.SingleReader);
+        Assert.True(channel.SingleWriter);
+        Assert.Equal(System.Threading.Channels.BoundedChannelFullMode.Wait, channel.FullMode);
     }
 }
