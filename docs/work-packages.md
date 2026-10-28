@@ -1,11 +1,12 @@
 # Nealytics delivery categories and work packages
 
-Status: Discussion draft 0.1
+Status: Implementation index 0.2
 
-Date: 2026-10-28
+Date: 2026-10-29
 
 Purpose: A short execution index for the [detailed roadmap](product-strategy-and-roadmap.md).
-All packages below are proposed and not started. Categories organize scope; they are not single
+Implementation is active on the A/B feature branches; consult the
+[evidence ledger](implementation-status.md) for passed and remaining gates. Categories organize scope; they are not single
 implementation tasks, delivery estimates, or a commitment to implement every possible integration.
 
 Implementation must follow the owner's [engineering rules and branch policy](engineering-rules.md):

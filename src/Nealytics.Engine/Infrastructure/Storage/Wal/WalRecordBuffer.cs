@@ -7,13 +7,15 @@ using System.IO;
 internal sealed class WalRecordBuffer : IBufferWriter<byte>, IDisposable
 {
     private readonly int _limit;
+    private readonly ArrayPool<byte> _pool;
     private byte[] _buffer = Array.Empty<byte>();
     private int _written;
 
-    public WalRecordBuffer(int limit)
+    public WalRecordBuffer(int limit, ArrayPool<byte>? pool = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
         _limit = limit;
+        _pool = pool ?? ArrayPool<byte>.Shared;
     }
 
     public ReadOnlyMemory<byte> WrittenMemory => _buffer.AsMemory(0, _written);
@@ -39,7 +41,7 @@ internal sealed class WalRecordBuffer : IBufferWriter<byte>, IDisposable
         if (required > _buffer.Length - _written)
         {
             int capacity = (int)Math.Min(_limit, Math.Max((long)_written + required, (long)_buffer.Length * 2));
-            byte[] replacement = ArrayPool<byte>.Shared.Rent(capacity);
+            byte[] replacement = _pool.Rent(capacity);
             _buffer.AsSpan(0, _written).CopyTo(replacement);
             ReturnBuffer();
             _buffer = replacement;
@@ -61,7 +63,7 @@ internal sealed class WalRecordBuffer : IBufferWriter<byte>, IDisposable
     {
         if (_buffer.Length > 0)
         {
-            ArrayPool<byte>.Shared.Return(_buffer, clearArray: true);
+            _pool.Return(_buffer, clearArray: true);
         }
     }
 }

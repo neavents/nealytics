@@ -3,11 +3,11 @@ namespace Nealytics.Engine.Infrastructure.Storage;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using Nealytics.Engine.Infrastructure.Serialization;
+using Nealytics.Engine.Infrastructure.Storage.Wal;
 
 public sealed partial class WriteAheadLogger
 {
@@ -18,7 +18,7 @@ public sealed partial class WriteAheadLogger
         try
         {
             PendingAppend pending;
-            await _serializationLock.WaitAsync(cancellationToken);
+            await _synchronization.Serialization.WaitAsync(cancellationToken);
             try
             {
                 _operations.ThrowIfFailed();
@@ -26,7 +26,7 @@ public sealed partial class WriteAheadLogger
             }
             finally
             {
-                _serializationLock.Release();
+                _synchronization.Serialization.Release();
             }
 
             await pending.Completion.Task;
@@ -41,12 +41,7 @@ public sealed partial class WriteAheadLogger
         GlobalTelemetryPayload payload, CancellationToken cancellationToken)
     {
         _recordBuffer.Reset();
-        using (Utf8JsonWriter writer = new Utf8JsonWriter(_recordBuffer, new JsonWriterOptions { SkipValidation = true }))
-        {
-            JsonSerializer.Serialize(writer, payload, TelemetryAotContext.Default.GlobalTelemetryPayload);
-        }
-        _recordBuffer.GetSpan(1)[0] = (byte)'\n';
-        _recordBuffer.Advance(1);
+        WalRecordEncoding.Serialize(payload, _recordBuffer);
 
         int length = _recordBuffer.WrittenMemory.Length;
         await _admission.ReserveAsync(length, cancellationToken);
@@ -82,7 +77,7 @@ public sealed partial class WriteAheadLogger
     private async Task RunFlushLoopAsync()
     {
         ChannelReader<PendingAppend> reader = _pending.Reader;
-        List<PendingAppend> group = new List<PendingAppend>(Math.Min(_limits.FlushRecords, 256));
+        List<PendingAppend> group = new List<PendingAppend>(_limits.InitialGroupCapacity);
         try
         {
             while (await reader.WaitToReadAsync())
@@ -116,7 +111,7 @@ public sealed partial class WriteAheadLogger
     private async Task FlushGroupAsync(List<PendingAppend> group)
     {
         long flushStartTicks = Stopwatch.GetTimestamp();
-        await _fileLock.WaitAsync();
+        await _synchronization.File.WaitAsync();
         try
         {
             _operations.ThrowIfFailed();
@@ -127,13 +122,15 @@ public sealed partial class WriteAheadLogger
             await _file.FlushAsync();
 
             Interlocked.Add(ref _uncommittedRecords, group.Count);
-            Interlocked.Increment(ref _flushGroupCount);
-            Interlocked.Add(ref _flushedRecordCount, group.Count);
-            Interlocked.Add(ref _flushDurationTicks, Stopwatch.GetTimestamp() - flushStartTicks);
+            _statistics.Record(group.Count, Stopwatch.GetElapsedTime(flushStartTicks));
+        }
+        catch (Exception error)
+        {
+            throw SignalFailure(error);
         }
         finally
         {
-            _fileLock.Release();
+            _synchronization.File.Release();
         }
     }
 

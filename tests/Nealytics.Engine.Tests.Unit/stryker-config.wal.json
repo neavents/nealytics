@@ -4,15 +4,16 @@
     "test-projects": [
       "Nealytics.Engine.Tests.Unit.csproj"
     ],
+    "test-case-filter": "FullyQualifiedName~WalFileBoundaryTests|FullyQualifiedName~WriteAheadLoggerTests|FullyQualifiedName~BoundedWalTests|FullyQualifiedName~WalBudgetTests|FullyQualifiedName~WalRecordBufferTests|FullyQualifiedName~WalOperationGateTests|FullyQualifiedName~WalFlushStatisticsTests|FullyQualifiedName~WalEncodingAndSynchronizationTests",
     "mutate": [
-      "Infrastructure/Storage/Wal/**/*.cs",
+      "Infrastructure/Storage/Wal/*.cs",
       "Infrastructure/Storage/WriteAheadLogger.cs",
       "Infrastructure/Storage/WriteAheadLogger.Append.cs"
     ],
     "mutation-level": "Complete",
     "concurrency": 2,
     "reporters": [
-      "progress",
+      "dots",
       "json",
       "html"
     ],

@@ -1,15 +1,14 @@
 namespace Nealytics.Engine.Infrastructure.Storage.Wal;
 
 using System;
+using System.Threading.Channels;
 using Nealytics.Engine.Infrastructure.Configuration;
 
 internal sealed class WalLimits
 {
     public WalLimits(TelemetryEngineOptions options)
     {
-        if (options.WalMaxPendingRecords < 1
-            || options.WalMaxPendingBytes < 256
-            || options.WalMaxRecordBytes < 256
+        if (options.WalMaxRecordBytes < 256
             || options.WalMaxRecordBytes > options.WalMaxFlushBytes
             || options.WalMaxFlushBytes > options.WalMaxPendingBytes
             || options.WalMaxFlushRecords < 1
@@ -24,6 +23,7 @@ internal sealed class WalLimits
         FlushRecords = options.WalMaxFlushRecords;
         FlushBytes = options.WalMaxFlushBytes;
         FileBufferBytes = options.WalFileBufferBytes > 0 ? options.WalFileBufferBytes : 65_536;
+        InitialGroupCapacity = Math.Min(FlushRecords, 256);
     }
 
     public int PendingRecords { get; }
@@ -32,4 +32,12 @@ internal sealed class WalLimits
     public int FlushRecords { get; }
     public int FlushBytes { get; }
     public int FileBufferBytes { get; }
+    public int InitialGroupCapacity { get; }
+
+    public BoundedChannelOptions CreateChannelOptions() => new BoundedChannelOptions(PendingRecords)
+    {
+        SingleReader = true,
+        SingleWriter = true,
+        FullMode = BoundedChannelFullMode.Wait
+    };
 }

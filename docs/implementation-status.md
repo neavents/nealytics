@@ -10,7 +10,7 @@ checks, platform requirements, and applicable coverage/mutation gates have passe
 | --- | --- | --- |
 | A1 reproducible latency, offered load, resource and visibility baseline | Implemented; qualification open | 61 benchmark unit cases and four real-Kestrel/ClickHouse cases passed; sustained final-revision runs and harness-wide changed-line coverage remain |
 | A2 HTTP compatibility and durability/failure fixtures | In progress | Nine additional real-Kestrel contract cases passed; deterministic write/flush-fault cases follow the B1 seam |
-| A3 bounded pending WAL and flush groups | In progress | Bounded admission and groups implemented; 100 focused cases and 1,401 full unit cases passed; mutation and real-dependency qualification remain |
+| A3 bounded pending WAL and flush groups | Shared-core checks passed; aggregate qualification open | 1,433 unit and 148 real-ClickHouse cases passed; changed WAL scope has 100% line/branch coverage and a 100% mutation score |
 | Streaming recovery | Pending | Current replay materializes the sealed WAL |
 | Replay-safe rollups and explicit delivery bounds | Pending | Persisted insert identity and pinned-server failure tests required |
 | Reserved read/write/probe capacity and bounded admission | Pending | Current connection factory is shared |
@@ -22,7 +22,7 @@ checks, platform requirements, and applicable coverage/mutation gates have passe
 | B6 combined qualification/default selection | Pending | Matched-load four-combination latency/CPU/memory/visibility evidence required |
 | Full build, unit, integration and published-artifact end-to-end | In progress | Capturing the unchanged baseline before implementation |
 | Changed maintained-code line/branch coverage | Pending | Baseline unit collector includes generated source; classify and combine with integration evidence |
-| Stryker mutation checks | Partial | Pinned Stryker.NET 5.0.0; measurement helpers: 115 killed, one nontermination timeout, zero survivors; engine and surrounding harness checks remain |
+| Stryker mutation checks | Partial | Shared WAL scope: 174 killed, 54 timeout detections, zero survivors; measurement helpers: 120 killed, one nontermination timeout; native and surrounding harness checks remain |
 | Source style, architecture and domain neutrality guards | Baseline passed | Included in the 1,303-test unit run |
 
 Baseline snapshot: engine f1cfe3e0c4e69bbbafc6096c02659a68986d0836; planning commit 90babda.
@@ -83,7 +83,22 @@ A3 component evidence:
   WAL helpers. The unchanged recovery reader still has inherited branch gaps. Repository-wide
   unit totals, including generated code, are 9,655/17,636 lines and 2,416/4,124 branches.
 - The complete-level mutation run covers the changed WAL files and helpers with thresholds at
-  100%; results are pending and this package is not yet marked complete.
+  100%. The final run detected all 228 executable mutants: 174 assertion kills, 54 timeout
+  detections and zero survivors. The first broad run
+  was interrupted after repeated HTTP-host initialization made mutation sessions expensive.
+  The rerun selects the six WAL fixture classes while keeping the same mutated files and
+  thresholds. Real-HTTP contracts continue to run in the full unit/integration qualification.
+
+Final A3 follow-up checks: a warning-free solution build, 1,433 unit cases and all 148 integration
+cases against ClickHouse 25.3.14.14 passed with zero skips. Changed maintained shared-WAL code
+has 100% collector line and branch coverage. Raw whole-unit collector totals, including generated
+source, are 9,678/17,659 lines and 2,416/4,124 branches; these are not repository-wide maintained
+coverage totals. The unchanged recovery reader retains its inherited branch gaps.
+See [A3 verification review](packages/a3-verification.md) for mutation/timeout interpretation.
+Published-artifact and matched-load qualification remain part of the A/B aggregate gate.
+
+The measurement-helper rerun after adding WAL budget fields detected all 121 executable mutants:
+120 assertion kills and the same nonterminating histogram-scan timeout. There were no survivors.
 
 Native preflight experiment, separate from production implementation: Docker's Linux ARM64 kernel
 6.12.76-linuxkit accepts io_uring when the isolated test container permits it. A scratch .NET probe

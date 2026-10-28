@@ -2,7 +2,6 @@ namespace Nealytics.Engine.Infrastructure.Storage;
 
 using System;
 using System.Buffers;
-using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Channels;
@@ -21,28 +20,31 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
     private readonly WalRecordBuffer _recordBuffer;
     private readonly ArrayPool<byte> _recordPool;
     private readonly WalOperationGate _operations = new WalOperationGate();
-    private readonly SemaphoreSlim _fileLock = new SemaphoreSlim(1, 1);
-    private readonly SemaphoreSlim _serializationLock = new SemaphoreSlim(1, 1);
+    private readonly WalFlushStatistics _statistics = new WalFlushStatistics();
+    private readonly WalSynchronization _synchronization;
     private readonly object _disposeSync = new object();
     private readonly Channel<PendingAppend> _pending;
     private readonly Task _flushLoop;
     private Task? _disposeTask;
     private long _uncommittedRecords;
-    private long _flushGroupCount;
-    private long _flushedRecordCount;
-    private long _flushDurationTicks;
 
     public WriteAheadLogger(IOptions<TelemetryEngineOptions> options)
         : this(options, null)
     {
     }
 
-    internal WriteAheadLogger(IOptions<TelemetryEngineOptions> options, IWalFile? file, ArrayPool<byte>? recordPool = null)
+    internal WriteAheadLogger(
+        IOptions<TelemetryEngineOptions> options,
+        IWalFile? file,
+        ArrayPool<byte>? recordPool = null,
+        ArrayPool<byte>? serializationPool = null,
+        WalSynchronization? synchronization = null)
     {
         TelemetryEngineOptions engineOptions = options.Value;
         _limits = new WalLimits(engineOptions);
+        _synchronization = synchronization ?? new WalSynchronization();
         _admission = new WalAdmission(_limits.PendingRecords, _limits.PendingBytes);
-        _recordBuffer = new WalRecordBuffer(_limits.RecordBytes);
+        _recordBuffer = new WalRecordBuffer(_limits.RecordBytes, serializationPool);
         _recordPool = recordPool ?? ArrayPool<byte>.Shared;
         string directory = engineOptions.WriteAheadLogDirectory;
         Directory.CreateDirectory(directory);
@@ -51,12 +53,7 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
         SealExistingLogForRecovery();
 
         _file = file ?? new ManagedWalFile(_logFilePath, _limits.FileBufferBytes);
-        _pending = Channel.CreateBounded<PendingAppend>(new BoundedChannelOptions(_limits.PendingRecords)
-        {
-            SingleReader = true,
-            SingleWriter = true,
-            FullMode = BoundedChannelFullMode.Wait
-        });
+        _pending = Channel.CreateBounded<PendingAppend>(_limits.CreateChannelOptions());
         _flushLoop = Task.Run(RunFlushLoopAsync);
     }
 
@@ -65,29 +62,10 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
 
     public long UncommittedRecordCount => Interlocked.Read(ref _uncommittedRecords);
 
-    internal long FlushGroupCount => Interlocked.Read(ref _flushGroupCount);
-    internal long FlushedRecordCount => Interlocked.Read(ref _flushedRecordCount);
-    internal double AverageGroupSize
-    {
-        get
-        {
-            long groups = Interlocked.Read(ref _flushGroupCount);
-            return groups == 0 ? 0 : (double)Interlocked.Read(ref _flushedRecordCount) / groups;
-        }
-    }
-    internal double AverageFlushMilliseconds
-    {
-        get
-        {
-            long groups = Interlocked.Read(ref _flushGroupCount);
-            if (groups == 0)
-            {
-                return 0;
-            }
-            double seconds = (double)Interlocked.Read(ref _flushDurationTicks) / Stopwatch.Frequency;
-            return seconds / groups * 1000.0;
-        }
-    }
+    internal long FlushGroupCount => _statistics.GroupCount;
+    internal long FlushedRecordCount => _statistics.RecordCount;
+    internal double AverageGroupSize => _statistics.AverageGroupSize;
+    internal double AverageFlushMilliseconds => _statistics.AverageFlushMilliseconds;
 
     public async Task AcknowledgeCommitAsync(int committedCount)
     {
@@ -99,7 +77,7 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
         _operations.Enter();
         try
         {
-            await _fileLock.WaitAsync();
+            await _synchronization.File.WaitAsync();
             try
             {
                 _operations.ThrowIfFailed();
@@ -116,7 +94,7 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
             }
             finally
             {
-                _fileLock.Release();
+                _synchronization.File.Release();
             }
         }
         finally
@@ -130,7 +108,7 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
         _operations.Enter();
         try
         {
-            await _fileLock.WaitAsync();
+            await _synchronization.File.WaitAsync();
             try
             {
                 _operations.ThrowIfFailed();
@@ -143,7 +121,7 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
             }
             finally
             {
-                _fileLock.Release();
+                _synchronization.File.Release();
             }
         }
         finally
@@ -176,15 +154,13 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
         _pending.Writer.TryComplete();
         try
         {
-            await _flushLoop;
-            await idle;
+            await Task.WhenAll(_flushLoop, idle);
             await _file.DisposeAsync();
         }
         finally
         {
             _recordBuffer.Dispose();
-            _serializationLock.Dispose();
-            _fileLock.Dispose();
+            _synchronization.Dispose();
         }
     }
 }

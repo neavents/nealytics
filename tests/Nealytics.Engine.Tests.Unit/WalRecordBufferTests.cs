@@ -1,3 +1,4 @@
+using System.Buffers;
 using Nealytics.Engine.Infrastructure.Storage.Wal;
 
 namespace Nealytics.Engine.Tests.Unit;
@@ -82,5 +83,75 @@ public sealed class WalRecordBufferTests
         written.Dispose();
         written.Dispose();
         Assert.Empty(written.WrittenMemory.ToArray());
+    }
+
+    [Fact]
+    public void PartialCapacityCannotBeMistakenForAvailableWritableSpace()
+    {
+        ExactPool pool = new();
+        using WalRecordBuffer buffer = new(100, pool);
+        buffer.GetSpan(16).Fill(7);
+        buffer.Advance(12);
+        Memory<byte> next = buffer.GetMemory(8);
+        Assert.True(next.Length >= 8);
+        next.Span[..8].Fill(9);
+        buffer.Advance(8);
+        Assert.Equal(Enumerable.Repeat((byte)7, 12).Concat(Enumerable.Repeat((byte)9, 8)), buffer.WrittenMemory.ToArray());
+        Assert.Equal(2, pool.RentRequests.Count);
+    }
+
+    [Fact]
+    public void ExactFitReusesItsExistingLoanAndGrowthNeverRequestsMoreThanTheLimit()
+    {
+        ExactPool pool = new();
+        using WalRecordBuffer buffer = new(20, pool);
+        buffer.GetMemory(16);
+        buffer.Advance(12);
+        Assert.Equal(4, buffer.GetMemory(4).Length);
+        Assert.Single(pool.RentRequests);
+        buffer.GetMemory(5);
+        Assert.All(pool.RentRequests, requested => Assert.InRange(requested, 1, 20));
+    }
+
+    [Fact]
+    public void SmallWritesHaveBoundedRentalOverheadAndReturnEveryClearedLoan()
+    {
+        ExactPool pool = new();
+        WalRecordBuffer buffer = new(1024, pool);
+        for (int index = 0; index < 512; index++)
+        {
+            buffer.GetSpan(1)[0] = 7;
+            buffer.Advance(1);
+        }
+        Assert.InRange(pool.RentRequests.Count, 1, 10);
+        Assert.Equal(Enumerable.Repeat((byte)7, 512), buffer.WrittenMemory.ToArray());
+        buffer.Dispose();
+        Assert.Equal(pool.RentRequests.Count, pool.Returns.Count);
+        Assert.All(pool.Returns, returned => Assert.All(returned, value => Assert.Equal(0, value)));
+        buffer.Dispose();
+        Assert.Equal(pool.RentRequests.Count, pool.Returns.Count);
+    }
+
+    private sealed class ExactPool : ArrayPool<byte>
+    {
+        private readonly HashSet<byte[]> _owned = [];
+        public List<int> RentRequests { get; } = [];
+        public List<byte[]> Returns { get; } = [];
+
+        public override byte[] Rent(int minimumLength)
+        {
+            RentRequests.Add(minimumLength);
+            byte[] bytes = new byte[minimumLength];
+            Assert.True(_owned.Add(bytes));
+            return bytes;
+        }
+
+        public override void Return(byte[] array, bool clearArray = false)
+        {
+            Assert.True(_owned.Remove(array));
+            Assert.True(clearArray);
+            Array.Clear(array);
+            Returns.Add(array);
+        }
     }
 }

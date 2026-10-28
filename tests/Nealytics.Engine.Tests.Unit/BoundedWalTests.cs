@@ -362,6 +362,193 @@ public sealed class BoundedWalTests : IDisposable
             bytes, TelemetryAotContext.Default.GlobalTelemetryPayload)!.EventId);
     }
 
+    [Fact]
+    public async Task CancelledRequestsRetainTheirCancellationOutcomeAfterDisposal()
+    {
+        WriteAheadLogger wal = new(Options.Create(Settings()), new GateFile(gate: false));
+        await wal.DisposeAsync();
+        using CancellationTokenSource canceled = new();
+        canceled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => wal.AppendAsync(Event(), canceled.Token));
+    }
+
+    [Fact]
+    public async Task FatalStorageFailureIsCheckedBeforeSerializingAQueuedProducer()
+    {
+        GateFile file = new(gate: false) { FailTruncate = true };
+        using RecordPool pool = new() { BlockRent = true };
+        await using WriteAheadLogger wal = new(Options.Create(Settings()), file, pool);
+        Task first = Task.Run(() => wal.AppendAsync(Event(), CancellationToken.None));
+        Task? queued = null;
+        try
+        {
+            await pool.RentEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            queued = wal.AppendAsync(Event(100_000), CancellationToken.None);
+            Assert.Same(file.Failure, await Assert.ThrowsAsync<IOException>(() => wal.TruncateAsync()));
+        }
+        finally
+        {
+            pool.ReleaseRent.Set();
+        }
+
+        Assert.Same(file.Failure, await Assert.ThrowsAsync<IOException>(() => first));
+        Assert.Same(file.Failure, await Assert.ThrowsAsync<IOException>(() => queued!));
+        Assert.Equal(1, pool.RentCalls);
+    }
+
+    [Fact]
+    public async Task StorageOperationsWaitingForTheFileLockCannotRunAfterAFlushFailure()
+    {
+        GateFile file = new() { FailFlushAt = 1 };
+        await using WriteAheadLogger wal = new(Options.Create(Settings()), file);
+        Task append = wal.AppendAsync(Event(), CancellationToken.None);
+        Task? acknowledge = null;
+        Task? truncate = null;
+        try
+        {
+            await file.FirstFlushEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            acknowledge = wal.AcknowledgeCommitAsync(1);
+            truncate = wal.TruncateAsync();
+        }
+        finally
+        {
+            file.ReleaseFirstFlush.TrySetResult();
+        }
+        Assert.Same(file.Failure, await Assert.ThrowsAsync<IOException>(() => append));
+        Assert.Same(file.Failure, await Assert.ThrowsAsync<IOException>(() => acknowledge!));
+        Assert.Same(file.Failure, await Assert.ThrowsAsync<IOException>(() => truncate!));
+        Assert.Equal(0, file.TruncateCalls);
+    }
+
+    [Fact]
+    public async Task FailedFlushRejectsAReservedProducerBeforeItCanQueueBehindTheStoppedReader()
+    {
+        GateFile file = new() { FailFlushAt = 1 };
+        using RecordPool pool = new() { BlockRent = true, BlockOnRentCall = 2 };
+        await using WriteAheadLogger wal = new(Options.Create(Settings()), file, pool);
+        Task first = wal.AppendAsync(Event(), CancellationToken.None);
+        Task? reserved = null;
+        try
+        {
+            await file.FirstFlushEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            reserved = Task.Run(() => wal.AppendAsync(Event(), CancellationToken.None));
+            await pool.RentEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            file.ReleaseFirstFlush.TrySetResult();
+            Assert.Same(file.Failure, await Assert.ThrowsAsync<IOException>(() => first));
+        }
+        finally
+        {
+            file.ReleaseFirstFlush.TrySetResult();
+            pool.ReleaseRent.Set();
+        }
+        Assert.Same(file.Failure, await Assert.ThrowsAsync<IOException>(() => reserved!));
+        Assert.Equal(2, pool.RentCalls);
+        Assert.Equal(2, pool.ReturnCalls);
+        Assert.Equal(0, wal.PendingRecordCount);
+    }
+
+    [Fact]
+    public async Task FailedAdmissionDoesNotRentABufferForAWaitingProducer()
+    {
+        GateFile file = new() { FailFlushAt = 1 };
+        using RecordPool pool = new();
+        await using WriteAheadLogger wal = new(Options.Create(Settings(records: 1, flushRecords: 1)), file, pool);
+        Task first = wal.AppendAsync(Event(), CancellationToken.None);
+        Task? waiting = null;
+        try
+        {
+            await file.FirstFlushEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            waiting = wal.AppendAsync(Event(), CancellationToken.None);
+            Assert.False(waiting.IsCompleted);
+        }
+        finally
+        {
+            file.ReleaseFirstFlush.TrySetResult();
+        }
+        Assert.Same(file.Failure, await Assert.ThrowsAsync<IOException>(() => first));
+        Assert.Same(file.Failure, await Assert.ThrowsAsync<IOException>(() => waiting!));
+        Assert.Equal(1, pool.RentCalls);
+        Assert.Equal(1, pool.ReturnCalls);
+    }
+
+    [Fact]
+    public async Task NoCommittedRecordsDoNotTouchStorageAndExplicitTruncationReleasesTheLock()
+    {
+        GateFile file = new(gate: false);
+        await using WriteAheadLogger wal = new(Options.Create(Settings()), file);
+        await wal.AcknowledgeCommitAsync(0);
+        await wal.AcknowledgeCommitAsync(-1);
+        Assert.Equal(0, file.TruncateCalls);
+        await wal.TruncateAsync();
+        await wal.AppendAsync(Event(), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        await wal.AcknowledgeCommitAsync(1).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(2, file.TruncateCalls);
+        Assert.Equal(0, wal.UncommittedRecordCount);
+    }
+
+    [Fact]
+    public async Task ShutdownReturnsEveryClearedSerializerLoan()
+    {
+        using RecordPool serializers = new();
+        WriteAheadLogger wal = new(Options.Create(Settings()), new GateFile(gate: false), serializationPool: serializers);
+        await wal.AppendAsync(Event(1000), CancellationToken.None);
+        Assert.True(serializers.Outstanding > 0);
+        await wal.DisposeAsync();
+        Assert.Equal(serializers.RentCalls, serializers.ReturnCalls);
+        Assert.Equal(0, serializers.Outstanding);
+        Assert.True(serializers.AllReturnsCleared);
+    }
+
+    [Fact]
+    public async Task AnExactByteLimitPacksTheFullFlushGroup()
+    {
+        GlobalTelemetryPayload payload = Event(2000);
+        int framedBytes = JsonSerializer.SerializeToUtf8Bytes(
+            payload, TelemetryAotContext.Default.GlobalTelemetryPayload).Length + 1;
+        TelemetryEngineOptions settings = Settings(records: 20, flushRecords: 20);
+        settings.WalMaxRecordBytes = framedBytes * 4;
+        settings.WalMaxFlushBytes = framedBytes * 4;
+        GateFile file = new();
+        await using WriteAheadLogger wal = new(Options.Create(settings), file);
+        Task first = wal.AppendAsync(payload, CancellationToken.None);
+        Task[] queued = [];
+        try
+        {
+            await file.FirstFlushEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            queued = Enumerable.Range(0, 8).Select(_ => wal.AppendAsync(Event(2000), CancellationToken.None)).ToArray();
+            await WaitForAsync(() => wal.PendingRecordCount == 9);
+        }
+        finally
+        {
+            file.ReleaseFirstFlush.TrySetResult();
+        }
+        await Task.WhenAll(queued.Append(first)).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal([1, 4, 4], file.Groups.Select(group => group.Records));
+    }
+
+    [Fact]
+    public async Task AFlushWaitingForAFailedTruncationCannotAppendAnyBytes()
+    {
+        GateFile file = new(gate: false) { GateTruncate = true, FailTruncate = true };
+        await using WriteAheadLogger wal = new(Options.Create(Settings()), file);
+        Task truncate = wal.TruncateAsync();
+        Task? append = null;
+        try
+        {
+            await file.TruncateEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            append = wal.AppendAsync(Event(), CancellationToken.None);
+            Assert.False(append.IsCompleted);
+        }
+        finally
+        {
+            file.ReleaseTruncate.TrySetResult();
+        }
+        Assert.Same(file.Failure, await Assert.ThrowsAsync<IOException>(() => truncate));
+        Assert.Same(file.Failure, await Assert.ThrowsAsync<IOException>(() => append!));
+        Assert.Equal(0, file.AppendCalls);
+        Assert.Equal(0, wal.UncommittedRecordCount);
+    }
+
     private TelemetryEngineOptions Settings(int records = 100, int flushRecords = 2, int bytes = 65_536) => new()
     {
         WriteAheadLogDirectory = _directory,
@@ -415,6 +602,8 @@ public sealed class BoundedWalTests : IDisposable
 
         public TaskCompletionSource FirstFlushEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseFirstFlush { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource TruncateEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseTruncate { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public IOException Failure { get; } = new("injected uncertain storage failure");
         public List<byte[]> Records { get; } = [];
         public List<(int Records, int Bytes)> Groups { get; } = [];
@@ -422,8 +611,10 @@ public sealed class BoundedWalTests : IDisposable
         public int FailFlushAt { get; init; }
         public bool FailDispose { get; init; }
         public bool FailTruncate { get; init; }
+        public bool GateTruncate { get; init; }
         public int AppendCalls { get; private set; }
         public int DisposeCalls { get; private set; }
+        public int TruncateCalls { get; private set; }
         public bool Disposed { get; private set; }
 
         public ValueTask AppendAsync(ReadOnlyMemory<byte> record)
@@ -456,7 +647,19 @@ public sealed class BoundedWalTests : IDisposable
             _groupBytes = 0;
         }
 
-        public ValueTask TruncateAsync() => FailTruncate ? ValueTask.FromException(Failure) : ValueTask.CompletedTask;
+        public async ValueTask TruncateAsync()
+        {
+            TruncateCalls++;
+            if (GateTruncate)
+            {
+                TruncateEntered.TrySetResult();
+                await ReleaseTruncate.Task;
+            }
+            if (FailTruncate)
+            {
+                throw Failure;
+            }
+        }
 
         public ValueTask DisposeAsync()
         {
@@ -474,6 +677,7 @@ public sealed class BoundedWalTests : IDisposable
         public InvalidOperationException Failure { get; } = new("injected rental failure");
         public bool FailRent { get; set; }
         public bool BlockRent { get; init; }
+        public int BlockOnRentCall { get; init; } = 1;
         public int RentCalls { get; private set; }
         public int ReturnCalls { get; private set; }
         public bool AllReturnsCleared { get; private set; } = true;
@@ -482,9 +686,9 @@ public sealed class BoundedWalTests : IDisposable
         public override byte[] Rent(int minimumLength)
         {
             RentCalls++;
-            RentEntered.TrySetResult();
-            if (BlockRent)
+            if (BlockRent && RentCalls == BlockOnRentCall)
             {
+                RentEntered.TrySetResult();
                 Assert.True(ReleaseRent.Wait(TimeSpan.FromSeconds(5)));
             }
             if (FailRent)
