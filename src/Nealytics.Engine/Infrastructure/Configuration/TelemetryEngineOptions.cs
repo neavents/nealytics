@@ -147,6 +147,11 @@ public sealed class TelemetryEngineOptions
     public int ConnectionMaxIdleSeconds { get; set; } = 300;
     public int WalReplayRetryDelayMs { get; set; } = 10_000;
     public int WalFileBufferBytes { get; set; } = 65_536;
+    public int WalMaxPendingRecords { get; set; } = 4_096;
+    public int WalMaxPendingBytes { get; set; } = 33_554_432;
+    public int WalMaxRecordBytes { get; set; } = 16_777_216;
+    public int WalMaxFlushRecords { get; set; } = 256;
+    public int WalMaxFlushBytes { get; set; } = 16_777_216;
     public bool EnableWireCompression { get; set; } = true;
     public bool EnableAsyncInsert { get; set; } = true;
     public int MaxConcurrentConnections { get; set; } = 20_000;

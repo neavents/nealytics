@@ -5,7 +5,9 @@
       "Nealytics.Engine.Tests.Unit.csproj"
     ],
     "mutate": [
-      "Infrastructure/Storage/Wal/ManagedWalFile.cs"
+      "Infrastructure/Storage/Wal/**/*.cs",
+      "Infrastructure/Storage/WriteAheadLogger.cs",
+      "Infrastructure/Storage/WriteAheadLogger.Append.cs"
     ],
     "mutation-level": "Complete",
     "concurrency": 2,

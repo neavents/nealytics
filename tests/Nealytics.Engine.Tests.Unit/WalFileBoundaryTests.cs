@@ -108,7 +108,7 @@ public sealed class WalFileBoundaryTests : IDisposable
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task TruncationFailureIsReportedAndTheFileLockIsReleased(bool acknowledge)
+    public async Task TruncationFailureStopsFurtherStorageOperationsAndPreservesTheRecordCount(bool acknowledge)
     {
         IOException failure = new("truncate failure");
         TestWalFile file = new() { Truncate = () => ValueTask.FromException(failure) };
@@ -119,9 +119,11 @@ public sealed class WalFileBoundaryTests : IDisposable
             () => acknowledge ? wal.AcknowledgeCommitAsync(1) : wal.TruncateAsync());
 
         Assert.Same(failure, actual);
-        file.Truncate = null;
-        await wal.TruncateAsync().WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(2, file.TruncateCalls);
+        Assert.Equal(1, wal.UncommittedRecordCount);
+        Assert.Same(failure, await Assert.ThrowsAsync<IOException>(() => wal.TruncateAsync()));
+        Assert.Same(failure, await Assert.ThrowsAsync<IOException>(() => wal.AcknowledgeCommitAsync(1)));
+        Assert.Same(failure, await Assert.ThrowsAsync<IOException>(() => wal.AppendAsync(Event(), CancellationToken.None)));
+        Assert.Equal(1, file.TruncateCalls);
     }
 
     [Fact]

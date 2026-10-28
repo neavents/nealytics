@@ -10,12 +10,12 @@ checks, platform requirements, and applicable coverage/mutation gates have passe
 | --- | --- | --- |
 | A1 reproducible latency, offered load, resource and visibility baseline | Implemented; qualification open | 61 benchmark unit cases and four real-Kestrel/ClickHouse cases passed; sustained final-revision runs and harness-wide changed-line coverage remain |
 | A2 HTTP compatibility and durability/failure fixtures | In progress | Nine additional real-Kestrel contract cases passed; deterministic write/flush-fault cases follow the B1 seam |
-| A3 bounded pending WAL and flush groups | Pending | Current pending channel is unbounded |
+| A3 bounded pending WAL and flush groups | In progress | Bounded admission and groups implemented; 100 focused cases and 1,401 full unit cases passed; mutation and real-dependency qualification remain |
 | Streaming recovery | Pending | Current replay materializes the sealed WAL |
 | Replay-safe rollups and explicit delivery bounds | Pending | Persisted insert identity and pinned-server failure tests required |
 | Reserved read/write/probe capacity and bounded admission | Pending | Current connection factory is shared |
 | B1 shared WAL I/O contract with managed baseline | Implemented; aggregate qualification open | Managed file class: 100% line/branch coverage, six executable mutants killed; 42 focused WAL/HTTP cases passed |
-| B2 native io_uring backend and packaging | Pending | Real Linux x64/ARM64 execution and standalone published artifact required |
+| B2 native io_uring backend and packaging | Pending | ARM64 kernel experiment completed linked write/fsync/readback; production backend, x64 and artifact qualification remain |
 | B3 native integration and operator fallback | Pending | Native/managed parity, unsupported-host and crash tests required |
 | B4 bounded beacon microbatches | Pending | Preserve accepted-prefix, rejection and cancellation semantics |
 | B5 custom ingestion dispatcher | Pending | Existing HTTP requests and policy behavior must remain compatible |
@@ -70,3 +70,25 @@ truncation and appending without gaps. Native I/O is not implemented by this ext
 The warning-free build, all 1,327 unit cases and six real-ClickHouse/HTTP recovery and benchmark
 cases passed after extraction, with zero skips. The full integration and published-artifact
 qualification will also be repeated after the remaining A/B changes.
+
+A3 component evidence:
+
+- Pending records and framed bytes are reserved before renting a pending buffer. A bounded
+  serializer scratch buffer is shared, and each flush group has explicit record/byte limits.
+- Write, flush and truncation failures stop admission and fault queued work. Cancellation before
+  queueing releases reservations; queued appends await durability. Shutdown and allocation-failure
+  fixtures verify exact buffer return and no stranded reservations.
+- One hundred focused cases passed, followed by all 1,401 unit cases with zero skips. The collector
+  reports 100% line and branch coverage for the changed append/accounting/lifecycle code and new
+  WAL helpers. The unchanged recovery reader still has inherited branch gaps. Repository-wide
+  unit totals, including generated code, are 9,655/17,636 lines and 2,416/4,124 branches.
+- The complete-level mutation run covers the changed WAL files and helpers with thresholds at
+  100%; results are pending and this package is not yet marked complete.
+
+Native preflight experiment, separate from production implementation: Docker's Linux ARM64 kernel
+6.12.76-linuxkit accepts io_uring when the isolated test container permits it. A scratch .NET probe
+submitted a linked write and fsync, observed completion results 22 and 0, and read the expected
+22 bytes back from a temporary file. The default Docker profile returned EPERM at ring creation.
+The permitted experiment used a network-disabled, capability-free, 512-MiB/one-CPU container with
+seccomp disabled for that one container. Host and existing container policies were untouched.
+This is not backend qualification, a crash test, x64 evidence, or a performance result.

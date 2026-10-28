@@ -51,7 +51,8 @@ public sealed class BenchmarkManifest
             "DatabaseBatchCommitSize", "ForceFlushIntervalSeconds", "MemoryChannelCapacity",
             "RateLimitPermitCount", "RateLimitWindowSeconds", "RateLimitQueueSize",
             "ConnectionPoolSize", "WalFileBufferBytes", "EnableAsyncInsert", "EnableWireCompression",
-            "WalBackend", "IngestionPipeline"
+            "WalBackend", "IngestionPipeline", "WalMaxPendingRecords", "WalMaxPendingBytes",
+            "WalMaxRecordBytes", "WalMaxFlushRecords", "WalMaxFlushBytes"
         ];
 
         Dictionary<string, string> settings = new(StringComparer.Ordinal);

@@ -203,7 +203,8 @@ public sealed class MeasurementTests
             "DatabaseBatchCommitSize", "ForceFlushIntervalSeconds", "MemoryChannelCapacity",
             "RateLimitPermitCount", "RateLimitWindowSeconds", "RateLimitQueueSize",
             "ConnectionPoolSize", "WalFileBufferBytes", "EnableAsyncInsert", "EnableWireCompression",
-            "WalBackend", "IngestionPipeline"
+            "WalBackend", "IngestionPipeline", "WalMaxPendingRecords", "WalMaxPendingBytes",
+            "WalMaxRecordBytes", "WalMaxFlushRecords", "WalMaxFlushBytes"
         ];
 
         Dictionary<string, string> settings = BenchmarkManifest.CaptureSettings(key => key);
