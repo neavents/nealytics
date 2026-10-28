@@ -38,6 +38,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Nealytics.Engine\Nealytics.Engine.csproj" />
+    <ProjectReference Include="../../bench/Nealytics.Engine.Bench/Nealytics.Engine.Bench.csproj" />
   </ItemGroup>
 
   <ItemGroup>

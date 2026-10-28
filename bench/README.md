@@ -1,5 +1,38 @@
 # Nealytics load-test harness
 
+## Reproducible measurement options
+
+The harness accepts `--rate <requests-per-second>` for an absolute fixed-arrival schedule,
+`--manifest <path.json>` for a machine-readable run manifest, and `--visibility-every <N>` to
+sample the query visibility of one identified event every N requests. All default to disabled;
+existing command lines remain valid. Fixed-arrival latency includes time waiting behind the
+configured concurrency limit, so overload is visible rather than hidden by a closed-loop client.
+
+Request latency uses a fixed-memory histogram with microsecond rounding and power-of-two
+sub-buckets of 1/256. Percentiles and maximum are upper-bucket estimates; older reports used
+interpolation and an exact sample maximum. Histogram snapshots are taken after writers stop.
+
+Visibility is an upper-bound observation from request start through a successful database query,
+not the exact server commit instant. A single bounded probe worker polls by event ID; manifests
+report sample count, probe drops, and timeouts. Missing visibility values are null. Probe sampling
+adds database work, so use identical sample settings in comparisons. Successful HTTP acknowledgment
+and query visibility are separate measurements.
+
+Client CPU, allocation, and working-set fields describe the load generator, not the engine.
+`declaredEngineSettings` contains only an allowlist of environment values supplied to the harness;
+it does not claim to discover the effective configuration of a remote server. Target URLs omit
+userinfo, queries, and fragments; keys, signing secrets, and connection strings are not serialized.
+Stored-count verification requires equality: loss, duplicates, and unavailable counts all fail it.
+
+Focused tests and mutation checks:
+
+```bash
+dotnet test tests/Nealytics.Engine.Bench.Tests --collect:"XPlat Code Coverage"
+dotnet tool restore
+cd bench/Nealytics.Engine.Bench
+dotnet stryker --config-file stryker-config.json
+```
+
 A layered load generator for the Nealytics ingest and read paths. It isolates each stage —
 HTTP round-trip, WAL group-commit, channel, single-event ingest, batched ingest — so you can
 see **where** time goes instead of only the end-to-end number. It records **throughput,
