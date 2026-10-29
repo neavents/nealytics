@@ -10,6 +10,35 @@ namespace Nealytics.Engine.Tests.Unit;
 
 public sealed class WalBatchAppendTests
 {
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(2)]
+    public async Task InvalidStartingOffsetsAreRefusedBeforeAdmission(int startIndex)
+    {
+        RecordingFile file = new();
+        await using Harness harness = new(file);
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            harness.Wal.AppendBatchAsync([Event()], CancellationToken.None, startIndex));
+        Assert.Equal(0, file.Appends);
+        Assert.Equal(0, harness.Wal.PendingRecordCount);
+    }
+
+    [Fact]
+    public async Task StartingOffsetsDoNotReencodeOrCommitTheAlreadyCompletedPrefix()
+    {
+        RecordingFile file = new();
+        await using Harness harness = new(file, configure: options => options.WalMaxFlushRecords = 2);
+        GlobalTelemetryPayload first = Event();
+        GlobalTelemetryPayload last = Event();
+        GlobalTelemetryPayload[] events = [null!, first, last];
+        WalBatchAppendResult result = await harness.Wal.AppendBatchAsync(events, CancellationToken.None, 1);
+        Assert.Equal(2, result.Count);
+        result.ThrowIfFailed();
+        Assert.Equal(Frame(first).Concat(Frame(last)), file.Bytes);
+        Assert.Equal(0, (await harness.Wal.AppendBatchAsync(events, CancellationToken.None, events.Length)).Count);
+        Assert.Equal(1, file.Flushes);
+    }
+
     [Fact]
     public async Task OneContiguousGroupUsesOneBarrierAndCountsEveryLogicalRecord()
     {
@@ -206,7 +235,8 @@ public sealed class WalBatchAppendTests
     private static GlobalTelemetryPayload Event(int size = 2_200) => new()
     {
         ProjectId = "p", TenantId = "t", SessionId = "s", EventType = "e",
-        MetadataJson = JsonSerializer.Serialize(new string('x', size), TelemetryAotContext.Default.String)
+        MetadataJson = JsonSerializer.Serialize(new string('x', size), TelemetryAotContext.Default.String),
+        Timestamp = new DateTime(2026, 10, 29, 0, 0, 0, DateTimeKind.Utc)
     };
 
     private static byte[] Frame(GlobalTelemetryPayload payload) =>

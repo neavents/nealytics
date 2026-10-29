@@ -11,14 +11,16 @@ using Nealytics.Engine.Infrastructure.Storage.Wal;
 public sealed partial class WriteAheadLogger
 {
     internal async Task<WalBatchAppendResult> AppendBatchAsync(
-        IReadOnlyList<GlobalTelemetryPayload> payloads, CancellationToken cancellationToken)
+        IReadOnlyList<GlobalTelemetryPayload> payloads, CancellationToken cancellationToken, int startIndex = 0)
     {
         ArgumentNullException.ThrowIfNull(payloads);
+        ArgumentOutOfRangeException.ThrowIfNegative(startIndex);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(startIndex, payloads.Count);
         cancellationToken.ThrowIfCancellationRequested();
         _operations.Enter();
         try
         {
-            if (payloads.Count == 0)
+            if (startIndex == payloads.Count)
             {
                 return new WalBatchAppendResult(0, null);
             }
@@ -28,7 +30,7 @@ public sealed partial class WriteAheadLogger
             try
             {
                 _operations.ThrowIfFailed();
-                result = EncodeBatch(payloads);
+                result = EncodeBatch(payloads, startIndex);
                 if (result.Count > 0)
                 {
                     pending = await EnqueueEncodedAsync(_batchBuffer.WrittenMemory, result.Count, cancellationToken);
@@ -50,18 +52,19 @@ public sealed partial class WriteAheadLogger
         }
     }
 
-    private WalBatchAppendResult EncodeBatch(IReadOnlyList<GlobalTelemetryPayload> payloads)
+    private WalBatchAppendResult EncodeBatch(IReadOnlyList<GlobalTelemetryPayload> payloads, int startIndex)
     {
         _batchBuffer.Reset();
         int count = 0;
         ExceptionDispatchInfo? failure = null;
         try
         {
-            while (count < payloads.Count && count < _limits.FlushRecords)
+            while (count < payloads.Count - startIndex && count < _limits.FlushRecords)
             {
-                ArgumentNullException.ThrowIfNull(payloads[count]);
+                GlobalTelemetryPayload payload = payloads[startIndex + count];
+                ArgumentNullException.ThrowIfNull(payload);
                 _recordBuffer.Reset();
-                WalRecordEncoding.Serialize(payloads[count], _recordBuffer);
+                WalRecordEncoding.Serialize(payload, _recordBuffer);
                 ReadOnlyMemory<byte> record = _recordBuffer.WrittenMemory;
                 if (record.Length > _limits.FlushBytes - _batchBuffer.WrittenMemory.Length)
                 {

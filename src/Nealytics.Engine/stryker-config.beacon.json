@@ -1,0 +1,30 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~BeaconBatchIngestorTests|FullyQualifiedName~WalBatchAppendTests|FullyQualifiedName~WalGroupAdmissionTests|FullyQualifiedName~BoundedWalTests|FullyQualifiedName~WalBudgetTests|FullyQualifiedName~WalFileBoundaryTests|FullyQualifiedName~WalFileSelectionTests|FullyQualifiedName~WalEncodingAndSynchronizationTests|FullyQualifiedName~WalFlushStatisticsTests|FullyQualifiedName~WalOperationGateTests|FullyQualifiedName~WalRecordBufferTests|FullyQualifiedName~WalEncodingReservationTests|FullyQualifiedName~WriteAheadLoggerTests",
+    "mutate": [
+      "Features/IngestTelemetry/BeaconBatchIngestor.cs",
+      "Infrastructure/Storage/WriteAheadLogger.cs",
+      "Infrastructure/Storage/WriteAheadLogger.Append.cs",
+      "Infrastructure/Storage/WriteAheadLogger.Batch.cs",
+      "Infrastructure/Storage/Wal/WalAdmission.cs",
+      "Infrastructure/Storage/Wal/WalBatchAppendResult.cs"
+    ],
+    "mutation-level": "Complete",
+    "concurrency": 2,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    }
+  }
+}

@@ -14,7 +14,6 @@ using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Diagnostics;
 using Nealytics.Engine.Infrastructure.Security;
 using Nealytics.Engine.Infrastructure.Serialization;
-using Nealytics.Engine.Infrastructure.Storage;
 
 public static partial class BeaconTelemetryEndpoint
 {
@@ -28,13 +27,9 @@ public static partial class BeaconTelemetryEndpoint
     {
         endpoints.MapPost("/api/v1/telemetry/beacon", async (
             HttpContext context,
-            TelemetryChannelBroker broker,
-            WriteAheadLogger wal,
+            BeaconBatchIngestor ingestor,
             ApiKeyValidator keyValidator,
-            DimensionSanitizer dimensionSanitizer,
-            MeasureSanitizer measureSanitizer,
             ILoggerFactory loggerFactory,
-            IngestGate gate,
             IOptions<TelemetryEngineOptions> options) =>
         {
             using Activity? activity = TelemetryDiagnostics.Source.StartActivity("BeaconIngest");
@@ -61,45 +56,29 @@ public static partial class BeaconTelemetryEndpoint
             {
                 PipeReader bodyReader = PipeReader.Create(
                     new LengthLimitedStream(context.Request.Body, options.Value.MaxRequestBodyBytes));
-                int accepted = 0;
-                int rejected = 0;
-                DateTime receivedAt = DateTime.UtcNow;
-
-                await foreach (GlobalTelemetryPayload? payload in
-                    JsonSerializer.DeserializeAsyncEnumerable(
+                BeaconIngestResult result;
+                try
+                {
+                    IAsyncEnumerable<GlobalTelemetryPayload?> payloads = JsonSerializer.DeserializeAsyncEnumerable(
                         bodyReader,
                         TelemetryAotContext.Default.GlobalTelemetryPayload,
-                        context.RequestAborted))
+                        context.RequestAborted);
+                    result = await ingestor.IngestAsync(payloads, policy!, DateTime.UtcNow, context.RequestAborted);
+                }
+                finally
                 {
-                    IngestRejection rejection = gate.Check(policy, payload, receivedAt, out _);
-
-                    if (rejection != IngestRejection.None)
-                    {
-                        rejected++;
-                        TelemetryDiagnostics.EventsRejected.Add(
-                            1,
-                            new KeyValuePair<string, object?>("reason", IngestValidation.Tag(rejection)),
-                            new KeyValuePair<string, object?>("transport", "beacon"));
-                        continue;
-                    }
-
-                    dimensionSanitizer.Sanitize(payload!);
-                    measureSanitizer.Sanitize(payload!);
-
-                    await wal.AppendAsync(payload!, context.RequestAborted);
-                    await broker.PublishAsync(payload!, context.RequestAborted);
-                    accepted++;
+                    await bodyReader.CompleteAsync();
                 }
 
-                activity?.SetTag("nealytics.beacon_events", accepted);
-                activity?.SetTag("nealytics.beacon_rejected", rejected);
+                activity?.SetTag("nealytics.beacon_events", result.Accepted);
+                activity?.SetTag("nealytics.beacon_rejected", result.Rejected);
 
-                if (rejected > 0)
+                if (result.Rejected > 0)
                 {
                     LogRejectedBeaconElements(
                         loggerFactory.CreateLogger(typeof(BeaconTelemetryEndpoint)),
-                        rejected,
-                        accepted + rejected);
+                        result.Rejected,
+                        result.Accepted + result.Rejected);
                 }
 
                 context.Response.StatusCode = StatusCodes.Status204NoContent;

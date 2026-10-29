@@ -133,6 +133,7 @@ public sealed class TelemetryEngineOptions
     public string AllowedProjectKeys { get; set; } = string.Empty;
     public string JwtSymmetricKey { get; set; } = string.Empty;
     public int MaxRequestBodyBytes { get; set; } = 1_048_576;
+    public int BeaconWalBatchRecords { get; set; } = 64;
     public int MaxQueryLimit { get; set; } = 10_000;
     public int RateLimitPermitCount { get; set; } = 1_000;
     public int RateLimitWindowSeconds { get; set; } = 10;
