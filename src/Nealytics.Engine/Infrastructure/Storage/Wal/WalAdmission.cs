@@ -33,8 +33,13 @@ internal sealed class WalAdmission
         get { lock (_sync) { return _bytes; } }
     }
 
-    public async ValueTask ReserveAsync(int bytes, CancellationToken cancellationToken)
+    public ValueTask ReserveAsync(int bytes, CancellationToken cancellationToken) =>
+        ReserveAsync(1, bytes, cancellationToken);
+
+    public async ValueTask ReserveAsync(int records, int bytes, CancellationToken cancellationToken)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(records, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(records, _recordLimit);
         ArgumentOutOfRangeException.ThrowIfLessThan(bytes, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(bytes, _byteLimit);
 
@@ -45,9 +50,9 @@ internal sealed class WalAdmission
             lock (_sync)
             {
                 _closed?.Throw();
-                if (_records < _recordLimit && bytes <= _byteLimit - _bytes)
+                if (records <= _recordLimit - _records && bytes <= _byteLimit - _bytes)
                 {
-                    _records++;
+                    _records += records;
                     _bytes += bytes;
                     return;
                 }
@@ -60,17 +65,19 @@ internal sealed class WalAdmission
         }
     }
 
-    public void Release(int bytes)
+    public void Release(int bytes) => Release(1, bytes);
+
+    public void Release(int records, int bytes)
     {
         TaskCompletionSource? changed;
         lock (_sync)
         {
-            if (bytes < 1 || _records == 0 || bytes > _bytes)
+            if (records < 1 || records > _records || bytes < 1 || bytes > _bytes)
             {
                 throw new InvalidOperationException("WAL admission release exceeds the reserved budget.");
             }
 
-            _records--;
+            _records -= records;
             _bytes -= bytes;
             changed = _changed;
             _changed = null;

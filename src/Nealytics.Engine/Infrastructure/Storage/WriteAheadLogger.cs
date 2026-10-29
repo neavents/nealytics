@@ -19,6 +19,7 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
     private readonly WalLimits _limits;
     private readonly WalAdmission _admission;
     private readonly WalRecordBuffer _recordBuffer;
+    private readonly WalRecordBuffer _batchBuffer;
     private readonly ArrayPool<byte> _recordPool;
     private readonly WalOperationGate _operations = new WalOperationGate();
     private readonly WalFlushStatistics _statistics = new WalFlushStatistics();
@@ -64,6 +65,7 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
         _synchronization = synchronization ?? new WalSynchronization();
         _admission = new WalAdmission(_limits.PendingRecords, _limits.PendingBytes);
         _recordBuffer = new WalRecordBuffer(_limits.RecordBytes, serializationPool);
+        _batchBuffer = new WalRecordBuffer(_limits.FlushBytes, serializationPool);
         _recordPool = recordPool ?? ArrayPool<byte>.Shared;
         _logFilePath = Path.Combine(directory, "telemetry_wal.log");
         _sealedFilePath = Path.Combine(directory, "telemetry_wal.replay");
@@ -210,6 +212,7 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
         finally
         {
             _recordBuffer.Dispose();
+            _batchBuffer.Dispose();
             _synchronization.Dispose();
         }
     }
