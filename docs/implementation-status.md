@@ -18,8 +18,8 @@ checks, platform requirements, and applicable coverage/mutation gates have passe
 | B1 shared WAL I/O contract with managed baseline | Implemented; aggregate qualification open | Managed file class: 100% line/branch coverage, six executable mutants killed; 42 focused WAL/HTTP cases passed |
 | B2 native io_uring backend and packaging | Implemented; platform/artifact gates passed | Actual x64 and ARM64 native faults/sanitizers, scoped coverage/mutation, standalone and container artifacts passed; aggregate crash/performance work remains |
 | B3 native integration and operator fallback | Implemented; platform/artifact gates passed | Both actual architectures passed run 40830818024 after the terminal-channel regression; shared recovery/HTTP contracts passed; aggregate crash qualification remains |
-| B4 bounded beacon microbatches | Pending | Preserve accepted-prefix, rejection and cancellation semantics |
-| B5 custom ingestion dispatcher | Pending | Existing HTTP requests and policy behavior must remain compatible |
+| B4 bounded beacon microbatches | Implemented; consolidated qualification open | 1,760 unit, 148 ClickHouse, 24 native and eleven real-native HTTP cases passed; see the B4 checkpoint |
+| B5 custom ingestion dispatcher | In progress | Direct bounded request-pipe reading and durable dispatch ownership implemented behind the managed/custom switch; focused parity checks pass |
 | B6 combined qualification/default selection | Pending | Matched-load four-combination latency/CPU/memory/visibility evidence required |
 | Full build, unit, integration and published-artifact end-to-end | In progress | Capturing the unchanged baseline before implementation |
 | Changed maintained-code line/branch coverage | Pending | Baseline unit collector includes generated source; classify and combine with integration evidence |

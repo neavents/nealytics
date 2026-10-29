@@ -35,6 +35,7 @@ public static partial class BeaconTelemetryEndpoint
     private static async Task HandleAsync(
         HttpContext context,
         BeaconBatchIngestor ingestor,
+        IngestionRequestReader reader,
         ApiKeyValidator keyValidator,
         ILoggerFactory loggerFactory,
         IOptions<TelemetryEngineOptions> options)
@@ -62,8 +63,7 @@ public static partial class BeaconTelemetryEndpoint
 
         try
         {
-            PipeReader bodyReader = PipeReader.Create(
-                new LengthLimitedStream(context.Request.Body, options.Value.MaxRequestBodyBytes));
+            PipeReader bodyReader = reader.Open(context);
             BeaconIngestResult result = await IngestBodyAsync(bodyReader, ingestor, policy!, context.RequestAborted);
 
             activity?.SetTag("nealytics.beacon_events", result.Accepted);

@@ -9,30 +9,25 @@ using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Diagnostics;
 using Nealytics.Engine.Infrastructure.Security;
 using Nealytics.Engine.Infrastructure.Serialization;
-using Nealytics.Engine.Infrastructure.Storage;
-using Nealytics.Engine.Infrastructure.Storage.Wal;
 
 internal readonly record struct BeaconIngestResult(int Accepted, int Rejected);
 
 internal sealed class BeaconBatchIngestor
 {
-    private readonly WriteAheadLogger _wal;
-    private readonly TelemetryChannelBroker _broker;
+    private readonly DurableIngestDispatcher _dispatcher;
     private readonly IngestGate _gate;
     private readonly DimensionSanitizer _dimensions;
     private readonly MeasureSanitizer _measures;
     private readonly int _records;
 
     public BeaconBatchIngestor(
-        WriteAheadLogger wal,
-        TelemetryChannelBroker broker,
+        DurableIngestDispatcher dispatcher,
         IngestGate gate,
         DimensionSanitizer dimensions,
         MeasureSanitizer measures,
         IOptions<TelemetryEngineOptions> options)
     {
-        _wal = wal;
-        _broker = broker;
+        _dispatcher = dispatcher;
         _gate = gate;
         _dimensions = dimensions;
         _measures = measures;
@@ -123,21 +118,9 @@ internal sealed class BeaconBatchIngestor
     private async Task<int> FlushAsync(
         List<GlobalTelemetryPayload> buffer, CancellationToken persistenceToken, CancellationToken publishToken)
     {
-        int offset = 0;
         try
         {
-            while (offset < buffer.Count)
-            {
-                WalBatchAppendResult result = await _wal.AppendBatchAsync(buffer, persistenceToken, offset);
-                int end = offset + result.Count;
-                while (offset < end)
-                {
-                    await _broker.PublishAsync(buffer[offset], publishToken);
-                    offset++;
-                }
-                result.ThrowIfFailed();
-            }
-            return offset;
+            return await _dispatcher.AppendBatchAsync(buffer, persistenceToken, publishToken);
         }
         finally
         {

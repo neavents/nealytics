@@ -74,6 +74,10 @@ A5 has a [rollup readiness brief](packages/a5-rollup-readiness.md) after a real 
 failure exposed routing to partial backfill results. It establishes persisted completion before
 routing; stable delivery identity and resumable rebuild semantics remain separate A6 work.
 
+B5 has a [custom ingestion brief](packages/b5-custom-ingestion.md). Implementation retains managed
+execution as the default and adds direct bounded pipe reading and caller-independent durable
+handoff in custom mode. Broad qualification is consolidated at implementation milestones.
+
 ## 3. How to split the later work
 
 Deliver an end-to-end slice per package, rather than a whole subsystem:

@@ -354,7 +354,9 @@ public sealed class BeaconBatchIngestorTests
         {
             DimensionRegistry dimensions = new(Options);
             MeasureRegistry measures = new(Options, dimensions);
-            return new BeaconBatchIngestor(Wal, Broker, new IngestGate(Options, measures),
+            return new BeaconBatchIngestor(new DurableIngestDispatcher(Wal, Broker,
+                new IngestionRequestReader(Microsoft.Extensions.Options.Options.Create(Options)),
+                NSubstitute.Substitute.For<Microsoft.Extensions.Hosting.IHostApplicationLifetime>()), new IngestGate(Options, measures),
                 new DimensionSanitizer(dimensions, NullLogger<DimensionSanitizer>.Instance),
                 new MeasureSanitizer(measures, NullLogger<MeasureSanitizer>.Instance),
                 Microsoft.Extensions.Options.Options.Create(Options));
