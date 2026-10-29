@@ -30,7 +30,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Qualify actual host architecture and native artifact
+        shell: bash
         run: |
+          set -o pipefail
           result_directory='artifacts/platform/${{ matrix.rid }}'
           mkdir -p "$result_directory"
           if bash native/qualify.sh '${{ matrix.rid }}' 2>&1 | tee "$result_directory/qualification.log"; then
