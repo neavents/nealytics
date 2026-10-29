@@ -136,6 +136,8 @@ public sealed class TelemetryEngineOptions
     public int BeaconWalBatchRecords { get; set; } = 64;
 
     public string IngestionExecutionPath { get; set; } = "managed";
+    public int MaxConcurrentIngestionRequests { get; set; } = 64;
+    public long IngestionRequestByteBudget { get; set; } = 16_777_216;
     public int MaxQueryLimit { get; set; } = 10_000;
     public int RateLimitPermitCount { get; set; } = 1_000;
     public int RateLimitWindowSeconds { get; set; } = 10;

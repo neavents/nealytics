@@ -181,6 +181,7 @@ if (engineOpts.EnableRequestDecompression)
 builder.Services.AddRateLimiter(limiter =>
 {
     limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    limiter.GlobalLimiter = IngestionRequestAdmission.Create(engineOpts);
     limiter.AddFixedWindowLimiter("ingestion", window =>
     {
         window.PermitLimit = engineOpts.RateLimitPermitCount;
