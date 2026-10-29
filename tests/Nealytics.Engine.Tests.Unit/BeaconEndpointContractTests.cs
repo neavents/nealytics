@@ -4,6 +4,8 @@ using System.Net;
 using System.Text;
 using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,6 +21,62 @@ namespace Nealytics.Engine.Tests.Unit;
 public sealed class BeaconEndpointContractTests
 {
     private const string Event = """{"projectId":"p","tenantId":"t","sessionId":"s","eventType":"e"}""";
+
+    [Fact]
+    public async Task AnOversizedDeclarationReturnsBeforeAnyBodyRead()
+    {
+        await using Factory factory = new(128);
+        DefaultHttpContext context = Context(factory);
+        context.Request.ContentLength = 129;
+        RejectReads stream = new();
+        context.Request.Body = stream;
+        await Endpoint(factory).RequestDelegate!(context);
+        Assert.Equal(413, context.Response.StatusCode);
+        Assert.Equal(0, stream.Reads);
+        Assert.Equal(0, factory.Services.GetRequiredService<WriteAheadLogger>().UncommittedRecordCount);
+    }
+
+    [Fact]
+    public async Task AnAcceptedBeaconAppliesItsConfiguredLimitToTheHostFeature()
+    {
+        await using Factory factory = new(128);
+        DefaultHttpContext context = Context(factory);
+        context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes("[" + Event + "]"));
+        BodyLimitFeature feature = new();
+        context.Features.Set<IHttpMaxRequestBodySizeFeature>(feature);
+        await Endpoint(factory).RequestDelegate!(context);
+        Assert.Equal(204, context.Response.StatusCode);
+        Assert.Equal(128, feature.MaxRequestBodySize);
+    }
+
+    private static DefaultHttpContext Context(Factory factory)
+    {
+        DefaultHttpContext context = new();
+        context.RequestServices = factory.Services;
+        context.Request.QueryString = new QueryString("?k=unit-key-1");
+        return context;
+    }
+
+    private static RouteEndpoint Endpoint(Factory factory) =>
+        Assert.Single(factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>(),
+            item => item.RoutePattern.RawText == "/api/v1/telemetry/beacon");
+
+    private sealed class BodyLimitFeature : IHttpMaxRequestBodySizeFeature
+    {
+        public bool IsReadOnly => false;
+        public long? MaxRequestBodySize { get; set; } = 1_000;
+    }
+
+    private sealed class RejectReads : MemoryStream
+    {
+        public int Reads { get; private set; }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Reads++;
+            throw new IOException("The declared oversized body must remain unread.");
+        }
+    }
 
     [Theory]
     [InlineData("", false)]

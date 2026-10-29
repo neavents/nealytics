@@ -91,6 +91,24 @@ public sealed class BoundedRequestPipeReaderTests
     }
 
     [Fact]
+    public async Task CompletionReleasesAnOutstandingBufferExactlyOnce()
+    {
+        Pipe pipe = new();
+        BoundedRequestPipeReader reader = new(pipe.Reader, 3);
+        await pipe.Writer.WriteAsync("old"u8.ToArray());
+        ReadResult first = await reader.ReadAsync();
+        Assert.Equal("old", Encoding.UTF8.GetString(first.Buffer));
+        await reader.CompleteAsync();
+        await reader.CompleteAsync();
+        await pipe.Writer.WriteAsync("new"u8.ToArray());
+        await pipe.Writer.CompleteAsync();
+        ReadResult remaining = await pipe.Reader.ReadAsync();
+        Assert.Equal("new", Encoding.UTF8.GetString(remaining.Buffer));
+        pipe.Reader.AdvanceTo(remaining.Buffer.End);
+        await pipe.Reader.CompleteAsync();
+    }
+
+    [Fact]
     public async Task CallerCancellationPropagatesWithoutOwningTheServerPipe()
     {
         Pipe pipe = new();
