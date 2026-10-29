@@ -15,14 +15,14 @@ checks, platform requirements, and applicable coverage/mutation gates have passe
 | Replay-safe rollups and explicit delivery bounds | Pending | Persisted insert identity and pinned-server failure tests required |
 | Reserved read/write/probe capacity and bounded admission | Pending | Current connection factory is shared |
 | B1 shared WAL I/O contract with managed baseline | Implemented; aggregate qualification open | Managed file class: 100% line/branch coverage, six executable mutants killed; 42 focused WAL/HTTP cases passed |
-| B2 native io_uring backend and packaging | Pending | ARM64 kernel experiment completed linked write/fsync/readback; production backend, x64 and artifact qualification remain |
+| B2 native io_uring backend and packaging | Implemented; platform/artifact qualification open | Real ARM64 bridge/backend, native fault/sanitizer checks and 100% scoped coverage/mutation passed; actual x64 and standalone artifact checks remain |
 | B3 native integration and operator fallback | Pending | Native/managed parity, unsupported-host and crash tests required |
 | B4 bounded beacon microbatches | Pending | Preserve accepted-prefix, rejection and cancellation semantics |
 | B5 custom ingestion dispatcher | Pending | Existing HTTP requests and policy behavior must remain compatible |
 | B6 combined qualification/default selection | Pending | Matched-load four-combination latency/CPU/memory/visibility evidence required |
 | Full build, unit, integration and published-artifact end-to-end | In progress | Capturing the unchanged baseline before implementation |
 | Changed maintained-code line/branch coverage | Pending | Baseline unit collector includes generated source; classify and combine with integration evidence |
-| Stryker mutation checks | Partial | Shared WAL scope: 174 killed, 54 timeout detections, zero survivors; measurement helpers: 120 killed, one nontermination timeout; native and surrounding harness checks remain |
+| Stryker mutation checks | Partial | Shared WAL: 174 killed, 54 timeout detections; measurement helpers: 120 killed, one timeout; native boundary: 87 killed, 14 timeout detections; all three scopes have zero survivors, surrounding harness remains |
 | Source style, architecture and domain neutrality guards | Baseline passed | Included in the 1,303-test unit run |
 
 Baseline snapshot: engine f1cfe3e0c4e69bbbafc6096c02659a68986d0836; planning commit 90babda.
@@ -107,3 +107,14 @@ submitted a linked write and fsync, observed completion results 22 and 0, and re
 The permitted experiment used a network-disabled, capability-free, 512-MiB/one-CPU container with
 seccomp disabled for that one container. Host and existing container policies were untouched.
 This is not backend qualification, a crash test, x64 evidence, or a performance result.
+
+B2 now contains the native file backend, statically linked pinned liburing bridge and embedded
+native-library packaging configuration. It remains outside live ingestion until B3 selection.
+After A3 integration, all 1,494 portable unit cases and thirteen real Linux ARM64 native cases
+passed with zero skips. Combined same-source collectors cover all 229 maintained native-boundary
+lines and branch outcomes. The native C bridge separately covers all 145 maintained statements
+and 112 branch outcomes with clean address, undefined-behavior and leak sanitizer runs.
+The native managed mutation rerun detects all 101 executable mutants: 87 assertion kills and
+fourteen progress/lifecycle timeout detections, with no survivors or uncovered mutants. The
+earlier 84.16% run drove stronger checks; no threshold was reduced. See the
+[B2 review](packages/b2-native-backend.md) for timeout interpretation and open platform gates.

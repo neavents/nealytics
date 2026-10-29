@@ -14,7 +14,8 @@ internal sealed class LiburingWalContext : INativeWalContext
     private bool _disposed;
 
     public LiburingWalContext(string path, int capacity, int entries)
-        : this(path, capacity, entries, ResolveApi())
+        : this(path, capacity, entries, NativeWalPlatform.ResolveApi(
+            OperatingSystem.IsLinux(), RuntimeInformation.ProcessArchitecture))
     {
     }
 
@@ -71,15 +72,6 @@ internal sealed class LiburingWalContext : INativeWalContext
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         CheckStatus(_api.Truncate(_context), "truncate");
-    }
-
-    private static INativeWalApi ResolveApi()
-    {
-        if (!NativeWalPlatform.IsSupported(OperatingSystem.IsLinux(), RuntimeInformation.ProcessArchitecture))
-        {
-            throw new PlatformNotSupportedException("Native WAL I/O requires Linux x64 or ARM64.");
-        }
-        return NativeWalApi.Instance;
     }
 
     private static void CheckStatus(int status, string operation)

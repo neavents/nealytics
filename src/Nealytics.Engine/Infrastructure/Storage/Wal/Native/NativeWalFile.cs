@@ -9,26 +9,26 @@ internal sealed class NativeWalFile : IWalFile
 {
     private readonly object _sync = new object();
     private readonly INativeWalContext _context;
-    private readonly AutoResetEvent _signal = new AutoResetEvent(false);
+    private readonly INativeWalSignal _signal;
     private readonly TaskCompletionSource _exited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly Thread _worker;
     private WorkRequest? _work;
     private ExceptionDispatchInfo? _failure;
     private Task? _disposal;
     private bool _stopping;
 
-    public NativeWalFile(INativeWalContext context)
+    public NativeWalFile(INativeWalContext context, INativeWalSignal? signal = null)
     {
         _context = context;
+        _signal = signal ?? new NativeWalSignal();
         try
         {
             IsFileRegistered = context.IsFileRegistered;
-            _worker = new Thread(RunCompletionLoop)
+            Thread worker = new Thread(RunCompletionLoop)
             {
                 IsBackground = true,
                 Name = "nealytics-wal-io"
             };
-            _worker.Start();
+            worker.Start();
         }
         catch
         {
@@ -69,7 +69,7 @@ internal sealed class NativeWalFile : IWalFile
             EnsureAvailable();
             WorkRequest request = new WorkRequest(truncate);
             _work = request;
-            _signal.Set();
+            _signal.Pulse();
             return new ValueTask(request.Completion.Task);
         }
     }
@@ -108,7 +108,7 @@ internal sealed class NativeWalFile : IWalFile
                 }
                 else
                 {
-                    _signal.WaitOne();
+                    _signal.Wait(Timeout.Infinite);
                 }
             }
         }
@@ -167,9 +167,8 @@ internal sealed class NativeWalFile : IWalFile
     private async Task DisposeCoreAsync()
     {
         _stopping = true;
-        _signal.Set();
+        _signal.Pulse();
         await _exited.Task;
-        _worker.Join();
         try
         {
             _context.Dispose();

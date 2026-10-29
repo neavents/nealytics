@@ -38,9 +38,20 @@ Current evidence (not a package completion claim):
 - The native C bridge reached 100% of 145 maintained statements and all 112 branch outcomes.
   The same checks passed address, undefined-behavior and leak sanitizers. These totals do not
   claim coverage of the upstream library or its headers.
-- The full portable unit suite passed 1,452 cases with zero skips before the final access-mode
-  adjustment. Repeat after integrating the final A3 changes and native qualification work.
+- After integrating final A3 changes, the full portable unit suite passed 1,494 cases with zero
+  skips. The thirteen actual Linux ARM64 cases also passed again with zero skips. The union of
+  the two same-source collectors covers all 229 maintained native-boundary lines and every
+  branch outcome. This is scoped evidence, rather than repository-wide coverage.
 - The first Linux managed-native mutation run scored 84.16%: 68 killed, 17 timeout detections,
-  14 survivors and two uncovered mutants. Strengthening those checks remains open; no threshold
-  has been reduced. Real Linux x64 and standalone artifact checks also remain open.
-  Reproduction and ownership details are in [native/README.md](../../native/README.md).
+  14 survivors and two uncovered mutants. Stronger diagnostics, platform, ownership and idle
+  blocking checks resolve those gaps. The complete-level rerun scored 100%: 87 assertion kills,
+  14 timeout detections, no survivors or uncovered mutants, six compile errors and 45 structural
+  ignores. Thresholds and maintained-code scope were not reduced.
+- All fourteen timeout detections are completion-owner progress/lifecycle defects: removing
+  thread start, queue transfer or wake, work completion, exit notification or shutdown progress;
+  reversing pending-work/shutdown decisions; or routing success/failure completion incorrectly.
+  They are timeout detections, not assertion kills. The unmutated suites complete without
+  timeouts. Tests verify the wake handle's initial state, consumption, blocking and disposal,
+  owner thread settings, SafeHandle release result and exact native error context.
+- Real Linux x64 and standalone artifact checks remain open. Reproduction and ownership details
+  are in [native/README.md](../../native/README.md).

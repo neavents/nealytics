@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Reflection;
 using Nealytics.Engine.Infrastructure.Storage.Wal.Native;
 
 namespace Nealytics.Engine.Tests.Unit;
@@ -21,6 +22,16 @@ public sealed class NativeWalContextTests : IDisposable
     public void PlatformSelectionIsExplicit(bool linux, Architecture architecture, bool expected)
     {
         Assert.Equal(expected, NativeWalPlatform.IsSupported(linux, architecture));
+        if (expected)
+        {
+            Assert.Same(NativeWalApi.Instance, NativeWalPlatform.ResolveApi(linux, architecture));
+        }
+        else
+        {
+            PlatformNotSupportedException error = Assert.Throws<PlatformNotSupportedException>(
+                () => NativeWalPlatform.ResolveApi(linux, architecture));
+            Assert.Contains("Linux x64 or ARM64", error.Message);
+        }
     }
 
     [Theory]
@@ -89,6 +100,11 @@ public sealed class NativeWalContextTests : IDisposable
         {
             Assert.Same(api.Failure, error);
         }
+        else
+        {
+            Assert.Equal("Native WAL create failed with errno 28.", error.Message);
+            Assert.Equal(28, Assert.IsType<Win32Exception>(error.InnerException).NativeErrorCode);
+        }
         using FileStream exclusive = new(PathName, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
     }
 
@@ -121,8 +137,7 @@ public sealed class NativeWalContextTests : IDisposable
                 default: context.Truncate(); break;
             }
         });
-        Assert.Contains(operation, error.Message);
-        Assert.Contains("28", error.Message);
+        Assert.Equal("Native WAL " + operation + " failed with errno 28.", error.Message);
         Assert.Equal(28, Assert.IsType<Win32Exception>(error.InnerException).NativeErrorCode);
     }
 
@@ -138,6 +153,28 @@ public sealed class NativeWalContextTests : IDisposable
         context.Dispose();
         Assert.Equal(1, api.DestroyCalls);
         using FileStream exclusive = new(PathName, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+    }
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(-16, false)]
+    public void SafeHandleReleaseReportsWhetherTheNativeContextWasFreed(int status, bool expected)
+    {
+        TestApi api = new() { DestroyStatus = status };
+        using NativeWalHandle handle = new(42, api);
+        try
+        {
+            // Exercise the protected SafeHandle contract while keeping the implementation sealed.
+            MethodInfo release = typeof(NativeWalHandle).GetMethod("ReleaseHandle", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            Assert.Equal(expected, release.Invoke(handle, null));
+            Assert.Equal(status, handle.CloseStatus);
+            Assert.Equal(1, api.DestroyCalls);
+            Assert.Equal((nint)42, api.DestroyedHandle);
+        }
+        finally
+        {
+            handle.SetHandleAsInvalid();
+        }
     }
 
     public void Dispose() => Directory.Delete(_directory, true);

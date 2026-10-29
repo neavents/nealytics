@@ -67,6 +67,11 @@ The blocked-host startup/fallback checks are separate from permitted-kernel qual
 One completion owner serves each native file. Appends copy into a reusable native buffer bounded
 by the flush byte budget. The bridge waits for the write and full fsync completions; short writes
 finish before success. It does not use mandatory busy polling or create a thread per flush.
+The completion owner checks pending work before sleeping, so coalesced work and shutdown pulses
+cannot strand a queued request. Its final action signals logical exit. Disposal waits for that
+signal before releasing the context and wake handle; the thread performs no resource access
+afterward. A second thread join adds no ownership guarantee. The wake boundary permits tests to
+verify idle blocking and cleanup without timing CPU samples or changing the native API.
 
 A partial submission or unresolved completion failure stops the context. Destruction refuses to
 free memory still referenced by the kernel and reports that a process restart is required.

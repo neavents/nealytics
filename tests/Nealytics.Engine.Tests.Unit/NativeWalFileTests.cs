@@ -41,7 +41,9 @@ public sealed class NativeWalFileTests
         {
             await context.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.False(operation.IsCompleted);
-            await Assert.ThrowsAsync<InvalidOperationException>(() => file.AppendAsync(new byte[1]).AsTask());
+            InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => file.AppendAsync(new byte[1]).AsTask());
+            Assert.Contains("operation is already in progress", error.Message);
             await Assert.ThrowsAsync<InvalidOperationException>(() => file.FlushAsync().AsTask());
             await Assert.ThrowsAsync<InvalidOperationException>(() => file.TruncateAsync().AsTask());
         }
@@ -133,11 +135,13 @@ public sealed class NativeWalFileTests
     public async Task DisposalFailureRemainsVisibleAndNewWorkIsRefused()
     {
         using TestContext context = new() { FailingOperation = "dispose" };
-        NativeWalFile file = new(context);
+        TestSignal signal = new();
+        NativeWalFile file = new(context, signal);
         Task disposal = file.DisposeAsync().AsTask();
         Assert.Same(context.Failure, await Assert.ThrowsAsync<IOException>(() => disposal));
         Assert.Same(disposal, file.DisposeAsync().AsTask());
         Assert.Equal(1, context.DisposeCalls);
+        Assert.True(signal.Disposed);
         await Assert.ThrowsAsync<ObjectDisposedException>(() => file.FlushAsync().AsTask());
     }
 
@@ -145,8 +149,52 @@ public sealed class NativeWalFileTests
     public void ConstructorFailureClosesTheTransferredContext()
     {
         using TestContext context = new() { FailingOperation = "registration" };
-        Assert.Same(context.Failure, Assert.Throws<IOException>(() => new NativeWalFile(context)));
+        TestSignal signal = new();
+        Assert.Same(context.Failure, Assert.Throws<IOException>(() => new NativeWalFile(context, signal)));
         Assert.Equal(1, context.DisposeCalls);
+        Assert.True(signal.Disposed);
+    }
+
+    [Fact]
+    public async Task CompletionOwnerSleepsWithoutPollingAndReleasesItsWakeSignal()
+    {
+        using TestContext context = new();
+        TestSignal signal = new();
+        NativeWalFile file = new(context, signal);
+        try
+        {
+            Thread owner = await signal.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(owner.IsBackground);
+            Assert.Equal("nealytics-wal-io", owner.Name);
+            Assert.Equal(Timeout.Infinite, signal.Timeout);
+            Assert.False(signal.Disposed);
+            Assert.Equal(0, signal.Pulses);
+        }
+        finally
+        {
+            await file.DisposeAsync();
+        }
+        Assert.True(signal.Disposed);
+        Assert.Equal(1, signal.Pulses);
+        Assert.Equal(1, context.DisposeCalls);
+    }
+
+    [Fact]
+    public void WakeSignalStartsUnsignaledAndConsumesExactlyOnePulse()
+    {
+        NativeWalSignal signal = new();
+        try
+        {
+            Assert.False(signal.Wait(0));
+            signal.Pulse();
+            Assert.True(signal.Wait(0));
+            Assert.False(signal.Wait(0));
+        }
+        finally
+        {
+            signal.Dispose();
+        }
+        Assert.Throws<ObjectDisposedException>(() => signal.Wait(0));
     }
 
     [Fact]
@@ -165,6 +213,35 @@ public sealed class NativeWalFileTests
     private static async Task CaptureAppendAsync(NativeWalFile file)
     {
         await file.AppendAsync(new byte[1]);
+    }
+
+    private sealed class TestSignal : INativeWalSignal
+    {
+        private readonly NativeWalSignal _signal = new();
+
+        public TaskCompletionSource<Thread> Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Timeout { get; private set; }
+        public int Pulses { get; private set; }
+        public bool Disposed { get; private set; }
+
+        public bool Wait(int millisecondsTimeout)
+        {
+            Timeout = millisecondsTimeout;
+            Entered.TrySetResult(Thread.CurrentThread);
+            return _signal.Wait(millisecondsTimeout);
+        }
+
+        public void Pulse()
+        {
+            Pulses++;
+            _signal.Pulse();
+        }
+
+        public void Dispose()
+        {
+            Disposed = true;
+            _signal.Dispose();
+        }
     }
 
     private sealed class TestContext : INativeWalContext
