@@ -150,15 +150,16 @@ def deployment(output, binary, backend, execution, interval=1):
 
 
 def sample(engine):
-    text = docker("exec", engine, "/bin/sh", "-c", "cat /proc/1/stat /proc/1/status /sys/fs/cgroup/memory.current")
+    text = docker("exec", engine, "/bin/sh", "-c", "cat /proc/1/stat /proc/1/status /sys/fs/cgroup/cpu.stat /sys/fs/cgroup/memory.current")
     rows = text.splitlines()
     fields = rows[0][rows[0].rindex(")") + 2:].split()
     rss = int(next(line for line in rows if line.startswith("VmRSS:")).split()[1]) * 1024
     return {"time": time.monotonic(), "cpuTicks": int(fields[11]) + int(fields[12]),
-            "rssBytes": rss, "cgroupBytes": int(rows[-1])}
+            "rssBytes": rss, "cgroupBytes": int(rows[-1]),
+            "throttledMicros": int(next(line for line in rows if line.startswith("throttled_usec ")).split()[1])}
 
 
-def measure(repository, output, client, binary, revision, label, backend, execution, mode, repetition, duration):
+def measure(repository, output, client, binary, revision, label, backend, execution, mode, repetition, duration, warmup_seconds):
     name = f"{label}-{mode}-{repetition}"
     print("Starting", name, flush=True)
     with deployment(output, binary, backend, execution) as target:
@@ -169,13 +170,13 @@ def measure(repository, output, client, binary, revision, label, backend, execut
                   "--mode", mode, "--concurrency", "8", "--beacon-batch", "50", "--ch", target["connection"],
                   "--warmup", "0", "--verify-loss", "true", "--out", str(output / "results.md")]
         with (output / (name + "-warmup.log")).open("w") as log:
-            subprocess.run(common + ["--requests", "100"], check=True, env=environment, cwd=repository,
+            subprocess.run(common + ["--duration", str(warmup_seconds), "--rate", "200" if mode == "track" else "25"], check=True, env=environment, cwd=repository,
                            stdout=log, stderr=subprocess.STDOUT)
         samples = [sample(target["engine"])]
         done = threading.Event()
         errors = []
         def observe():
-            while not done.wait(0.5):
+            while not done.wait(1):
                 try:
                     samples.append(sample(target["engine"]))
                 except BaseException as error:
@@ -198,6 +199,7 @@ def measure(repository, output, client, binary, revision, label, backend, execut
         cpu = (samples[-1]["cpuTicks"] - samples[0]["cpuTicks"]) / ticks
         resource = {"scope": "workload and stored-count verification; warmup excluded", "seconds": elapsed,
                     "cpuSeconds": cpu, "meanCpuPercentOfOneCore": cpu / elapsed * 100,
+                    "throttledMicros": samples[-1]["throttledMicros"] - samples[0]["throttledMicros"],
                     "peakRssBytes": max(value["rssBytes"] for value in samples),
                     "peakCgroupBytes": max(value["cgroupBytes"] for value in samples), "samples": samples}
         (output / (name + "-resources.json")).write_text(json.dumps(resource, indent=2))
@@ -216,9 +218,11 @@ def measure(repository, output, client, binary, revision, label, backend, execut
 
 def crash_check(output, binary, backend, execution):
     with deployment(output, binary, backend, execution, interval=300) as target:
+        print("Starting crash parity", backend, execution, flush=True)
         tenant = uuid.uuid4().hex
         events = [{"eventId": str(uuid.uuid4()), "projectId": "crash", "tenantId": tenant,
                    "sessionId": "s", "eventType": "e"} for _ in range(48)]
+        (output / ("crash-" + backend + "-" + execution + "-expected.json")).write_text(json.dumps(events, indent=2))
         for event in events[:32]:
             assert request(target["port"], "POST", "/api/v1/telemetry/track?k=b6-key", json.dumps(event))[0] == 202
         for start in (32, 40):
@@ -230,6 +234,7 @@ def crash_check(output, binary, backend, execution):
         assert stored() == [], "Crash qualification requires all accepted events to remain in the WAL"
         docker("kill", "--signal", "KILL", target["engine"])
         docker("start", target["engine"])
+        target["port"] = int(docker("port", target["engine"], "8080/tcp").rsplit(":", 1)[1])
         wait_for(lambda: request(target["port"], "GET", "/ready")[0] == 200)
         expected = sorted(event["eventId"] for event in events)
         wait_for(lambda: stored() == expected)
@@ -249,6 +254,8 @@ def main():
     parser.add_argument("--candidate", default="HEAD")
     parser.add_argument("--duration", type=int, default=20)
     parser.add_argument("--repetitions", type=int, default=3)
+    parser.add_argument("--warmup-seconds", type=int, default=10)
+    parser.add_argument("--reuse-baseline-from", type=Path)
     args = parser.parse_args()
     assert platform.machine() == "arm64", "Run native x64 qualification on an actual x64 host separately"
     assert args.duration > 0 and args.repetitions > 0
@@ -257,8 +264,15 @@ def main():
     output.mkdir(parents=True, exist_ok=False)
     candidate = run("git", "-C", str(repository), "rev-parse", args.candidate)
     baseline = run("git", "-C", str(repository), "rev-parse", args.baseline)
-    binaries = {name: build(repository, output, revision, name, native=name == "candidate")
-                for name, revision in [("baseline", baseline), ("candidate", candidate)]}
+    if args.reuse_baseline_from:
+        previous = json.loads((args.reuse_baseline_from / "summary.json").read_text())["binaries"]["baseline"]
+        assert previous["revision"] == baseline
+        assert hashlib.sha256(Path(previous["binary"]).read_bytes()).hexdigest() == previous["sha256"]
+        baseline_binary = previous
+        print("Reusing verified baseline", previous["sha256"], flush=True)
+    else:
+        baseline_binary = build(repository, output, baseline, "baseline", native=False)
+    binaries = {"baseline": baseline_binary, "candidate": build(repository, output, candidate, "candidate", native=True)}
     client_directory = output / "client"
     client_directory.mkdir()
     subprocess.run(["dotnet", "build", str(repository / "bench/Nealytics.Engine.Bench"), "--configuration", "Release",
@@ -277,7 +291,7 @@ def main():
             binary = binaries["baseline" if label == "baseline" else "candidate"]
             for mode in ("track", "beacon"):
                 result = measure(repository, output, client, binary["binary"], binary["revision"], label, backend,
-                                 execution, mode, repetition, args.duration)
+                                 execution, mode, repetition, args.duration, args.warmup_seconds)
                 summary["runs"].append(result)
                 (output / "summary.json").write_text(json.dumps(summary, indent=2))
     for _, backend, execution in modes[1:]:
