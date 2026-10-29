@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feat/correctness-and-safety*', 'feat/ingestion-performance*']
   pull_request:
-    branches: [main]
+    branches: [main, 'feat/correctness-and-safety*', 'feat/ingestion-performance*']
+  workflow_dispatch:
 
 jobs:
   build:
@@ -30,7 +31,41 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Unit tests
-        run: dotnet test tests/Nealytics.Engine.Tests.Unit --verbosity normal
+        run: dotnet test tests/Nealytics.Engine.Tests.Unit --collect:"XPlat Code Coverage" --results-directory artifacts/unit --verbosity normal
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-coverage
+          path: artifacts/unit
+
+  benchmark-tests:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Benchmark unit tests
+        run: dotnet test tests/Nealytics.Engine.Bench.Tests --collect:"XPlat Code Coverage" --results-directory artifacts/benchmark --verbosity normal
+
+      - name: Restore pinned mutation tooling
+        run: dotnet tool restore
+
+      - name: Measurement helper mutation tests
+        working-directory: bench/Nealytics.Engine.Bench
+        run: dotnet stryker --config-file stryker-config.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-verification
+          path: |
+            artifacts/benchmark
+            bench/Nealytics.Engine.Bench/StrykerOutput
 
   integration-tests:
     runs-on: ubuntu-latest
@@ -120,7 +155,7 @@ jobs:
   publish-image:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests, smoke-test]
+    needs: [unit-tests, benchmark-tests, integration-tests, smoke-test]
     permissions:
       contents: read
       packages: write

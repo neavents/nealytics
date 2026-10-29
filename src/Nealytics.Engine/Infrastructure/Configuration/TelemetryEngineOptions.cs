@@ -133,6 +133,7 @@ public sealed class TelemetryEngineOptions
     public string AllowedProjectKeys { get; set; } = string.Empty;
     public string JwtSymmetricKey { get; set; } = string.Empty;
     public int MaxRequestBodyBytes { get; set; } = 1_048_576;
+    public int BeaconWalBatchRecords { get; set; } = 64;
     public int MaxQueryLimit { get; set; } = 10_000;
     public int RateLimitPermitCount { get; set; } = 1_000;
     public int RateLimitWindowSeconds { get; set; } = 10;
@@ -147,6 +148,13 @@ public sealed class TelemetryEngineOptions
     public int ConnectionMaxIdleSeconds { get; set; } = 300;
     public int WalReplayRetryDelayMs { get; set; } = 10_000;
     public int WalFileBufferBytes { get; set; } = 65_536;
+    public string WalIoBackend { get; set; } = "managed";
+    public int WalRingEntries { get; set; } = 8;
+    public int WalMaxPendingRecords { get; set; } = 4_096;
+    public int WalMaxPendingBytes { get; set; } = 33_554_432;
+    public int WalMaxRecordBytes { get; set; } = 16_777_216;
+    public int WalMaxFlushRecords { get; set; } = 256;
+    public int WalMaxFlushBytes { get; set; } = 16_777_216;
     public bool EnableWireCompression { get; set; } = true;
     public bool EnableAsyncInsert { get; set; } = true;
     public int MaxConcurrentConnections { get; set; } = 20_000;

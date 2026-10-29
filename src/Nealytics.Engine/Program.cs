@@ -198,6 +198,7 @@ builder.Services.AddSingleton<IngestGate>();
 builder.Services.AddSingleton<ITenantAttributeWriter, ClickHouseTenantAttributeWriter>();
 builder.Services.AddSingleton<DimensionSanitizer>();
 builder.Services.AddSingleton<MeasureSanitizer>();
+builder.Services.AddSingleton<BeaconBatchIngestor>();
 builder.Services.AddHostedService<ClickHouseSchemaMigrator>();
 builder.Services.AddSingleton<ITelemetryBatchWriter, ClickHouseBatchWriter>();
 builder.Services.AddHostedService<TelemetryBatchProcessor>();

@@ -1,0 +1,26 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~WalEncodingReservationTests|FullyQualifiedName~WalRecordBufferTests|FullyQualifiedName~WalBudgetTests|FullyQualifiedName~BoundedWalTests",
+    "mutate": [
+      "Infrastructure/Storage/Wal/WalRecordBuffer.cs",
+      "Infrastructure/Storage/WriteAheadLogger.cs{2518..2628}"
+    ],
+    "mutation-level": "Complete",
+    "concurrency": 2,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    }
+  }
+}
