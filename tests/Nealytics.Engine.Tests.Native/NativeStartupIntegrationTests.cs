@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Serialization;
 using Nealytics.Engine.Infrastructure.Storage;
@@ -12,6 +13,33 @@ public sealed class NativeStartupIntegrationTests : IDisposable
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "nealytics-native-startup-" + Guid.NewGuid().ToString("N"));
 
     public NativeStartupIntegrationTests() => Directory.CreateDirectory(_directory);
+
+    [Theory]
+    [InlineData("managed")]
+    [InlineData("io_uring")]
+    [InlineData("auto")]
+    public async Task ExactFramedByteBudgetsApplyToManagedAndNativeWriters(string backend)
+    {
+        GlobalTelemetryPayload payload = new()
+        {
+            ProjectId = "p", TenantId = "t", SessionId = "s", EventType = "e",
+            MetadataJson = JsonSerializer.Serialize(new string('x', 2_200), TelemetryAotContext.Default.String)
+        };
+        byte[] expected = [.. JsonSerializer.SerializeToUtf8Bytes(payload, TelemetryAotContext.Default.GlobalTelemetryPayload), (byte)'\n'];
+        TelemetryEngineOptions options = new()
+        {
+            WriteAheadLogDirectory = _directory,
+            WalIoBackend = backend,
+            WalMaxRecordBytes = expected.Length,
+            WalMaxFlushBytes = expected.Length,
+            WalMaxPendingBytes = expected.Length * 2
+        };
+        await using WriteAheadLogger wal = new(Options.Create(options));
+        Assert.Equal(backend == "managed" ? "managed" : "io_uring", wal.Selection.Backend);
+        await wal.AppendAsync(payload, CancellationToken.None);
+        Assert.Equal(1, wal.UncommittedRecordCount);
+        Assert.Equal(expected, await File.ReadAllBytesAsync(Path.Combine(_directory, "telemetry_wal.log")));
+    }
 
     [Theory]
     [InlineData("io_uring")]
