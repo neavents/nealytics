@@ -56,13 +56,13 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
         ArrayPool<byte>? recordPool = null,
         ArrayPool<byte>? serializationPool = null,
         WalSynchronization? synchronization = null,
-        WalFileFactory? fileFactory = null)
+        WalFileFactory? fileFactory = null,
+        Action<string>? directorySynchronize = null)
     {
         TelemetryEngineOptions engineOptions = options.Value;
         _limits = new WalLimits(engineOptions);
         WalFileFactory factory = fileFactory ?? new WalFileFactory(engineOptions);
         string directory = engineOptions.WriteAheadLogDirectory;
-        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         _synchronization = synchronization ?? new WalSynchronization();
         _admission = new WalAdmission(_limits.PendingRecords, _limits.PendingBytes);
         _recordBuffer = new WalRecordBuffer(_limits.RecordBytes, serializationPool, reserveForEncoding: true);
@@ -72,7 +72,7 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
         WalDirectory? ownedDirectory = null;
         try
         {
-            ownedDirectory = new WalDirectory(directory);
+            ownedDirectory = new WalDirectory(directory, directorySynchronize);
             _directory = ownedDirectory;
             _directory.SealActive();
             _recoveryPaths = _directory.RecoveryPaths();
