@@ -26,12 +26,27 @@ jobs:
             runner: ubuntu-24.04-arm
             rid: linux-arm64
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Qualify actual host architecture and native artifact
-        run: bash native/qualify.sh '${{ matrix.rid }}'
+        run: |
+          result_directory='artifacts/platform/${{ matrix.rid }}'
+          mkdir -p "$result_directory"
+          if bash native/qualify.sh '${{ matrix.rid }}' 2>&1 | tee "$result_directory/qualification.log"; then
+            exit 0
+          fi
+          python3 - "$result_directory/qualification.log" <<'PY'
+          from pathlib import Path
+          import sys
+          text = Path(sys.argv[1]).read_text()[-12000:]
+          text = text.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          print('::error title=Native qualification failed::' + text)
+          PY
+          exit 1
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload verification v7.0.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: native-${{ matrix.rid }}
