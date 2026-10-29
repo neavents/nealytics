@@ -80,7 +80,7 @@ def build(repository, output, revision, name, native):
 
 
 @contextlib.contextmanager
-def deployment(output, binary, backend, execution, interval=1):
+def deployment(output, binary, backend, execution, interval=1, settings_overrides=None, engine_cpus=1, engine_memory="512m"):
     suffix = uuid.uuid4().hex[:12]
     network, storage, engine, volume = ["nealytics-b6-" + role + "-" + suffix
                                         for role in ("net", "ch", "engine", "wal")]
@@ -120,8 +120,9 @@ def deployment(output, binary, backend, execution, interval=1):
             "ASPNETCORE_URLS": "http://0.0.0.0:8080", "DOTNET_BUNDLE_EXTRACT_BASE_DIR": "/tmp/bundle",
             "OTEL_SDK_DISABLED": "true", "Logging__LogLevel__Default": "Warning"
         }
+        settings.update(settings_overrides or {})
         arguments = ["run", "--detach", "--name", engine, "--label", LABEL, "--network", network,
-                     "--read-only", "--user", "10001:10001", "--cap-drop", "ALL", "--cpus", "1", "--memory", "512m",
+                     "--read-only", "--user", "10001:10001", "--cap-drop", "ALL", "--cpus", str(engine_cpus), "--memory", engine_memory,
                      "--security-opt", "no-new-privileges", "--security-opt", "seccomp=unconfined",
                      "--publish", "127.0.0.1::8080", "--tmpfs", "/tmp:rw,exec,nosuid,nodev,uid=10001,gid=10001,mode=0700,size=256m",
                      "--mount", f"type=volume,source={volume},target=/wal",
