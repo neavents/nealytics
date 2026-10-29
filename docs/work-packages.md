@@ -62,6 +62,10 @@ Replay/rollup defects discovered by A2 require their own A-category fixes before
 on the affected totals. They must not be hidden inside a throughput patch. Likewise, reserved
 database capacity and streaming recovery are separate A packages, not extra scope attached to B3.
 
+A4 now has a separate [bounded streaming-recovery brief](packages/a4-streaming-recovery.md).
+It bounds the recovery reader and batch owner while retaining the current record format. Durable
+segment rotation/delivery identities and reserved capacity remain separate A requirements.
+
 ## 3. How to split the later work
 
 Deliver an end-to-end slice per package, rather than a whole subsystem:

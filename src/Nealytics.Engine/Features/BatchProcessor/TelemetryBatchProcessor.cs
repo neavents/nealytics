@@ -41,6 +41,7 @@ public sealed partial class TelemetryBatchProcessor : BackgroundService
         _writer = writer;
         _lifetime = lifetime;
         _options = options.Value;
+        ArgumentOutOfRangeException.ThrowIfLessThan(_options.DatabaseBatchCommitSize, 1);
         _logger = logger;
         _bufferA = new List<GlobalTelemetryPayload>(_options.DatabaseBatchCommitSize);
         _bufferB = new List<GlobalTelemetryPayload>(_options.DatabaseBatchCommitSize);
@@ -64,19 +65,19 @@ public sealed partial class TelemetryBatchProcessor : BackgroundService
 
     [LoggerMessage(EventId = 9005, Level = LogLevel.Information,
         Message = "WAL replay recovered {Count} uncommitted events.")]
-    private static partial void LogWalRecovery(ILogger logger, int count);
+    private static partial void LogWalRecovery(ILogger logger, long count);
 
     [LoggerMessage(EventId = 9006, Level = LogLevel.Warning,
-        Message = "WAL replay batch failed. Retrying in 10 seconds.")]
-    private static partial void LogWalReplayRetry(ILogger logger);
+        Message = "WAL replay batch failed. Retrying in {DelayMs}ms.")]
+    private static partial void LogWalReplayRetry(ILogger logger, int delayMs);
 
     [LoggerMessage(EventId = 9007, Level = LogLevel.Warning,
         Message = "Batch insert failed. Backing off for {DelayMs}ms before next batch (consecutive failures: {Failures}).")]
     private static partial void LogCrossBatchBackoff(ILogger logger, int delayMs, int failures);
 
     [LoggerMessage(EventId = 9008, Level = LogLevel.Critical,
-        Message = "Shutdown drain timed out after {Seconds}s. {RemainingCount} events may be lost.")]
-    private static partial void LogDrainTimeout(ILogger logger, int seconds, int remainingCount);
+        Message = "Shutdown drain stopped with {RemainingCount} events preserved in WAL; time budget {Seconds}s.")]
+    private static partial void LogDrainTimeout(ILogger logger, int seconds, long remainingCount);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -86,7 +87,6 @@ public sealed partial class TelemetryBatchProcessor : BackgroundService
 
         List<GlobalTelemetryPayload> fillBuffer = _bufferA;
         Task<bool>? pendingInsert = null;
-        List<GlobalTelemetryPayload>? pendingBuffer = null;
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -117,12 +117,10 @@ public sealed partial class TelemetryBatchProcessor : BackgroundService
                 if (pendingInsert is not null)
                 {
                     await AwaitInsertAndBackoffAsync(pendingInsert, stoppingToken);
-                    pendingBuffer!.Clear();
                 }
 
-                pendingBuffer = fillBuffer;
-                pendingInsert = PushBatchToClickHouseAsync(pendingBuffer, stoppingToken);
-                fillBuffer = ReferenceEquals(pendingBuffer, _bufferA) ? _bufferB : _bufferA;
+                pendingInsert = PushBatchToClickHouseAsync(fillBuffer, stoppingToken);
+                fillBuffer = ReferenceEquals(fillBuffer, _bufferA) ? _bufferB : _bufferA;
             }
             catch (OperationCanceledException)
             {
@@ -139,8 +137,6 @@ public sealed partial class TelemetryBatchProcessor : BackgroundService
             catch (OperationCanceledException)
             {
             }
-
-            pendingBuffer!.Clear();
         }
 
         await ExecuteCriticalDrainLoopAsync(fillBuffer);
@@ -162,77 +158,37 @@ public sealed partial class TelemetryBatchProcessor : BackgroundService
         _consecutiveFailures++;
     }
 
-    private async Task RecoverWalEntriesAsync(CancellationToken cancellationToken)
-    {
-        IReadOnlyList<GlobalTelemetryPayload> recovered = await _wal.ReplayUncommittedAsync();
-        if (recovered.Count == 0)
-        {
-            return;
-        }
-
-        LogWalRecovery(_logger, recovered.Count);
-
-        List<GlobalTelemetryPayload> recoveryBuffer = _bufferA;
-        int offset = 0;
-
-        while (offset < recovered.Count && !cancellationToken.IsCancellationRequested)
-        {
-            int remaining = recovered.Count - offset;
-            int batchSize = Math.Min(remaining, _options.DatabaseBatchCommitSize);
-
-            for (int i = 0; i < batchSize; i++)
-            {
-                recoveryBuffer.Add(recovered[offset + i]);
-            }
-
-            bool success = await PushBatchToClickHouseAsync(
-                recoveryBuffer, cancellationToken, truncateWalOnSuccess: false);
-
-            if (success)
-            {
-                offset += batchSize;
-            }
-            else
-            {
-                LogWalReplayRetry(_logger);
-                await Task.Delay(_options.WalReplayRetryDelayMs, cancellationToken);
-            }
-        }
-
-        if (offset == recovered.Count)
-        {
-            await _wal.DeleteSealedSegmentAsync();
-        }
-    }
-
     private async Task ExecuteCriticalDrainLoopAsync(List<GlobalTelemetryPayload> buffer)
     {
         using CancellationTokenSource drainTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(DrainTimeoutSeconds));
 
-        while (_broker.Reader.TryRead(out GlobalTelemetryPayload? remainingItem))
+        try
         {
-            buffer.Add(remainingItem);
             if (buffer.Count >= _options.DatabaseBatchCommitSize)
             {
                 await PushBatchToClickHouseAsync(buffer, drainTimeout.Token);
             }
-        }
-
-        if (buffer.Count > 0)
-        {
-            try
+            while (_broker.Reader.TryRead(out GlobalTelemetryPayload? remainingItem))
+            {
+                buffer.Add(remainingItem);
+                if (buffer.Count >= _options.DatabaseBatchCommitSize)
+                {
+                    await PushBatchToClickHouseAsync(buffer, drainTimeout.Token);
+                }
+            }
+            if (buffer.Count > 0)
             {
                 await PushBatchToClickHouseAsync(buffer, drainTimeout.Token);
             }
-            catch (OperationCanceledException)
-            {
-                LogDrainTimeout(_logger, DrainTimeoutSeconds, buffer.Count);
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            LogDrainTimeout(_logger, DrainTimeoutSeconds, _wal.UncommittedRecordCount);
         }
     }
 
     private async Task<bool> PushBatchToClickHouseAsync(
-        List<GlobalTelemetryPayload> buffer, CancellationToken cancellationToken, bool truncateWalOnSuccess = true)
+        List<GlobalTelemetryPayload> buffer, CancellationToken cancellationToken, bool replay = false)
     {
         using Activity? activity = TelemetryDiagnostics.Source.StartActivity("BatchProcessor.Flush");
         long startTicks = Stopwatch.GetTimestamp();
@@ -271,7 +227,7 @@ public sealed partial class TelemetryBatchProcessor : BackgroundService
 
             if (committed)
             {
-                if (truncateWalOnSuccess)
+                if (!replay)
                 {
                     await _wal.AcknowledgeCommitAsync(batchCount);
                 }
@@ -289,8 +245,14 @@ public sealed partial class TelemetryBatchProcessor : BackgroundService
             double executionSeconds = (double)elapsedTicks / Stopwatch.Frequency;
             TelemetryDiagnostics.StorageWriteDuration.Record(executionSeconds);
 
-            TelemetryDiagnostics.DecrementQueueCounter(batchCount);
-            buffer.Clear();
+            if (!replay)
+            {
+                TelemetryDiagnostics.DecrementQueueCounter(batchCount);
+            }
+            if (!replay || committed)
+            {
+                buffer.Clear();
+            }
         }
 
         return committed;

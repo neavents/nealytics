@@ -2,9 +2,11 @@ namespace Nealytics.Engine.Infrastructure.Storage;
 
 using System.Collections.Generic;
 using System.IO;
-using System.Text.Json;
+using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 using Nealytics.Engine.Infrastructure.Serialization;
+using Nealytics.Engine.Infrastructure.Storage.Wal;
 
 public sealed partial class WriteAheadLogger
 {
@@ -17,10 +19,11 @@ public sealed partial class WriteAheadLogger
 
         if (File.Exists(_sealedFilePath))
         {
-            using FileStream source = new FileStream(_logFilePath, FileMode.Open, FileAccess.Read, FileShare.None);
-            using FileStream destination = new FileStream(_sealedFilePath, FileMode.Append, FileAccess.Write, FileShare.None);
-            source.CopyTo(destination);
-            source.Close();
+            {
+                using FileStream source = new FileStream(_logFilePath, FileMode.Open, FileAccess.Read, FileShare.None);
+                using FileStream destination = new FileStream(_sealedFilePath, FileMode.Append, FileAccess.Write, FileShare.None);
+                source.CopyTo(destination);
+            }
             File.Delete(_logFilePath);
             return;
         }
@@ -33,41 +36,30 @@ public sealed partial class WriteAheadLogger
     public async Task<IReadOnlyList<GlobalTelemetryPayload>> ReplayUncommittedAsync()
     {
         List<GlobalTelemetryPayload> recovered = new List<GlobalTelemetryPayload>();
-
-        if (!File.Exists(_sealedFilePath))
+        await foreach (WalReplayRecord record in ReplayRecordsAsync())
         {
-            return recovered;
-        }
-
-        using FileStream readStream = new FileStream(_sealedFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using StreamReader reader = new StreamReader(readStream);
-
-        while (await reader.ReadLineAsync() is { } line)
-        {
-            if (line.Length == 0)
-            {
-                continue;
-            }
-
-            try
-            {
-                GlobalTelemetryPayload? payload = JsonSerializer.Deserialize(
-                    line,
-                    TelemetryAotContext.Default.GlobalTelemetryPayload);
-
-                if (payload is not null
-                    && !string.IsNullOrEmpty(payload.ProjectId)
-                    && !string.IsNullOrEmpty(payload.TenantId)
-                    && !string.IsNullOrEmpty(payload.EventType))
-                {
-                    recovered.Add(payload);
-                }
-            }
-            catch (JsonException)
-            {
-            }
+            recovered.Add(record.Payload);
         }
         return recovered;
+    }
+
+    internal int ReplayBatchByteLimit => _limits.FlushBytes;
+
+    internal async IAsyncEnumerable<WalReplayRecord> ReplayRecordsAsync(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        if (!File.Exists(_sealedFilePath))
+        {
+            yield break;
+        }
+        await using FileStream source = new FileStream(
+            _sealedFilePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65_536,
+            WalReplayReader.OpenOptions);
+        WalReplayReader reader = new WalReplayReader(_limits.RecordBytes);
+        await foreach (WalReplayRecord record in reader.ReadAsync(source, cancellationToken))
+        {
+            yield return record;
+        }
     }
 
     public Task DeleteSealedSegmentAsync()
