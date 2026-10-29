@@ -131,10 +131,12 @@ public sealed class BoundedRequestPipeReaderTests
     [InlineData("unknown")]
     public void InvalidExecutionSelectionFailsBeforeReadingInput(string? path)
     {
-        Assert.Throws<ArgumentException>(() => new IngestionRequestReader(Options.Create(new TelemetryEngineOptions
+        ArgumentException error = Assert.Throws<ArgumentException>(() => new IngestionRequestReader(Options.Create(new TelemetryEngineOptions
         {
             IngestionExecutionPath = path!
         })));
+        Assert.Equal("options", error.ParamName);
+        Assert.Contains("managed or custom", error.Message);
     }
 
     [Theory]
