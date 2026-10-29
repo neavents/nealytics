@@ -53,8 +53,11 @@ public sealed partial class WriteAheadLogger
         await _admission.ReserveAsync(records, length, cancellationToken);
         byte[]? rented = null;
         bool queued = false;
+        bool reserved = false;
         try
         {
+            _backlog.Reserve(length);
+            reserved = true;
             rented = _recordPool.Rent(length);
             serialized.CopyTo(rented);
             PendingAppend pending = new PendingAppend(rented, length, records);
@@ -76,6 +79,10 @@ public sealed partial class WriteAheadLogger
                     _recordPool.Return(rented, clearArray: true);
                 }
                 _admission.Release(records, length);
+                if (reserved)
+                {
+                    _backlog.Release(length);
+                }
             }
         }
     }
@@ -126,6 +133,7 @@ public sealed partial class WriteAheadLogger
             foreach (PendingAppend entry in group)
             {
                 await _file.AppendAsync(entry.Buffer.AsMemory(0, entry.Length));
+                _persistedBytes += entry.Length;
             }
             await _file.FlushAsync();
 

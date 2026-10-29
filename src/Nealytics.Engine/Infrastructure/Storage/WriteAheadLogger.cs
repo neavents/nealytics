@@ -19,6 +19,8 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
     private readonly IWalFile _file;
     private readonly WalLimits _limits;
     private readonly WalAdmission _admission;
+    private readonly WalBacklogBudget _backlog;
+    private long _persistedBytes;
     private readonly WalRecordBuffer _recordBuffer;
     private readonly WalRecordBuffer _batchBuffer;
     private readonly ArrayPool<byte> _recordPool;
@@ -76,6 +78,12 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
             _directory = ownedDirectory;
             _directory.SealActive();
             _recoveryPaths = _directory.RecoveryPaths();
+            long recoveredBytes = 0;
+            foreach (string path in _recoveryPaths)
+            {
+                recoveredBytes = checked(recoveredBytes + new FileInfo(path).Length);
+            }
+            _backlog = new WalBacklogBudget(engineOptions.WalMaxBacklogBytes, recoveredBytes);
             _logFilePath = _directory.ActivePath;
             Selection = file is null
                 ? factory.Create(_logFilePath, _limits)
@@ -119,6 +127,8 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
     internal int PendingRecordCount => _admission.PendingRecords;
     internal int PendingByteCount => _admission.PendingBytes;
 
+    public long RetainedWalBytes => _backlog.Bytes;
+
     public long UncommittedRecordCount => Interlocked.Read(ref _uncommittedRecords);
 
     internal long FlushGroupCount => _statistics.GroupCount;
@@ -144,6 +154,8 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
                 if (remaining == 0)
                 {
                     await _file.TruncateAsync();
+                    _backlog.Release(_persistedBytes);
+                    _persistedBytes = 0;
                 }
                 Interlocked.Exchange(ref _uncommittedRecords, remaining);
             }
@@ -201,6 +213,8 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
             {
                 _operations.ThrowIfFailed();
                 await _file.TruncateAsync();
+                _backlog.Release(_persistedBytes);
+                _persistedBytes = 0;
                 Interlocked.Exchange(ref _uncommittedRecords, 0);
             }
             catch (Exception error)

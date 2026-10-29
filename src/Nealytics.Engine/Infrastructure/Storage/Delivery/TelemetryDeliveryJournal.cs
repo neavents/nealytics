@@ -16,6 +16,7 @@ internal sealed class TelemetryDeliveryJournal
     private readonly string _directory;
     private readonly int _maxRecords;
     private readonly long _maxBytes;
+    private readonly int _maxUnitBytes;
     private readonly HashSet<Guid> _delivered = new HashSet<Guid>();
     private int _records;
     private long _bytes;
@@ -24,6 +25,7 @@ internal sealed class TelemetryDeliveryJournal
     {
         _maxRecords = options.Value.DeliveryJournalMaxRecords;
         _maxBytes = options.Value.DeliveryJournalMaxBytes;
+        _maxUnitBytes = (int)Math.Min(int.MaxValue, Math.Min(_maxBytes, options.Value.DatabaseBatchByteCapacity * 4L + 4096));
         ArgumentOutOfRangeException.ThrowIfLessThan(_maxRecords, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(_maxBytes, 1);
         _directory = Path.Combine(Path.GetFullPath(options.Value.WriteAheadLogDirectory), "delivery");
@@ -44,7 +46,12 @@ internal sealed class TelemetryDeliveryJournal
         }
         foreach (string path in Directory.EnumerateFiles(_directory, "*.json"))
         {
-            Account(new FileInfo(path).Length);
+            long length = new FileInfo(path).Length;
+            if (length > _maxUnitBytes)
+            {
+                throw new InvalidDataException("The delivery unit exceeds its configured recovery byte limit.");
+            }
+            Account(length);
             TelemetryDeliveryUnit unit = Read(path);
             Validate(unit);
             ReserveRecords(unit.Items.Length);
@@ -66,7 +73,7 @@ internal sealed class TelemetryDeliveryJournal
     public TelemetryDeliveryUnit Prepare(TelemetryDeliveryUnit unit)
     {
         Validate(unit);
-        using WalRecordBuffer buffer = new WalRecordBuffer((int)Math.Min(int.MaxValue, _maxBytes - _bytes), reserveForEncoding: true);
+        using WalRecordBuffer buffer = new WalRecordBuffer((int)Math.Min(_maxUnitBytes, _maxBytes - _bytes), reserveForEncoding: true);
         using (Utf8JsonWriter writer = new Utf8JsonWriter(buffer))
         {
             JsonSerializer.Serialize(writer, unit, TelemetryAotContext.Default.TelemetryDeliveryUnit);

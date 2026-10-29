@@ -67,10 +67,38 @@ public sealed partial class WriteAheadLogger
         }
     }
 
-    public Task DeleteSealedSegmentAsync()
+    public async Task DeleteSealedSegmentAsync()
     {
-        _directory.DeleteRecovery(_recoveryPaths);
-        return Task.CompletedTask;
+        _operations.Enter();
+        try
+        {
+            await _synchronization.File.WaitAsync();
+            try
+            {
+                _operations.ThrowIfFailed();
+                long bytes = 0;
+                foreach (string path in _recoveryPaths)
+                {
+                    if (File.Exists(path))
+                    {
+                        bytes = checked(bytes + new FileInfo(path).Length);
+                    }
+                }
+                _directory.DeleteRecovery(_recoveryPaths);
+                _backlog.Release(bytes);
+            }
+            catch (Exception error)
+            {
+                throw SignalFailure(error);
+            }
+            finally
+            {
+                _synchronization.File.Release();
+            }
+        }
+        finally
+        {
+            _operations.Exit();
+        }
     }
-
 }

@@ -128,6 +128,9 @@ public sealed class TelemetryEngineOptions
     public string ClickHouseConnectionString { get; set; } = "Host=127.0.0.1;Port=9000;Database=nealytics_core;";
     public string WriteAheadLogDirectory { get; set; } = "/var/log/nealytics_engine/";
     public int MemoryChannelCapacity { get; set; } = 100_000;
+    public int MemoryChannelByteCapacity { get; set; } = 67_108_864;
+    public int DatabaseBatchByteCapacity { get; set; } = 16_777_216;
+    public long WalMaxBacklogBytes { get; set; } = 1_073_741_824;
     public int DeliveryJournalMaxRecords { get; set; } = 100_000;
     public long DeliveryJournalMaxBytes { get; set; } = 268_435_456;
     public int DeliveryRetryMaxAgeSeconds { get; set; } = 900;

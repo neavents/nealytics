@@ -116,6 +116,7 @@ named feat/correctness-and-safety cannot also contain child refs beneath that sa
 | A6 | feat/correctness-and-safety-a6-replay-delivery |
 | A7 | feat/correctness-and-safety-a7-resource-capacity |
 | A7b | feat/correctness-and-safety-a7b-request-admission |
+| A7c | feat/correctness-and-safety-a7c-backlog-capacity |
 | A8 | feat/correctness-and-safety-a8-wal-segments |
 | B1 | feat/ingestion-performance-b1-wal-io-boundary |
 | B2 | feat/ingestion-performance-b2-native-backend |

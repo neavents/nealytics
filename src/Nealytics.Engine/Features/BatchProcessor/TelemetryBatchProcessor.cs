@@ -3,6 +3,7 @@ namespace Nealytics.Engine.Features.BatchProcessor;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -25,6 +26,7 @@ public sealed partial class TelemetryBatchProcessor : BackgroundService
     private readonly List<GlobalTelemetryPayload> _bufferB;
     private readonly TelemetryEngineOptions _options;
     private int _consecutiveFailures;
+    private GlobalTelemetryPayload? _deferredPayload;
 
     private const int DrainTimeoutSeconds = 30;
 
@@ -42,6 +44,7 @@ public sealed partial class TelemetryBatchProcessor : BackgroundService
         _lifetime = lifetime;
         _options = options.Value;
         ArgumentOutOfRangeException.ThrowIfLessThan(_options.DatabaseBatchCommitSize, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(_options.DatabaseBatchByteCapacity, 1);
         _logger = logger;
         _bufferA = new List<GlobalTelemetryPayload>(_options.DatabaseBatchCommitSize);
         _bufferB = new List<GlobalTelemetryPayload>(_options.DatabaseBatchCommitSize);
@@ -99,9 +102,17 @@ public sealed partial class TelemetryBatchProcessor : BackgroundService
 
                 try
                 {
+                    int bytes = BufferBytes(fillBuffer);
                     while (fillBuffer.Count < _options.DatabaseBatchCommitSize)
                     {
-                        GlobalTelemetryPayload item = await _broker.Reader.ReadAsync(linkedSource.Token);
+                        GlobalTelemetryPayload item = _deferredPayload
+                            ?? await _broker.Reader.ReadAsync(linkedSource.Token);
+                        _deferredPayload = null;
+                        if (!FitsBatch(item, ref bytes))
+                        {
+                            _deferredPayload = item;
+                            break;
+                        }
                         fillBuffer.Add(item);
                     }
                 }
@@ -168,12 +179,22 @@ public sealed partial class TelemetryBatchProcessor : BackgroundService
             {
                 await PushBatchToClickHouseAsync(buffer, drainTimeout.Token);
             }
-            while (_broker.Reader.TryRead(out GlobalTelemetryPayload? remainingItem))
+            int bytes = BufferBytes(buffer);
+            while (_deferredPayload is not null || _broker.Reader.TryPeek(out _))
             {
+                GlobalTelemetryPayload remainingItem = _deferredPayload ?? await _broker.Reader.ReadAsync(drainTimeout.Token);
+                _deferredPayload = null;
+                if (!FitsBatch(remainingItem, ref bytes))
+                {
+                    await PushBatchToClickHouseAsync(buffer, drainTimeout.Token);
+                    bytes = 0;
+                    FitsBatch(remainingItem, ref bytes);
+                }
                 buffer.Add(remainingItem);
                 if (buffer.Count >= _options.DatabaseBatchCommitSize)
                 {
                     await PushBatchToClickHouseAsync(buffer, drainTimeout.Token);
+                    bytes = 0;
                 }
             }
             if (buffer.Count > 0)
@@ -185,6 +206,31 @@ public sealed partial class TelemetryBatchProcessor : BackgroundService
         {
             LogDrainTimeout(_logger, DrainTimeoutSeconds, _wal.UncommittedRecordCount);
         }
+    }
+
+    private static int BufferBytes(List<GlobalTelemetryPayload> buffer)
+    {
+        int bytes = 0;
+        foreach (GlobalTelemetryPayload payload in buffer)
+        {
+            bytes = checked(bytes + TelemetryPayloadMemory.Estimate(payload));
+        }
+        return bytes;
+    }
+
+    private bool FitsBatch(GlobalTelemetryPayload payload, ref int bytes)
+    {
+        int required = TelemetryPayloadMemory.Estimate(payload);
+        if (required > _options.DatabaseBatchByteCapacity)
+        {
+            throw new IOException("A retained WAL event exceeds DatabaseBatchByteCapacity; raise the capacity to recover it.");
+        }
+        if (required > _options.DatabaseBatchByteCapacity - bytes)
+        {
+            return false;
+        }
+        bytes += required;
+        return true;
     }
 
     private async Task<bool> PushBatchToClickHouseAsync(

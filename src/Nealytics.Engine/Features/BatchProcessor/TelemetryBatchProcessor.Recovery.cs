@@ -12,15 +12,19 @@ public sealed partial class TelemetryBatchProcessor
     {
         List<GlobalTelemetryPayload> buffer = _bufferA;
         int bytes = 0;
+        int memoryBytes = 0;
         long recovered = 0;
         try
         {
             await foreach (WalReplayRecord record in _wal.ReplayRecordsAsync(cancellationToken))
             {
-                if ((long)bytes + record.FramedBytes > _wal.ReplayBatchByteLimit)
+                if ((long)bytes + record.FramedBytes > _wal.ReplayBatchByteLimit
+                    || !FitsBatch(record.Payload, ref memoryBytes))
                 {
                     await PushRecoveryBatchAsync(buffer, cancellationToken);
                     bytes = 0;
+                    memoryBytes = 0;
+                    FitsBatch(record.Payload, ref memoryBytes);
                 }
                 buffer.Add(record.Payload);
                 bytes += record.FramedBytes;
@@ -29,6 +33,7 @@ public sealed partial class TelemetryBatchProcessor
                 {
                     await PushRecoveryBatchAsync(buffer, cancellationToken);
                     bytes = 0;
+                    memoryBytes = 0;
                 }
             }
             if (buffer.Count > 0)
