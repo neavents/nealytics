@@ -190,7 +190,8 @@ public sealed class IngestionCapacityTests : IAsyncDisposable
             Dimensions = new() { ["dimension"] = new string('字', 500) },
             Measures = new() { ["measure"] = "1" }
         };
-        Assert.True(TelemetryPayloadMemory.Estimate(item) > TelemetryPayloadMemory.Estimate(empty) + 3000);
+        Assert.Equal(900, TelemetryPayloadMemory.Estimate(empty));
+        Assert.Equal(4674, TelemetryPayloadMemory.Estimate(item));
         Assert.True(TelemetryPayloadMemory.Estimate(item) > JsonSerializer.SerializeToUtf8Bytes(item,
             TelemetryAotContext.Default.GlobalTelemetryPayload).Length / 4);
         Assert.Throws<ArgumentNullException>(() => TelemetryPayloadMemory.Estimate(null!));
@@ -233,6 +234,68 @@ public sealed class IngestionCapacityTests : IAsyncDisposable
         Assert.Equal(new[] { 2, 2, 2, 1 }, target.Batches.Select(batch => batch.Length));
         Assert.Equal(0, broker.RetainedBytes);
         Assert.Equal(0, wal.RetainedWalBytes);
+    }
+
+    [Fact]
+    public async Task SourceAdmissionReservesRoomForDeliveryManifestsInBothDiskAndRecordBudgets()
+    {
+        var settings = Settings();
+        settings.DeliveryJournalMaxBytes = 4096;
+        var options = Options.Create(settings);
+        await using var wal = new WriteAheadLogger(options);
+        var oversized = Payload();
+        oversized.MetadataJson = new string('x', 2000);
+        await Assert.ThrowsAsync<IOException>(() => wal.AppendAsync(oversized, CancellationToken.None));
+        Assert.Equal(0, wal.RetainedWalBytes);
+        await wal.AppendAsync(Payload(), CancellationToken.None);
+        await wal.AppendAsync(Payload(), CancellationToken.None);
+        Assert.True(wal.RetainedWalBytes < settings.DeliveryJournalMaxBytes / 2);
+        await Assert.ThrowsAsync<IOException>(() => wal.AppendAsync(Payload(), CancellationToken.None));
+        await wal.AcknowledgeCommitAsync(2);
+        await wal.AppendAsync(Payload(), CancellationToken.None);
+        Assert.Equal(1, wal.UncommittedRecordCount);
+    }
+
+    [Fact]
+    public async Task AClosedChannelReturnsTheExactReservationWhenPublicationFails()
+    {
+        var channel = System.Threading.Channels.Channel.CreateBounded<TelemetryChannelBroker.QueuedPayload>(1);
+        channel.Writer.Complete();
+        var broker = new TelemetryChannelBroker(Options.Create(Settings()), channel);
+        await Assert.ThrowsAsync<System.Threading.Channels.ChannelClosedException>(() =>
+            broker.PublishAsync(Payload(), CancellationToken.None).AsTask());
+        Assert.Equal(0, broker.RetainedBytes);
+        Assert.False(await broker.Reader.WaitToReadAsync());
+        await broker.Reader.Completion;
+    }
+
+    [Fact]
+    public void RecordReservationsRemainIndependentOfByteReservations()
+    {
+        var budget = new WalBacklogBudget(100, 0, recordCapacity: 2);
+        budget.Reserve(10, 2);
+        Assert.Throws<IOException>(() => budget.Reserve(1));
+        Assert.Equal(10, budget.Bytes);
+        budget.Release(5, 1);
+        budget.Reserve(1);
+        Assert.Throws<InvalidOperationException>(() => budget.Release(0, 3));
+        Assert.Throws<InvalidOperationException>(() => budget.Release(0, -1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => budget.Reserve(1, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new WalBacklogBudget(1, 0, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new WalBacklogBudget(1, 0, 1, -1));
+    }
+
+    [Fact]
+    public void VeryLargeSharedStringsSaturateAccountingWithoutIntegerOverflow()
+    {
+        string text = new('x', 80000000);
+        var payload = new GlobalTelemetryPayload
+        {
+            ProjectId = text, TenantId = text, SessionId = text, UserId = text, EventType = text,
+            ObjectId = text, TrafficClass = text, PagePath = text, Referrer = text, DeviceClass = text,
+            Os = text, Browser = text, Country = text, MetadataJson = text
+        };
+        Assert.Equal(int.MaxValue, TelemetryPayloadMemory.Estimate(payload));
     }
 
     private sealed class RecordingWriter : ITelemetryBatchWriter

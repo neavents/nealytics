@@ -56,7 +56,7 @@ public sealed partial class WriteAheadLogger
         bool reserved = false;
         try
         {
-            _backlog.Reserve(length);
+            _backlog.Reserve(length, records);
             reserved = true;
             rented = _recordPool.Rent(length);
             serialized.CopyTo(rented);
@@ -81,7 +81,7 @@ public sealed partial class WriteAheadLogger
                 _admission.Release(records, length);
                 if (reserved)
                 {
-                    _backlog.Release(length);
+                    _backlog.Release(length, records);
                 }
             }
         }
@@ -137,6 +137,7 @@ public sealed partial class WriteAheadLogger
             }
             await _file.FlushAsync();
 
+            _persistedRecords += records;
             Interlocked.Add(ref _uncommittedRecords, records);
             _statistics.Record(records, Stopwatch.GetElapsedTime(flushStartTicks));
         }

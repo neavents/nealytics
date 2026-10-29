@@ -15,4 +15,5 @@ internal interface IDeliveryBatchWriter
 internal interface IDeliveryCheckpoint
 {
     Task CheckpointAsync();
+    Task CheckpointRecoveryAsync();
 }

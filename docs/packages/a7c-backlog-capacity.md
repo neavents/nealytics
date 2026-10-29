@@ -21,8 +21,16 @@ After an outage, retained source files may exceed a newly lowered setting; recov
 available while new appends wait for sufficient space. Delivery manifests have their own byte,
 record and per-unit recovery limits. No cleanup depends on FIFO assumptions about producer tasks.
 
-Defaults: channel 64 MiB, each database buffer 16 MiB, retained source WAL 1 GiB, delivery journal
-256 MiB/100,000 records. Configure these with request admission, WAL pending/flush bounds and
+Defaults: channel 64 MiB, each database buffer 16 MiB, requested source WAL ceiling 1 GiB,
+delivery journal 256 MiB/100,000 records. Effective source admission reserves room for journal
+metadata: bytes are bounded by min(WalMaxBacklogBytes, DeliveryJournalMaxBytes / 2), and retained
+record reservations by min(DeliveryJournalMaxRecords, DeliveryJournalMaxBytes / 2048). The default
+effective source bound is therefore 128 MiB and 100,000 records. A full generation briefly refuses
+new appends while accepted work drains and checkpoints, so continuous traffic cannot exhaust the
+journal before it can be pruned. Startup counts complete frames with a fixed-size buffer; old
+segments hold their record reservations until durable removal. A completed recovery checkpoint
+can prune old manifests while newly admitted active records remain uncommitted, because no live
+database unit has been attempted during recovery. Configure these with request admission, WAL pending/flush bounds and
 reserved database pools. These are explicit capacities, not an assertion that total RSS equals
 their sum. Disk saturation and consumer failure must preserve acknowledged records while keeping
 admission bounded. Existing callers keep the same endpoints and durable acknowledgment contract.

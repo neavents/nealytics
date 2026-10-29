@@ -3,6 +3,7 @@ namespace Nealytics.Engine.Features.BatchProcessor;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
@@ -20,6 +21,7 @@ internal sealed class JournaledTelemetryBatchWriter : ITelemetryBatchWriter, IDe
     private readonly RollupRegistry? _rollups;
     private bool _loaded;
     private TelemetryDeliveryUnit? _pending;
+    private ExceptionDispatchInfo? _preparationFailure;
 
     public JournaledTelemetryBatchWriter(
         IDeliveryBatchWriter writer,
@@ -43,6 +45,7 @@ internal sealed class JournaledTelemetryBatchWriter : ITelemetryBatchWriter, IDe
     public async Task WriteAsync(
         IReadOnlyList<GlobalTelemetryPayload> batch, int count, CancellationToken cancellationToken)
     {
+        _preparationFailure?.Throw();
         if (!_loaded)
         {
             foreach (TelemetryDeliveryUnit pending in _journal.Load())
@@ -71,7 +74,15 @@ internal sealed class JournaledTelemetryBatchWriter : ITelemetryBatchWriter, IDe
                 Schema = _writer.SchemaFingerprint,
                 Items = remaining.ToArray()
             };
-            _pending = _journal.Prepare(unit);
+            try
+            {
+                _pending = _journal.Prepare(unit);
+            }
+            catch (Exception error)
+            {
+                _preparationFailure = ExceptionDispatchInfo.Capture(error);
+                throw;
+            }
         }
         else
         {
@@ -92,6 +103,8 @@ internal sealed class JournaledTelemetryBatchWriter : ITelemetryBatchWriter, IDe
     }
 
     public Task CheckpointAsync() => _wal.CheckpointDeliveryAsync(_journal.Clear);
+
+    public Task CheckpointRecoveryAsync() => _wal.CheckpointDeliveryAsync(_journal.Clear, requireEmptyActive: false);
 
     private async Task DeliverAsync(TelemetryDeliveryUnit unit, CancellationToken cancellationToken)
     {

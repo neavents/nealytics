@@ -127,6 +127,26 @@ internal sealed class WalDirectory : IDisposable
         return value;
     }
 
+    internal static long CountFrames(string path)
+    {
+        using FileStream source = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            65_536, FileOptions.SequentialScan);
+        Span<byte> buffer = stackalloc byte[4096];
+        long records = 0;
+        int count;
+        while ((count = source.Read(buffer)) != 0)
+        {
+            foreach (byte value in buffer[..count])
+            {
+                if (value == (byte)'\n')
+                {
+                    records++;
+                }
+            }
+        }
+        return records;
+    }
+
     private void EnsureOwned() => ObjectDisposedException.ThrowIf(!_lease.CanRead, this);
 
     public void Dispose() => _lease.Dispose();

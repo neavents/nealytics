@@ -19,12 +19,17 @@ public sealed class TelemetryChannelBroker
     private readonly int _maxItemBytes;
 
     public TelemetryChannelBroker(IOptions<TelemetryEngineOptions> options)
+        : this(options, channel: null)
+    {
+    }
+
+    internal TelemetryChannelBroker(IOptions<TelemetryEngineOptions> options, Channel<QueuedPayload>? channel)
     {
         TelemetryEngineOptions settings = options.Value;
         _admission = new WalAdmission(settings.MemoryChannelCapacity, settings.MemoryChannelByteCapacity);
         _maxItemBytes = Math.Min(settings.MemoryChannelByteCapacity, settings.DatabaseBatchByteCapacity);
         ArgumentOutOfRangeException.ThrowIfLessThan(_maxItemBytes, 1);
-        _channel = Channel.CreateBounded<QueuedPayload>(
+        _channel = channel ?? Channel.CreateBounded<QueuedPayload>(
             new BoundedChannelOptions(settings.MemoryChannelCapacity)
             {
                 SingleReader = true,
@@ -63,7 +68,7 @@ public sealed class TelemetryChannelBroker
 
     public ChannelReader<GlobalTelemetryPayload> Reader { get; }
 
-    private readonly record struct QueuedPayload(GlobalTelemetryPayload Payload, int Bytes);
+    internal readonly record struct QueuedPayload(GlobalTelemetryPayload Payload, int Bytes);
 
     private sealed class BudgetedReader : ChannelReader<GlobalTelemetryPayload>
     {

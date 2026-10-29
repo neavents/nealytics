@@ -6,6 +6,7 @@ using Nealytics.Engine.Infrastructure.Serialization;
 using Nealytics.Engine.Infrastructure.Storage;
 using Nealytics.Engine.Infrastructure.Storage.Delivery;
 using Octonica.ClickHouseClient;
+using Testcontainers.ClickHouse;
 
 namespace Nealytics.Engine.Tests.Integration;
 
@@ -137,6 +138,93 @@ public sealed class ReplayDeliveryIntegrationTests
         finally
         {
             await ClickHouseTestSupport.ExecuteAsync($"DROP DATABASE IF EXISTS {database} SYNC");
+        }
+    }
+
+    [Fact]
+    public async Task SourceIdentityRequiresTheSupportedEngineAndAnActiveDeduplicationLog()
+    {
+        await using ClickHouseContainer server = new ClickHouseBuilder(
+            "clickhouse/clickhouse-server:25.3.14.14@sha256:b627d7a9bc0e0c1bac26cdbe9d2fc6316faa29c5d8a174f28f5abd57d0fa6ba2")
+            .WithDatabase("nealytics_core").WithUsername("delivery").WithPassword("delivery-test-only")
+            .WithLabel("nealytics.scope", "delivery-identity-qualification")
+            .WithCreateParameterModifier(parameters =>
+            {
+                parameters.HostConfig!.Memory = 2147483648;
+                parameters.HostConfig.NanoCPUs = 2000000000;
+            }).Build();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await server.StartAsync(timeout.Token);
+        var connectionString = new ClickHouseConnectionStringBuilder
+        {
+            Host = server.Hostname, Port = server.GetMappedPublicPort(9000), Database = "nealytics_core",
+            User = "delivery", Password = "delivery-test-only"
+        }.ToString();
+        var options = Options.Create(new TelemetryEngineOptions { ClickHouseConnectionString = connectionString });
+        await using var connection = new ClickHouseConnection(connectionString);
+        await connection.OpenAsync(timeout.Token);
+        async Task Execute(string sql)
+        {
+            await using var command = connection.CreateCommand(sql);
+            await command.ExecuteNonQueryAsync(timeout.Token);
+        }
+        await Execute("CREATE TABLE nealytics_core.global_events (event_id UUID) ENGINE=ReplacingMergeTree ORDER BY event_id");
+        await using var factory = new ClickHouseConnectionFactory(options);
+        var dimensions = new DimensionRegistry(options.Value);
+        var writer = new ClickHouseBatchWriter(factory, dimensions, new MeasureRegistry(options.Value, dimensions),
+            options, NullLogger<ClickHouseBatchWriter>.Instance);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => writer.GetSourceIdAsync(timeout.Token));
+        await Execute("ALTER TABLE nealytics_core.global_events MODIFY SETTING non_replicated_deduplication_window = 100000");
+        Assert.NotEqual(Guid.Empty, await writer.GetSourceIdAsync(timeout.Token));
+        await Execute("DROP DATABASE nealytics_core SYNC");
+        await Execute("CREATE DATABASE nealytics_core");
+        await Execute("CREATE TABLE nealytics_core.global_events (event_id UUID) ENGINE=MergeTree ORDER BY event_id SETTINGS non_replicated_deduplication_window=100000");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => writer.GetSourceIdAsync(timeout.Token));
+    }
+
+    [Fact]
+    public async Task PendingDeliveryPreventsNewRollupBackfillAndReadinessUntilItIsResolved()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "nealytics-delivery-rollup-" + Guid.NewGuid().ToString("N"));
+        string name = "delivery_" + Guid.NewGuid().ToString("N");
+        string delivery = Path.Combine(directory, "delivery");
+        Directory.CreateDirectory(delivery);
+        string manifest = Path.Combine(delivery, Guid.NewGuid().ToString("N") + ".json");
+        File.WriteAllText(manifest, "pending");
+        var options = Options.Create(new TelemetryEngineOptions
+        {
+            WriteAheadLogDirectory = directory,
+            ClickHouseConnectionString = ClickHouseTestSupport.ConnectionString,
+            Rollups = [new RollupOptions { Name = name }]
+        });
+        await using var factory = new ClickHouseConnectionFactory(options);
+        var dimensions = new DimensionRegistry(options.Value);
+        var measures = new MeasureRegistry(options.Value, dimensions);
+        var registry = new RollupRegistry(options.Value, dimensions, measures);
+        var migrator = new ClickHouseSchemaMigrator(factory, dimensions, measures, registry, options,
+            NullLogger<ClickHouseSchemaMigrator>.Instance);
+        var rollup = Assert.Single(registry.Declared);
+        try
+        {
+            await migrator.StartAsync(CancellationToken.None);
+            Assert.False(registry.IsRoutable(rollup));
+            Assert.Contains("pending delivery", registry.UnroutableReason(rollup));
+            await using var connection = new ClickHouseConnection(ClickHouseTestSupport.ConnectionString);
+            await connection.OpenAsync();
+            await using (var count = connection.CreateCommand(
+                $"SELECT count() FROM system.tables WHERE database='nealytics_core' AND name='rollup_{name}'"))
+            {
+                Assert.Equal((ulong)0, await count.ExecuteScalarAsync());
+            }
+            File.WriteAllText(Path.ChangeExtension(manifest, ".committed"), string.Empty);
+            await migrator.StartAsync(CancellationToken.None);
+            Assert.True(registry.IsRoutable(rollup));
+        }
+        finally
+        {
+            await ClickHouseTestSupport.ExecuteAsync($"DROP VIEW IF EXISTS nealytics_core.rollup_{name}_mv");
+            await ClickHouseTestSupport.ExecuteAsync($"DROP TABLE IF EXISTS nealytics_core.rollup_{name} SYNC");
+            Directory.Delete(directory, true);
         }
     }
 

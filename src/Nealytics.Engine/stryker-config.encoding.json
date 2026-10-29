@@ -7,7 +7,7 @@
     "test-case-filter": "FullyQualifiedName~WalEncodingReservationTests|FullyQualifiedName~WalRecordBufferTests|FullyQualifiedName~WalBudgetTests|FullyQualifiedName~BoundedWalTests",
     "mutate": [
       "Infrastructure/Storage/Wal/WalRecordBuffer.cs",
-      "Infrastructure/Storage/WriteAheadLogger.cs{2565..2675}"
+      "Infrastructure/Storage/WriteAheadLogger.cs{2707..2817}"
     ],
     "mutation-level": "Complete",
     "concurrency": 2,

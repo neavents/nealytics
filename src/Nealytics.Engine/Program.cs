@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using System.Collections.Generic;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Exporter;
@@ -179,16 +180,18 @@ if (engineOpts.EnableRequestDecompression)
     builder.Services.AddRequestDecompression();
 }
 
-builder.Services.AddRateLimiter(limiter =>
+builder.Services.AddRateLimiter();
+builder.Services.AddOptions<RateLimiterOptions>().Configure<IOptions<TelemetryEngineOptions>>((limiter, configured) =>
 {
+    TelemetryEngineOptions capacityOptions = configured.Value;
     limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    limiter.GlobalLimiter = IngestionRequestAdmission.Create(engineOpts);
+    limiter.GlobalLimiter = IngestionRequestAdmission.Create(capacityOptions);
     limiter.AddFixedWindowLimiter("ingestion", window =>
     {
-        window.PermitLimit = engineOpts.RateLimitPermitCount;
-        window.Window = TimeSpan.FromSeconds(engineOpts.RateLimitWindowSeconds);
+        window.PermitLimit = capacityOptions.RateLimitPermitCount;
+        window.Window = TimeSpan.FromSeconds(capacityOptions.RateLimitWindowSeconds);
         window.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-        window.QueueLimit = engineOpts.RateLimitQueueSize;
+        window.QueueLimit = capacityOptions.RateLimitQueueSize;
     });
 });
 

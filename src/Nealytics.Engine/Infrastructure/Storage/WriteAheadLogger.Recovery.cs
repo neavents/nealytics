@@ -85,7 +85,8 @@ public sealed partial class WriteAheadLogger
                     }
                 }
                 _directory.DeleteRecovery(_recoveryPaths);
-                _backlog.Release(bytes);
+                _backlog.Release(bytes, _sealedRecords);
+                _sealedRecords = 0;
             }
             catch (Exception error)
             {

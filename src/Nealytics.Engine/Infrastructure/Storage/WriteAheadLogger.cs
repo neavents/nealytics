@@ -21,6 +21,8 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
     private readonly WalAdmission _admission;
     private readonly WalBacklogBudget _backlog;
     private long _persistedBytes;
+    private long _persistedRecords;
+    private long _sealedRecords;
     private readonly WalRecordBuffer _recordBuffer;
     private readonly WalRecordBuffer _batchBuffer;
     private readonly ArrayPool<byte> _recordPool;
@@ -82,8 +84,11 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
             foreach (string path in _recoveryPaths)
             {
                 recoveredBytes = checked(recoveredBytes + new FileInfo(path).Length);
+                _sealedRecords = checked(_sealedRecords + WalDirectory.CountFrames(path));
             }
-            _backlog = new WalBacklogBudget(engineOptions.WalMaxBacklogBytes, recoveredBytes);
+            long byteCapacity = Math.Min(engineOptions.WalMaxBacklogBytes, engineOptions.DeliveryJournalMaxBytes / 2);
+            long recordCapacity = Math.Min(engineOptions.DeliveryJournalMaxRecords, engineOptions.DeliveryJournalMaxBytes / 2048);
+            _backlog = new WalBacklogBudget(byteCapacity, recoveredBytes, recordCapacity, _sealedRecords);
             _logFilePath = _directory.ActivePath;
             Selection = file is null
                 ? factory.Create(_logFilePath, _limits)
@@ -154,8 +159,9 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
                 if (remaining == 0)
                 {
                     await _file.TruncateAsync();
-                    _backlog.Release(_persistedBytes);
+                    _backlog.Release(_persistedBytes, _persistedRecords);
                     _persistedBytes = 0;
+                    _persistedRecords = 0;
                 }
                 Interlocked.Exchange(ref _uncommittedRecords, remaining);
             }
@@ -174,7 +180,7 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
         }
     }
 
-    internal async Task CheckpointDeliveryAsync(Action clearDelivery)
+    internal async Task CheckpointDeliveryAsync(Action clearDelivery, bool requireEmptyActive = true)
     {
         _operations.Enter();
         try
@@ -183,7 +189,7 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
             try
             {
                 _operations.ThrowIfFailed();
-                if (UncommittedRecordCount == 0 && !HasSealedSegment)
+                if ((!requireEmptyActive || UncommittedRecordCount == 0) && !HasSealedSegment)
                 {
                     clearDelivery();
                 }
@@ -213,8 +219,9 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
             {
                 _operations.ThrowIfFailed();
                 await _file.TruncateAsync();
-                _backlog.Release(_persistedBytes);
+                _backlog.Release(_persistedBytes, _persistedRecords);
                 _persistedBytes = 0;
+                _persistedRecords = 0;
                 Interlocked.Exchange(ref _uncommittedRecords, 0);
             }
             catch (Exception error)

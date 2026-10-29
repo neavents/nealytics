@@ -17,12 +17,27 @@ internal sealed class TelemetryDeliveryJournal
     private readonly int _maxRecords;
     private readonly long _maxBytes;
     private readonly int _maxUnitBytes;
+    private readonly Func<string, FileMode, FileStream> _openFile;
+    private readonly Action<string> _synchronize;
+    private readonly Func<string, byte[]> _readFile;
     private readonly HashSet<Guid> _delivered = new HashSet<Guid>();
     private int _records;
     private long _bytes;
 
     public TelemetryDeliveryJournal(IOptions<TelemetryEngineOptions> options)
+        : this(options, OpenFile, WalDirectoryDurability.Synchronize)
     {
+    }
+
+    internal TelemetryDeliveryJournal(
+        IOptions<TelemetryEngineOptions> options,
+        Func<string, FileMode, FileStream> openFile,
+        Action<string> synchronize,
+        Func<string, byte[]>? readFile = null)
+    {
+        _openFile = openFile;
+        _synchronize = synchronize;
+        _readFile = readFile ?? File.ReadAllBytes;
         _maxRecords = options.Value.DeliveryJournalMaxRecords;
         _maxBytes = options.Value.DeliveryJournalMaxBytes;
         _maxUnitBytes = (int)Math.Min(int.MaxValue, Math.Min(_maxBytes, options.Value.DatabaseBatchByteCapacity * 4L + 4096));
@@ -30,7 +45,7 @@ internal sealed class TelemetryDeliveryJournal
         ArgumentOutOfRangeException.ThrowIfLessThan(_maxBytes, 1);
         _directory = Path.Combine(Path.GetFullPath(options.Value.WriteAheadLogDirectory), "delivery");
         Directory.CreateDirectory(_directory);
-        WalDirectoryDurability.Synchronize(Path.GetDirectoryName(_directory)!);
+        _synchronize(Path.GetDirectoryName(_directory)!);
     }
 
     public bool IsDelivered(GlobalTelemetryPayload payload) => _delivered.Contains(payload.WalRecordId);
@@ -73,7 +88,12 @@ internal sealed class TelemetryDeliveryJournal
     public TelemetryDeliveryUnit Prepare(TelemetryDeliveryUnit unit)
     {
         Validate(unit);
-        using WalRecordBuffer buffer = new WalRecordBuffer((int)Math.Min(_maxUnitBytes, _maxBytes - _bytes), reserveForEncoding: true);
+        long remainingBytes = _maxBytes - _bytes - 65;
+        if (remainingBytes < 1)
+        {
+            throw new InvalidDataException("The delivery journal has no capacity for another durable manifest.");
+        }
+        using WalRecordBuffer buffer = new WalRecordBuffer((int)Math.Min(_maxUnitBytes, remainingBytes), reserveForEncoding: true);
         using (Utf8JsonWriter writer = new Utf8JsonWriter(buffer))
         {
             JsonSerializer.Serialize(writer, unit, TelemetryAotContext.Default.TelemetryDeliveryUnit);
@@ -82,20 +102,20 @@ internal sealed class TelemetryDeliveryJournal
         ReserveRecords(unit.Items.Length);
         byte[] checksum = Encoding.ASCII.GetBytes(Convert.ToHexString(SHA256.HashData(buffer.WrittenMemory.Span)) + "\n");
         string temporary = Path.Combine(_directory, unit.Id.ToString("N") + ".tmp");
-        using (FileStream target = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        using (FileStream target = _openFile(temporary, FileMode.CreateNew))
         {
             target.Write(checksum);
             target.Write(buffer.WrittenMemory.Span);
             target.Flush(flushToDisk: true);
         }
         File.Move(temporary, ManifestPath(unit));
-        WalDirectoryDurability.Synchronize(_directory);
+        _synchronize(_directory);
         return JsonSerializer.Deserialize(buffer.WrittenMemory.Span, TelemetryAotContext.Default.TelemetryDeliveryUnit)!;
     }
 
-    private static TelemetryDeliveryUnit Read(string path)
+    private TelemetryDeliveryUnit Read(string path)
     {
-        byte[] bytes = File.ReadAllBytes(path);
+        byte[] bytes = _readFile(path);
         if (bytes.Length < 66 || bytes[64] != (byte)'\n'
             || !Encoding.ASCII.GetString(bytes.AsSpan(0, 64)).Equals(
                 Convert.ToHexString(SHA256.HashData(bytes.AsSpan(65))), StringComparison.Ordinal))
@@ -108,11 +128,11 @@ internal sealed class TelemetryDeliveryJournal
 
     public void Complete(TelemetryDeliveryUnit unit)
     {
-        using (FileStream marker = new FileStream(CommittedPath(unit), FileMode.Create, FileAccess.Write, FileShare.None))
+        using (FileStream marker = _openFile(CommittedPath(unit), FileMode.Create))
         {
             marker.Flush(flushToDisk: true);
         }
-        WalDirectoryDurability.Synchronize(_directory);
+        _synchronize(_directory);
         Remember(unit);
     }
 
@@ -122,7 +142,7 @@ internal sealed class TelemetryDeliveryJournal
         {
             File.Delete(path);
         }
-        WalDirectoryDurability.Synchronize(_directory);
+        _synchronize(_directory);
         _delivered.Clear();
         _records = 0;
         _bytes = 0;
@@ -149,7 +169,8 @@ internal sealed class TelemetryDeliveryJournal
     private static void Validate(TelemetryDeliveryUnit unit)
     {
         if (unit.Version != 1 || unit.Id == Guid.Empty || unit.SourceId == Guid.Empty
-            || unit.Schema is null || unit.Schema.Length != 64 || unit.Items is null || unit.Items.Length == 0 || unit.IngestedAt == default)
+            || unit.Schema is null || unit.Schema.Length != 64
+            || unit.Items is null || unit.Items.Length == 0 || unit.IngestedAt == default)
         {
             throw new InvalidDataException("The delivery manifest header is invalid.");
         }
@@ -173,6 +194,9 @@ internal sealed class TelemetryDeliveryJournal
             }
         }
     }
+
+    private static FileStream OpenFile(string path, FileMode mode) =>
+        new FileStream(path, mode, FileAccess.Write, FileShare.None);
 
     private string ManifestPath(TelemetryDeliveryUnit unit) => Path.Combine(_directory, unit.Id.ToString("N") + ".json");
     private string CommittedPath(TelemetryDeliveryUnit unit) => Path.Combine(_directory, unit.Id.ToString("N") + ".committed");

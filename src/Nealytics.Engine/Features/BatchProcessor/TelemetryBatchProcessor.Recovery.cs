@@ -44,7 +44,7 @@ public sealed partial class TelemetryBatchProcessor
             await _wal.DeleteSealedSegmentAsync();
             if (_writer is IDeliveryCheckpoint checkpoint)
             {
-                await checkpoint.CheckpointAsync();
+                await checkpoint.CheckpointRecoveryAsync();
             }
             LogWalRecovery(_logger, recovered);
         }

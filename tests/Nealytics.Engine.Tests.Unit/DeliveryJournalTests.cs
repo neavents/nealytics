@@ -255,6 +255,248 @@ public sealed class DeliveryJournalTests : IAsyncDisposable
         Assert.Empty(Directory.GetFiles(Path.Combine(_directory, "delivery")));
     }
 
+    [Fact]
+    public void DurableManifestAndCompletionBarriersPrecedeTheirDirectoryPublication()
+    {
+        var settings = Options.Create(Settings());
+        List<string> trace = [];
+        var journal = new TelemetryDeliveryJournal(settings,
+            (path, mode) => new ProbeFileStream(path, mode, trace),
+            path => trace.Add("sync:" + Path.GetFileName(path)));
+        trace.Clear();
+        var unit = journal.Prepare(Unit());
+        Assert.Equal(new[] { "flush:True", "closed", "sync:delivery" }, trace);
+        Assert.True(File.Exists(Path.Combine(_directory, "delivery", unit.Id.ToString("N") + ".json")));
+        trace.Clear();
+        journal.Complete(unit);
+        Assert.Equal(new[] { "flush:True", "closed", "sync:delivery" }, trace);
+        Assert.True(File.Exists(Path.Combine(_directory, "delivery", unit.Id.ToString("N") + ".committed")));
+        trace.Clear();
+        journal.Clear();
+        Assert.Equal(new[] { "sync:delivery" }, trace);
+    }
+
+    [Fact]
+    public async Task FailedManifestPublicationCannotCreateAnotherUnitOrReachTheDatabaseBeforeRestart()
+    {
+        var options = Options.Create(Settings());
+        await using var wal = new WriteAheadLogger(options);
+        var item = Payload();
+        await wal.AppendAsync(item, CancellationToken.None);
+        IOException failure = new("manifest directory barrier failed");
+        var journal = new TelemetryDeliveryJournal(options,
+            (path, mode) => new FileStream(path, mode, FileAccess.Write, FileShare.None),
+            path =>
+            {
+                if (Path.GetFileName(path) == "delivery")
+                {
+                    throw failure;
+                }
+            });
+        var target = new RecordingWriter(_source, _directory);
+        var writer = new JournaledTelemetryBatchWriter(target, journal, wal, options);
+        Assert.Same(failure, await Assert.ThrowsAsync<IOException>(() => writer.WriteAsync([item], 1, CancellationToken.None)));
+        Assert.Same(failure, await Assert.ThrowsAsync<IOException>(() => writer.WriteAsync([item], 1, CancellationToken.None)));
+        Assert.Empty(target.Units);
+        Assert.Single(Directory.GetFiles(Path.Combine(_directory, "delivery"), "*.json"));
+        var restart = new JournaledTelemetryBatchWriter(target, new TelemetryDeliveryJournal(options), wal, options);
+        await restart.WriteAsync([item], 1, CancellationToken.None);
+        Assert.Single(target.Units);
+    }
+
+    [Fact]
+    public void AggregateJournalByteCapacityCountsEveryManifestBeforeRecoveryAllocatesAnother()
+    {
+        var settings = Settings();
+        var journal = new TelemetryDeliveryJournal(Options.Create(settings));
+        journal.Prepare(Unit());
+        journal.Prepare(Unit());
+        settings.DeliveryJournalMaxBytes = Directory.GetFiles(Path.Combine(_directory, "delivery"), "*.json")
+            .Sum(path => new FileInfo(path).Length) - 1;
+        var limited = new TelemetryDeliveryJournal(Options.Create(settings));
+        Assert.Throws<InvalidDataException>(() => limited.Load().ToArray());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UnsupportedDeliveryConfigurationIsRefused(bool asyncInsert)
+    {
+        var settings = Settings();
+        settings.EnableAsyncInsert = asyncInsert;
+        settings.DeliveryRetryMaxAgeSeconds = asyncInsert ? 900 : 0;
+        var options = Options.Create(settings);
+        await using var wal = new WriteAheadLogger(options);
+        var journal = new TelemetryDeliveryJournal(options);
+        if (asyncInsert)
+        {
+            Assert.Throws<InvalidOperationException>(() => new JournaledTelemetryBatchWriter(
+                new RecordingWriter(_source, _directory), journal, wal, options));
+        }
+        else
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => new JournaledTelemetryBatchWriter(
+                new RecordingWriter(_source, _directory), journal, wal, options));
+        }
+    }
+
+    [Fact]
+    public async Task RecordCapacityRefusesNewAppendsUntilTheCurrentGenerationCanDrainAndCheckpoint()
+    {
+        var settings = Settings();
+        settings.DeliveryJournalMaxRecords = 1;
+        var options = Options.Create(settings);
+        await using var wal = new WriteAheadLogger(options);
+        var target = new RecordingWriter(_source, _directory);
+        var writer = new JournaledTelemetryBatchWriter(target, new TelemetryDeliveryJournal(options), wal, options);
+        for (int iteration = 0; iteration < 20; iteration++)
+        {
+            var item = Payload();
+            await wal.AppendAsync(item, CancellationToken.None);
+            await Assert.ThrowsAsync<IOException>(() => wal.AppendAsync(Payload(), CancellationToken.None));
+            await writer.WriteAsync([item], 1, CancellationToken.None);
+            await wal.AcknowledgeCommitAsync(1);
+            await writer.CheckpointAsync();
+            Assert.Equal(0, wal.RetainedWalBytes);
+            Assert.Empty(Directory.GetFiles(Path.Combine(_directory, "delivery")));
+        }
+        Assert.Equal(20, target.Units.Count);
+        Assert.Equal(20, target.Units.Select(unit => unit.Id).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task RecoveryCheckpointCanReleaseOldManifestsWhileNewActiveRecordsRemainUncommitted()
+    {
+        var settings = Settings();
+        settings.DeliveryJournalMaxRecords = 2;
+        var options = Options.Create(settings);
+        await using (var seed = new WriteAheadLogger(options))
+        {
+            await seed.AppendAsync(Payload(), CancellationToken.None);
+        }
+        await using var wal = new WriteAheadLogger(options);
+        var old = Assert.Single(await wal.ReplayUncommittedAsync());
+        var live = Payload();
+        await wal.AppendAsync(live, CancellationToken.None);
+        await Assert.ThrowsAsync<IOException>(() => wal.AppendAsync(Payload(), CancellationToken.None));
+        var target = new RecordingWriter(_source, _directory);
+        var writer = new JournaledTelemetryBatchWriter(target, new TelemetryDeliveryJournal(options), wal, options);
+        await writer.WriteAsync([old], 1, CancellationToken.None);
+        await wal.DeleteSealedSegmentAsync();
+        await writer.CheckpointRecoveryAsync();
+        Assert.Equal(1, wal.UncommittedRecordCount);
+        Assert.Empty(Directory.GetFiles(Path.Combine(_directory, "delivery")));
+        await writer.WriteAsync([live], 1, CancellationToken.None);
+        await wal.AcknowledgeCommitAsync(1);
+        await writer.CheckpointAsync();
+        Assert.Equal(new[] { old.WalRecordId, live.WalRecordId }, target.Units.SelectMany(unit => unit.Items).Select(item => item.WalRecordId));
+        Assert.Equal(0, wal.RetainedWalBytes);
+    }
+
+    [Fact]
+    public async Task TheCompletionIndexLoadsOnceAndAvoidsReopeningPriorManifestsForEveryBatch()
+    {
+        var options = Options.Create(Settings());
+        await using var wal = new WriteAheadLogger(options);
+        var first = Payload();
+        var second = Payload();
+        await wal.AppendAsync(first, CancellationToken.None);
+        await wal.AppendAsync(second, CancellationToken.None);
+        new TelemetryDeliveryJournal(options).Prepare(Unit([first]));
+        int reads = 0;
+        var journal = new TelemetryDeliveryJournal(options,
+            (path, mode) => new FileStream(path, mode, FileAccess.Write, FileShare.None),
+            _ => { },
+            path =>
+            {
+                reads++;
+                return File.ReadAllBytes(path);
+            });
+        var target = new RecordingWriter(_source, _directory);
+        var writer = new JournaledTelemetryBatchWriter(target, journal, wal, options);
+        await writer.WriteAsync([first], 1, CancellationToken.None);
+        await writer.WriteAsync([second], 1, CancellationToken.None);
+        Assert.Equal(1, reads);
+        Assert.Equal(2, target.Units.Count);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(64)]
+    [InlineData(65)]
+    public void TruncatedManifestsAreRefusedBeforeDeserialization(int bytes)
+    {
+        var journal = new TelemetryDeliveryJournal(Options.Create(Settings()));
+        journal.Prepare(Unit());
+        string path = Assert.Single(Directory.GetFiles(Path.Combine(_directory, "delivery"), "*.json"));
+        File.WriteAllBytes(path, new byte[bytes]);
+        Assert.Throws<InvalidDataException>(() => journal.Load().ToArray());
+    }
+
+    [Fact]
+    public void AnEmptyButChecksummedManifestCannotBecomeADelivery()
+    {
+        var journal = new TelemetryDeliveryJournal(Options.Create(Settings()));
+        journal.Prepare(Unit());
+        string path = Assert.Single(Directory.GetFiles(Path.Combine(_directory, "delivery"), "*.json"));
+        byte[] content = Encoding.UTF8.GetBytes("null");
+        string header = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)) + "\n";
+        File.WriteAllBytes(path, Encoding.ASCII.GetBytes(header).Concat(content).ToArray());
+        Assert.Throws<InvalidDataException>(() => journal.Load().ToArray());
+    }
+
+    [Fact]
+    public void AFullJournalCannotPublishAnotherManifest()
+    {
+        var settings = Settings();
+        new TelemetryDeliveryJournal(Options.Create(settings)).Prepare(Unit());
+        settings.DeliveryJournalMaxBytes = new FileInfo(Assert.Single(
+            Directory.GetFiles(Path.Combine(_directory, "delivery"), "*.json"))).Length;
+        var journal = new TelemetryDeliveryJournal(Options.Create(settings));
+        Assert.Single(journal.Load());
+        Assert.Throws<InvalidDataException>(() => journal.Prepare(Unit()));
+        Assert.Single(Directory.GetFiles(Path.Combine(_directory, "delivery"), "*.json"));
+    }
+
+    [Fact]
+    public async Task AnUncertainViewOutcomeDisablesRollupRoutingUntilVerifiedStartup()
+    {
+        var settings = Settings();
+        settings.Rollups = [new RollupOptions { Name = "delivery" }];
+        var options = Options.Create(settings);
+        await using var wal = new WriteAheadLogger(options);
+        var dimensions = new DimensionRegistry(settings);
+        var rollups = new RollupRegistry(settings, dimensions, new MeasureRegistry(settings, dimensions));
+        var rollup = Assert.Single(rollups.Declared);
+        rollups.MarkRoutable(rollup);
+        var item = Payload();
+        await wal.AppendAsync(item, CancellationToken.None);
+        var target = new RecordingWriter(_source, _directory) { Fail = true };
+        var writer = new JournaledTelemetryBatchWriter(target, new TelemetryDeliveryJournal(options), wal, options, rollups);
+        await Assert.ThrowsAsync<IOException>(() => writer.WriteAsync([item], 1, CancellationToken.None));
+        Assert.False(rollups.IsRoutable(rollup));
+        Assert.Contains("uncertain", rollups.UnroutableReason(rollup));
+        target.Fail = false;
+        await writer.WriteAsync([item], 1, CancellationToken.None);
+        Assert.False(rollups.IsRoutable(rollup));
+    }
+
+    private sealed class ProbeFileStream(string path, FileMode mode, List<string> trace)
+        : FileStream(path, mode, FileAccess.Write, FileShare.None)
+    {
+        public override void Flush(bool flushToDisk)
+        {
+            trace.Add("flush:" + flushToDisk);
+            base.Flush(flushToDisk);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            trace.Add("closed");
+        }
+    }
+
     private sealed class RecordingWriter(Guid source, string directory) : IDeliveryBatchWriter
     {
         public bool Fail;

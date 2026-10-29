@@ -5,13 +5,13 @@
       "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj",
       "../../tests/Nealytics.Engine.Tests.Integration/Nealytics.Engine.Tests.Integration.csproj"
     ],
-    "test-case-filter": "FullyQualifiedName~RollupReadiness|FullyQualifiedName~SchemaReconcilerGuardTests|FullyQualifiedName~RollupBackfillIntegrationTests.ARollupWhoseStoredShapeDiffers",
+    "test-case-filter": "FullyQualifiedName~RollupReadiness|FullyQualifiedName~SchemaReconcilerGuardTests|FullyQualifiedName~RollupBackfillIntegrationTests.ARollupWhoseStoredShapeDiffers|FullyQualifiedName~ReplayDeliveryIntegrationTests.PendingDelivery",
     "mutate": [
       "Infrastructure/Storage/Rollups/*.cs",
-      "Infrastructure/Storage/ClickHouseSchemaMigrator.cs{11641..12233}",
-      "Infrastructure/Storage/ClickHouseSchemaMigrator.cs{18428..21577}",
+      "Infrastructure/Storage/ClickHouseSchemaMigrator.cs{11913..12505}",
+      "Infrastructure/Storage/ClickHouseSchemaMigrator.cs{18700..22497}",
       "Infrastructure/Configuration/RollupRegistry.cs{13392..13535}",
-      "Infrastructure/Configuration/RollupRegistry.cs{14326..14435}"
+      "Infrastructure/Configuration/RollupRegistry.cs{14435..14544}"
     ],
     "mutation-level": "Complete",
     "concurrency": 1,
