@@ -38,11 +38,16 @@ jobs:
           gh run download 40807694186 --repo '${{ github.repository }}' --name native-linux-arm64 --dir /tmp/nealytics-prior-arm
           python3 - <<'PY'
           from pathlib import Path
+          from collections import Counter
+          import json
           import subprocess
           report = next(Path('/tmp/nealytics-prior-arm').rglob('mutation-report.json'))
-          text = subprocess.check_output(['python3', 'native/report_mutants.py', str(report)], text=True)
+          data = json.loads(report.read_text())
+          counts = Counter(mutant['status'] for file in data['files'].values() for mutant in file.get('mutants', []))
+          text = str(report) + ' ' + str(counts) + '\n'
+          text += subprocess.check_output(['python3', 'native/report_mutants.py', str(report)], text=True)
           text = text[-2500:].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-          print('::notice title=Prior ARM mutation review::' + text)
+          print('::warning title=Prior ARM mutation review::' + text)
           PY
 
       - name: Qualify actual host architecture and native artifact
