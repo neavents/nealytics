@@ -20,6 +20,8 @@ internal sealed class ClickHouseConnectionPool : IAsyncDisposable
     private readonly object _sync = new object();
     private readonly object _disposeSync = new object();
     private Task? _disposeTask;
+    private TaskCompletionSource? _acquisitionsIdle;
+    private int _acquisitions;
     private bool _disposed;
 
     private readonly record struct IdleConnection(ClickHouseConnection Connection, long Since);
@@ -37,6 +39,30 @@ internal sealed class ClickHouseConnectionPool : IAsyncDisposable
         _maxIdle != Timeout.InfiniteTimeSpan && Stopwatch.GetElapsedTime(idleSinceTicks, nowTicks) >= _maxIdle;
 
     public async Task<PooledClickHouseConnection> AcquireAsync(CancellationToken cancellationToken)
+    {
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            _acquisitions++;
+        }
+        try
+        {
+            return await AcquireCoreAsync(cancellationToken);
+        }
+        finally
+        {
+            lock (_sync)
+            {
+                _acquisitions--;
+                if (_acquisitions == 0)
+                {
+                    _acquisitionsIdle?.TrySetResult();
+                }
+            }
+        }
+    }
+
+    private async Task<PooledClickHouseConnection> AcquireCoreAsync(CancellationToken cancellationToken)
     {
         using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
         deadline.CancelAfter(_timeout);
@@ -162,13 +188,17 @@ internal sealed class ClickHouseConnectionPool : IAsyncDisposable
 
     private async Task DisposeCoreAsync()
     {
+        Task idleAcquisitions;
         lock (_sync)
         {
             _disposed = true;
+            idleAcquisitions = _acquisitions == 0 ? Task.CompletedTask
+                : (_acquisitionsIdle ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
         }
         _shutdown.Cancel();
         try
         {
+            await idleAcquisitions;
             List<ClickHouseConnection> idle = TakeIdle();
             Task[] shutdowns = new Task[idle.Count];
             for (int index = 0; index < idle.Count; index++)
