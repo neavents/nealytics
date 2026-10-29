@@ -66,6 +66,10 @@ A4 now has a separate [bounded streaming-recovery brief](packages/a4-streaming-r
 It bounds the recovery reader and batch owner while retaining the current record format. Durable
 segment rotation/delivery identities and reserved capacity remain separate A requirements.
 
+A5 has a [rollup readiness brief](packages/a5-rollup-readiness.md) after a real memory-pressure
+failure exposed routing to partial backfill results. It establishes persisted completion before
+routing; stable delivery identity and resumable rebuild semantics remain separate A6 work.
+
 ## 3. How to split the later work
 
 Deliver an end-to-end slice per package, rather than a whole subsystem:

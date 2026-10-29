@@ -107,6 +107,7 @@ named feat/correctness-and-safety cannot also contain child refs beneath that sa
 | A2 | feat/correctness-and-safety-a2-compatibility-and-durability |
 | A3 | feat/correctness-and-safety-a3-bounded-wal-admission |
 | A4 | feat/correctness-and-safety-a4-streaming-recovery |
+| A5 | feat/correctness-and-safety-a5-rollup-readiness |
 | B1 | feat/ingestion-performance-b1-wal-io-boundary |
 | B2 | feat/ingestion-performance-b2-native-backend |
 | B3 | feat/ingestion-performance-b3-native-wal-integration |

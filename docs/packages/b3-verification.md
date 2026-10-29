@@ -25,7 +25,9 @@ completion after a terminal WAL error. End-to-end failure outcomes did not relia
 that the channel itself was faulted, leaving a scheduling-sensitive gap around late producers.
 The regression now awaits channel completion and requires the original storage exception.
 A separate temporary-source check removed that completion call and verified an assertion failure;
-the unmutated regression passes. Repeat the full platform gates after this strengthened assertion.
+the unmutated regression passes. Both actual-platform gates passed again with the strengthened
+assertion in [run 40830818024](https://github.com/neavents/nealytics/actions/runs/40830818024),
+at commit 6f8c5aa. The x64 job completed in about thirteen minutes and ARM64 in about twelve.
 
 The 25 timeout detections erase completion, draining, cancellation or shutdown progress. They
 are detections rather than assertion kills; ordinary suites complete without timeouts. Thresholds
