@@ -50,7 +50,9 @@ public sealed partial class StreamingRecoveryTests
         Task stop = harness.StopAsync();
         try
         {
-            Assert.False(stop.IsCompleted);
+            Task observation = Task.Delay(200);
+            Assert.Same(observation, await Task.WhenAny(stop, observation));
+            Assert.False(harness.Processor.ExecuteTask!.IsCompleted);
             Assert.Equal(1, harness.Wal.UncommittedRecordCount);
         }
         finally
