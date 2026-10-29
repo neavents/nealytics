@@ -24,3 +24,21 @@ matched four-mode performance comparison and any default change. Managed remains
 
 Persistent records remain compatible with B4. The execution-path switch does not migrate storage
 or waive the remaining delivery-identity and crash-consistent directory work in category A.
+
+
+## Mutation checkpoint
+
+Source 977978a was qualified using stryker-config.b5.json at Complete level with all thresholds
+at 100. The rerun detected all 65 executable mutants: 57 assertion kills and eight timeout
+detections, with zero survivors or uncovered mutants. Seven selected mutants could not compile.
+Local report: artifacts/verification/b5-qualified/reports/mutation-report.json.
+
+The two earlier survivors removed eager JSON contract immutability and allowed a missing required
+private metadata property to pass silently. Two new regression tests detect both changes.
+
+Timeout mutations remove the bounded reader's disposed check or its advance into the borrowed
+reader, alter the dispatch loop termination or remove either offset increment or failure
+propagation, and remove the track reader's completed-input handling or its buffer advance.
+Those changes strand a read or create a loop that cannot progress. They count as timeout
+detections rather than assertion kills and are reported separately. Native I/O correctness and
+all-mode published crash recovery are separate gates; this score does not certify them.

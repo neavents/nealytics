@@ -13,18 +13,21 @@ checks, platform requirements, and applicable coverage/mutation gates have passe
 | A3 bounded pending WAL and flush groups | Shared-core checks passed; aggregate qualification open | 1,433 unit and 148 real-ClickHouse cases passed; changed WAL scope has 100% line/branch coverage and a 100% mutation score |
 | Streaming recovery | Component/backend gates passed; aggregate durability work open | 343/343 maintained lines, 124/124 branch outcomes, 100% mutation; full integration now passes after the separate A5 routing fix |
 | A5 persisted rollup readiness | Scoped gates passed | 1,680 portable units, 168 ClickHouse integrations, 172/172 maintained scoped lines, 40/40 branch outcomes and 99/99 executable mutants; delivery and rebuild semantics remain A6 |
-| Replay-safe rollups and explicit delivery bounds | Pending | Persisted insert identity and pinned-server failure tests required |
-| Reserved read/write/probe capacity and bounded admission | Pool foundation implemented; admission open | Separate bounded workload pools, acquisition/probe deadlines and idempotent leases pass focused unit and real-database checks; request/channel/backlog bounds and pressure qualification remain |
+| Replay-safe rollups and explicit delivery bounds | Implemented; final qualification open | Persisted replay units and pinned-server failure cases pass; combined mutation and coverage gates remain |
+| Reserved read/write/probe capacity and bounded admission | Implemented; final qualification open | Workload pools, request admission, channel/batch byte bounds and retained WAL/journal limits implemented; combined mutation and coverage gates remain |
 | B1 shared WAL I/O contract with managed baseline | Implemented; aggregate qualification open | Managed file class: 100% line/branch coverage, six executable mutants killed; 42 focused WAL/HTTP cases passed |
 | B2 native io_uring backend and packaging | Implemented; platform/artifact gates passed | Actual x64 and ARM64 native faults/sanitizers, scoped coverage/mutation, standalone and container artifacts passed; aggregate crash/performance work remains |
 | B3 native integration and operator fallback | Implemented; platform/artifact gates passed | Both actual architectures passed run 40830818024 after the terminal-channel regression; shared recovery/HTTP contracts passed; aggregate crash qualification remains |
 | B4 bounded beacon microbatches | Implemented; consolidated qualification open | 1,760 unit, 148 ClickHouse, 24 native and eleven real-native HTTP cases passed; see the B4 checkpoint |
-| B5 custom ingestion dispatcher | In progress | Direct bounded request-pipe reading and durable dispatch ownership implemented behind the managed/custom switch; focused parity checks pass |
-| B6 combined qualification/default selection | Pending | Matched-load four-combination latency/CPU/memory/visibility evidence required |
+| B5 custom ingestion dispatcher | Implemented; final qualification open | HTTP parity passes; 57 assertion kills and eight timeout detections, zero survivors/uncovered mutants; aggregate artifact qualification remains |
+| B6 combined qualification/default selection | Exploratory matrix complete; final qualification open | Thirty runs, 435,000 events, zero request errors/count mismatches; noisy timings require a clean final matrix and all-mode crash checks |
 | Full build, unit, integration and published-artifact end-to-end | In progress | Capturing the unchanged baseline before implementation |
 | Changed maintained-code line/branch coverage | Pending | Baseline unit collector includes generated source; classify and combine with integration evidence |
 | Stryker mutation checks | Partial | Shared WAL: 174 killed, 54 timeout detections; measurement helpers: 120 killed, one timeout; native boundary: 87 killed, 14 timeout detections; all three scopes have zero survivors, surrounding harness remains |
 | Source style, architecture and domain neutrality guards | Baseline passed | Included in the 1,303-test unit run |
+
+Current measured results and remaining gates: [2026-10-29 sweep checkpoint](performance-sweep-checkpoint.md).
+The historical counts below identify the source state at each earlier milestone.
 
 Baseline snapshot: engine f1cfe3e0c4e69bbbafc6096c02659a68986d0836; planning commit 90babda.
 Environment: macOS ARM64, .NET SDK 10.0.103; Docker provides a Linux ARM64 environment.

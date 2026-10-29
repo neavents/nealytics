@@ -298,8 +298,10 @@ public sealed class IngestionCapacityTests : IAsyncDisposable
         Assert.Equal(int.MaxValue, TelemetryPayloadMemory.Estimate(payload));
     }
 
-    [Fact]
-    public async Task ShutdownDrainSplitsAQueuedSuffixBeforeItsByteBudgetIsExceeded()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ShutdownDrainSplitsAQueuedSuffixBeforeItsByteBudgetIsExceeded(bool deferred)
     {
         var settings = Settings();
         settings.DatabaseBatchByteCapacity = TelemetryPayloadMemory.Estimate(Payload()) * 2;
@@ -314,13 +316,19 @@ public sealed class IngestionCapacityTests : IAsyncDisposable
         {
             await wal.AppendAsync(item, CancellationToken.None);
         }
-        foreach (var item in items.Skip(1))
+        if (deferred)
+        {
+            typeof(TelemetryBatchProcessor).GetField("_deferredPayload",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.SetValue(processor, items[1]);
+        }
+        foreach (var item in items.Skip(deferred ? 2 : 1))
         {
             await broker.PublishAsync(item, CancellationToken.None);
         }
         var method = typeof(TelemetryBatchProcessor).GetMethod("ExecuteCriticalDrainLoopAsync",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        await (Task)method.Invoke(processor, new object[] { new List<GlobalTelemetryPayload> { items[0] } })!;
+        await ((Task)method.Invoke(processor, new object[] { new List<GlobalTelemetryPayload> { items[0] } })!)
+            .WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(new[] { 2, 2 }, target.Batches.Select(batch => batch.Length));
         Assert.Equal(items.Select(item => item.EventId), target.Batches.SelectMany(batch => batch).Select(item => item.EventId));
         Assert.Equal(0, wal.UncommittedRecordCount);
