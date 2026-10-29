@@ -28,6 +28,28 @@ public sealed class TelemetryRequestJsonTests
     }
 
     [Fact]
+    public void ANewRequestContractIsImmutableBeforeAnyRequestUsesIt()
+    {
+        var create = typeof(TelemetryRequestJson).GetMethod("Create",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var metadata = (System.Text.Json.Serialization.Metadata.JsonTypeInfo<GlobalTelemetryPayload>)create.Invoke(null, null)!;
+        Assert.True(metadata.Options.IsReadOnly);
+        Assert.True(metadata.IsReadOnly);
+    }
+
+    [Fact]
+    public void AStorageContractMissingItsRequiredIdentityCannotBeSilentlyAdopted()
+    {
+        var metadata = System.Text.Json.Serialization.Metadata.JsonTypeInfo.CreateJsonTypeInfo<GlobalTelemetryPayload>(
+            new JsonSerializerOptions { TypeInfoResolver = TelemetryAotContext.Default });
+        Assert.Empty(metadata.Properties);
+        var remove = typeof(TelemetryRequestJson).GetMethod("RemoveStorageIdentity",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var error = Assert.Throws<System.Reflection.TargetInvocationException>(() => remove.Invoke(null, [metadata]));
+        Assert.IsType<InvalidOperationException>(error.InnerException);
+    }
+
+    [Fact]
     public void RequestMetadataDoesNotAlterThePersistedWalContract()
     {
         Guid identity = Guid.NewGuid();
