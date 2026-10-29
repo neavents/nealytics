@@ -72,9 +72,8 @@ public sealed class ReplayDeliveryIntegrationTests
                 string token = ambiguous.Attempt.Id.ToString("N");
                 await using (var logged = connection.CreateCommand(
                     "SELECT query FROM system.query_log WHERE type='QueryFinish' AND query_kind='Insert' "
-                    + $"AND position(replaceAll(query, ' ', ''), 'insert_deduplication_token=\"{token}\"') > 0"))
+                    + $"AND position(replaceAll(query, ' ', ''), 'insert_deduplication_token=''{token}''') > 0"))
                 {
-                    logged.CommandText = logged.CommandText.Replace("\"", "''");
                     await using var entries = await logged.ExecuteReaderAsync();
                     int attempts = 0;
                     while (await entries.ReadAsync())
@@ -208,6 +207,13 @@ public sealed class ReplayDeliveryIntegrationTests
         await Execute("DROP DATABASE nealytics_core SYNC");
         await Execute("CREATE DATABASE nealytics_core");
         await Execute("CREATE TABLE nealytics_core.global_events (event_id UUID) ENGINE=MergeTree ORDER BY event_id SETTINGS non_replicated_deduplication_window=100000");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => writer.GetSourceIdAsync(timeout.Token));
+        var ordinary = await server.ExecScriptAsync(
+            "SET allow_deprecated_database_ordinary=1; DROP DATABASE nealytics_core SYNC; "
+            + "CREATE DATABASE nealytics_core ENGINE=Ordinary; "
+            + "CREATE TABLE nealytics_core.global_events (event_id UUID) ENGINE=ReplacingMergeTree "
+            + "ORDER BY event_id SETTINGS non_replicated_deduplication_window=100000;", timeout.Token);
+        Assert.Equal(0, ordinary.ExitCode);
         await Assert.ThrowsAsync<InvalidOperationException>(() => writer.GetSourceIdAsync(timeout.Token));
     }
 

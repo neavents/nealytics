@@ -1,0 +1,40 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj",
+      "../../tests/Nealytics.Engine.Tests.Integration/Nealytics.Engine.Tests.Integration.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~DeliveryJournalTests|FullyQualifiedName~IngestionCapacityTests|FullyQualifiedName~IngestionRequestAdmissionTests|FullyQualifiedName~IngestionAdmissionHttpTests|FullyQualifiedName~ClickHouseCapacityOptionsTests|FullyQualifiedName~ClickHouseWorkloadCapacityTests|FullyQualifiedName~ClickHousePoolTests|FullyQualifiedName~ReplayDeliveryIntegrationTests|FullyQualifiedName~TelemetryBatchProcessorTests|FullyQualifiedName~StreamingRecoveryTests|FullyQualifiedName~TelemetryColumnBuffersTests|FullyQualifiedName~ClickHouseBatchWriterTests|FullyQualifiedName~BatchWriterRejectionDiagnosticsTests|FullyQualifiedName~WalDirectoryTests|FullyQualifiedName~WalSegmentRecoveryTests|FullyQualifiedName~WalMetadataStartupTests|FullyQualifiedName~BoundedWalTests",
+    "mutate": [
+      "Infrastructure/Storage/Delivery/*.cs",
+      "Infrastructure/Storage/Wal/WalBacklogBudget.cs",
+      "Infrastructure/Storage/ClickHouseConnectionPool.cs",
+      "Infrastructure/Storage/ClickHouseConnectionFactory.cs",
+      "Infrastructure/Storage/PooledClickHouseConnection.cs",
+      "Infrastructure/Serialization/TelemetryPayloadMemory.cs",
+      "Features/BatchProcessor/JournaledTelemetryBatchWriter.cs",
+      "Features/BatchProcessor/TelemetryBatchProcessor.cs",
+      "Features/BatchProcessor/TelemetryBatchProcessor.Recovery.cs",
+      "Features/IngestTelemetry/IngestionRequestAdmission.cs",
+      "Features/IngestTelemetry/TelemetryChannelBroker.cs",
+      "Features/BatchProcessor/ClickHouseBatchWriter.cs{1465..1693}",
+      "Features/BatchProcessor/ClickHouseBatchWriter.cs{3424..5068}",
+      "Features/BatchProcessor/TelemetryColumnBuffers.cs{3171..3366}",
+      "Infrastructure/Storage/Wal/WalDirectory.cs{4188..4782}"
+    ],
+    "mutation-level": "Complete",
+    "concurrency": 2,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    }
+  }
+}
