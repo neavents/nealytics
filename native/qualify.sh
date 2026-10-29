@@ -19,8 +19,9 @@ docker build --file native/Dockerfile --tag "$image" .
 
 common=(
     run --rm --cap-drop ALL --memory 3g --cpus 2 --env OTEL_SDK_DISABLED=true
+    --user "$(id -u):$(id -g)" --env DOTNET_CLI_HOME=/tmp/nealytics-dotnet --env NUGET_PACKAGES=/cache
     --mount "type=bind,source=$repository,target=/workspace"
-    --mount "type=bind,source=$HOME/.nuget/packages,target=/root/.nuget/packages"
+    --mount "type=bind,source=$HOME/.nuget/packages,target=/cache"
 )
 permitted=(--network none --security-opt seccomp=unconfined)
 
