@@ -4,7 +4,7 @@
     "test-projects": [
       "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
     ],
-    "test-case-filter": "FullyQualifiedName~BoundedRequestPipeReaderTests|FullyQualifiedName~DurableIngestDispatcherTests|FullyQualifiedName~IngestionDurabilityContractTests|FullyQualifiedName~BeaconBatchIngestorTests|FullyQualifiedName~BeaconEndpointContractTests|FullyQualifiedName~IngestResponseHeaderTests|FullyQualifiedName~BodyLimitTests",
+    "test-case-filter": "FullyQualifiedName~BoundedRequestPipeReaderTests|FullyQualifiedName~DurableIngestDispatcherTests|FullyQualifiedName~IngestionDurabilityContractTests|FullyQualifiedName~BeaconBatchIngestorTests|FullyQualifiedName~BeaconEndpointContractTests|FullyQualifiedName~IngestResponseHeaderTests|FullyQualifiedName~BodyLimitTests|FullyQualifiedName~TrackRequestReaderTests",
     "mutate": [
       "Features/IngestTelemetry/BoundedRequestPipeReader.cs",
       "Features/IngestTelemetry/IngestionRequestReader.cs",
