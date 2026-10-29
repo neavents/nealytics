@@ -9,7 +9,7 @@
     "mutate": [
       "Infrastructure/Storage/Rollups/*.cs",
       "Infrastructure/Storage/ClickHouseSchemaMigrator.cs{11641..12233}",
-      "Infrastructure/Storage/ClickHouseSchemaMigrator.cs{18396..21545}",
+      "Infrastructure/Storage/ClickHouseSchemaMigrator.cs{18428..21577}",
       "Infrastructure/Configuration/RollupRegistry.cs{13392..13535}",
       "Infrastructure/Configuration/RollupRegistry.cs{14326..14435}"
     ],

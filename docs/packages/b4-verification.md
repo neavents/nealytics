@@ -25,7 +25,12 @@ Kestrel's HTTP/1 chunked-body limit includes chunk framing. Existing host behavi
 the decoded reader's exact boundary is tested separately. This follows the pinned
 [Kestrel implementation](https://github.com/dotnet/aspnetcore/blob/v10.0.0/src/Servers/Kestrel/Core/src/Internal/Http/Http1ChunkedEncodingMessageBody.cs).
 
-Actual x64/ARM64 native CI, final mutation results, maintained-code coverage aggregation and the
+Actual Linux x64 and ARM64 native CI passed in
+[run 40871154156](https://github.com/neavents/nealytics/actions/runs/40871154156), after the
+incomplete-request fixture accepted Kestrel's valid connection-reset termination. The fixture
+still requires a healthy server and an empty WAL. General CI also passed at cf0e1fc.
+
+Final mutation results, maintained-code coverage aggregation and the
 matched low-concurrency/resource comparison remain milestone checks. B6 combines these with
 the custom dispatcher. No performance improvement is claimed from compatibility tests alone.
 
