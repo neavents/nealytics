@@ -38,3 +38,11 @@ and conversion behavior, source/schema mismatch, checksummed corruption, capacit
 marker/checkpoint ordering, repeated tokens, multiple partitions, partial materialized-view failure,
 and actual deduplication-window eviction on the pinned server. Broad coverage, mutation, native
 and artifact checks follow the implementation milestone; this brief does not claim they passed.
+
+
+The conversion fingerprint uses versioned canonical JSON rather than record display formatting.
+It covers ordered columns, storage types, conversion kinds and invariant nullable measure bounds.
+Process locale and query-only metadata do not change it. Fixed digest regressions guard its
+persisted representation. Resolve pending manifests with their original feature build before
+upgrading from an earlier intermediate fingerprint format; a mismatch fails closed rather than
+rewriting the fingerprint or automatically reinserting an uncertain unit.

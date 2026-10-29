@@ -3,7 +3,6 @@ namespace Nealytics.Engine.Features.BatchProcessor;
 using System;
 using System.Collections.Generic;
 using System.Text;
-using System.Security.Cryptography;
 using System.Globalization;
 using Nealytics.Engine.Infrastructure.Storage.Delivery;
 using System.Threading;
@@ -35,8 +34,7 @@ public sealed partial class ClickHouseBatchWriter : ITelemetryBatchWriter, IDeli
         _logger = logger;
         _layout = new TelemetryColumnLayout(registry, measures);
         _insertCommand = BuildInsertCommand(_layout, options.Value.EnableAsyncInsert);
-        _schemaFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-            BuildInsertColumns(_layout) + "|" + string.Join("|", _layout.Dimensions) + "|" + string.Join("|", _layout.Measures))));
+        _schemaFingerprint = TelemetryDeliverySchema.Fingerprint(_layout);
     }
 
     [LoggerMessage(EventId = 9101, Level = LogLevel.Warning,

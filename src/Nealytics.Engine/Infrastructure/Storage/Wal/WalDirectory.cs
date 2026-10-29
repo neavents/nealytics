@@ -12,6 +12,10 @@ internal sealed class WalDirectory : IDisposable
     private readonly Action<string> _synchronize;
     private readonly FileStream _lease;
 
+    internal readonly record struct SegmentSize(long Bytes, long Records);
+
+    internal static SegmentSize Measure(string path) => new SegmentSize(new FileInfo(path).Length, CountFrames(path));
+
     public WalDirectory(string directory, Action<string>? synchronize = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);

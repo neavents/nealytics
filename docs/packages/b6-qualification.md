@@ -61,3 +61,12 @@ the corrected fixture subsequently recovered all 48 records in the custom/manage
 The final matrix, platform results, combined coverage, mutation findings and default decision are
 recorded with the final verification artifacts. This document does not mark an unfinished gate
 as passed.
+
+
+The actual x64/ARM64 run at source 81b2ba9 passed its preceding platform, coverage and artifact
+stages but stopped at the final mutation gate (98.60%). Both architectures reported the same
+three surviving mutations: unchecked recovery byte addition, unchecked recovery record addition,
+and removing the checkpoint failure check after acquiring the file gate. New tests inject
+metadata measurements that overflow each total while preserving files and directory ownership,
+and queue a checkpoint behind a failing durable flush to assert that its cleanup never runs.
+These focused regressions pass; the new platform run must establish mutation detection.

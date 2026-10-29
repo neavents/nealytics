@@ -76,6 +76,42 @@ public sealed class WalFileBoundaryTests : IDisposable
     }
 
     [Fact]
+    public async Task ACheckpointWaitingBehindAFailedFlushCannotDeleteDeliveryMetadata()
+    {
+        TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        IOException failure = new("flush failed before checkpoint");
+        TestWalFile file = new()
+        {
+            Flush = async () =>
+            {
+                entered.TrySetResult();
+                await release.Task;
+                throw failure;
+            }
+        };
+        await using WriteAheadLogger wal = new(Options(), file);
+        Task append = wal.AppendAsync(Event(), CancellationToken.None);
+        Task? checkpoint = null;
+        bool cleared = false;
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            checkpoint = wal.CheckpointDeliveryAsync(() => cleared = true);
+            Assert.False(checkpoint.IsCompleted);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+        Assert.Same(failure, await Assert.ThrowsAsync<IOException>(() => append.WaitAsync(TimeSpan.FromSeconds(5))));
+        Assert.Same(failure, await Assert.ThrowsAsync<IOException>(() => checkpoint!.WaitAsync(TimeSpan.FromSeconds(5))));
+        Assert.False(cleared);
+        Assert.Equal(0, wal.UncommittedRecordCount);
+        Assert.Equal(0, file.TruncateCalls);
+    }
+
+    [Fact]
     public async Task PartialCommitKeepsTheFileAndFinalCommitTruncatesIt()
     {
         TestWalFile file = new();

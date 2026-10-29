@@ -18,10 +18,12 @@
       "Features/BatchProcessor/TelemetryBatchProcessor.Recovery.cs",
       "Features/IngestTelemetry/IngestionRequestAdmission.cs",
       "Features/IngestTelemetry/TelemetryChannelBroker.cs",
-      "Features/BatchProcessor/ClickHouseBatchWriter.cs{1465..1693}",
-      "Features/BatchProcessor/ClickHouseBatchWriter.cs{3424..5068}",
       "Features/BatchProcessor/TelemetryColumnBuffers.cs{3171..3366}",
-      "Infrastructure/Storage/Wal/WalDirectory.cs{4188..4782}"
+      "Features/BatchProcessor/TelemetryDeliverySchema.cs",
+      "Features/BatchProcessor/ClickHouseBatchWriter.cs{1437..1503}",
+      "Features/BatchProcessor/ClickHouseBatchWriter.cs{3246..4885}",
+      "Infrastructure/Storage/Wal/WalDirectory.cs{476..590}",
+      "Infrastructure/Storage/Wal/WalDirectory.cs{4388..4976}"
     ],
     "mutation-level": "Complete",
     "concurrency": 2,

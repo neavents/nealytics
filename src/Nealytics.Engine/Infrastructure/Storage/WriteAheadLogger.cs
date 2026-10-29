@@ -62,7 +62,8 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
         ArrayPool<byte>? serializationPool = null,
         WalSynchronization? synchronization = null,
         WalFileFactory? fileFactory = null,
-        Action<string>? directorySynchronize = null)
+        Action<string>? directorySynchronize = null,
+        Func<string, WalDirectory.SegmentSize>? measureRecovery = null)
     {
         TelemetryEngineOptions engineOptions = options.Value;
         _limits = new WalLimits(engineOptions);
@@ -82,15 +83,16 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
             _directory.SealActive();
             _recoveryPaths = _directory.RecoveryPaths();
             long recoveredBytes = 0;
+            Func<string, WalDirectory.SegmentSize> measure = measureRecovery ?? WalDirectory.Measure;
             foreach (string path in _recoveryPaths)
             {
-                long length = new FileInfo(path).Length;
-                recoveredBytes = checked(recoveredBytes + length);
-                if (length > 0)
+                WalDirectory.SegmentSize size = measure(path);
+                recoveredBytes = checked(recoveredBytes + size.Bytes);
+                if (size.Bytes > 0)
                 {
                     _hasSealedSegment = 1;
                 }
-                _sealedRecords = checked(_sealedRecords + WalDirectory.CountFrames(path));
+                _sealedRecords = checked(_sealedRecords + size.Records);
             }
             long byteCapacity = Math.Min(engineOptions.WalMaxBacklogBytes, engineOptions.DeliveryJournalMaxBytes / 2);
             long recordCapacity = Math.Min(engineOptions.DeliveryJournalMaxRecords, engineOptions.DeliveryJournalMaxBytes / 2048);
