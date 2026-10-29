@@ -52,4 +52,16 @@ jobs:
         if: always()
         with:
           name: native-${{ matrix.rid }}
-          path: artifacts/platform/${{ matrix.rid }}
+          retention-days: 7
+          path: |
+            artifacts/platform/${{ matrix.rid }}/host.txt
+            artifacts/platform/${{ matrix.rid }}/qualification.log
+            artifacts/platform/${{ matrix.rid }}/native/*.so
+            artifacts/platform/${{ matrix.rid }}/native-c/*.gcov
+            artifacts/platform/${{ matrix.rid }}/Nealytics.Engine.Tests.*/**/*.trx
+            artifacts/platform/${{ matrix.rid }}/Nealytics.Engine.Tests.*/**/coverage.cobertura.xml
+            artifacts/platform/${{ matrix.rid }}/http/*.trx
+            artifacts/platform/${{ matrix.rid }}/denied/*.trx
+            artifacts/platform/${{ matrix.rid }}/mutation/reports
+            artifacts/platform/${{ matrix.rid }}/mutation/logs
+            artifacts/platform/${{ matrix.rid }}/publish/Nealytics.Engine

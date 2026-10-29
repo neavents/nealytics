@@ -65,5 +65,7 @@ python3 native/test_artifact.py "$binary" --backend managed
 docker build --file Dockerfile --tag "nealytics-qualified-engine:$rid" .
 python3 native/test_artifact.py --engine-image "nealytics-qualified-engine:$rid" --backend io_uring --permit-native
 
+docker "${common[@]}" "$image" dotnet tool restore
+
 docker "${common[@]}" "${permitted[@]}" "$image" bash /workspace/native/mutate.sh \
     /workspace "$bridge" "$output/mutation" stryker-config.selection.json
