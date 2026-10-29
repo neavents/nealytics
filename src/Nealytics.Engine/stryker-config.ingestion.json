@@ -1,0 +1,35 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~BoundedRequestPipeReaderTests|FullyQualifiedName~DurableIngestDispatcherTests|FullyQualifiedName~IngestionDurabilityContractTests|FullyQualifiedName~BeaconBatchIngestorTests|FullyQualifiedName~BeaconEndpointContractTests|FullyQualifiedName~IngestResponseHeaderTests|FullyQualifiedName~BodyLimitTests",
+    "mutate": [
+      "Features/IngestTelemetry/BoundedRequestPipeReader.cs",
+      "Features/IngestTelemetry/IngestionRequestReader.cs",
+      "Features/IngestTelemetry/DurableIngestDispatcher.cs",
+      "Features/IngestTelemetry/TrackRequestReader.cs",
+      "Program.cs{7702..7758}",
+      "Program.cs{7759..7816}",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{3803..3866}",
+      "Features/IngestTelemetry/IngestTelemetryEndpoint.cs{2033..2165}",
+      "Features/IngestTelemetry/IngestTelemetryEndpoint.cs{3359..3422}",
+      "Features/IngestTelemetry/BeaconTelemetryEndpoint.cs{2457..2502}",
+      "Features/IngestTelemetry/BeaconBatchIngestor.cs{4376..4458}"
+    ],
+    "mutation-level": "Complete",
+    "concurrency": 2,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    }
+  }
+}

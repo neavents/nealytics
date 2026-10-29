@@ -7,14 +7,18 @@ using System.IO;
 internal sealed class WalRecordBuffer : IBufferWriter<byte>, IDisposable
 {
     private readonly int _limit;
+    private readonly int _reservationLimit;
     private readonly ArrayPool<byte> _pool;
     private byte[] _buffer = Array.Empty<byte>();
     private int _written;
 
-    public WalRecordBuffer(int limit, ArrayPool<byte>? pool = null)
+    public WalRecordBuffer(int limit, ArrayPool<byte>? pool = null, bool reserveForEncoding = false)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
         _limit = limit;
+        _reservationLimit = reserveForEncoding
+            ? (int)Math.Min(int.MaxValue, (long)limit * 6 + 4_096)
+            : limit;
         _pool = pool ?? ArrayPool<byte>.Shared;
     }
 
@@ -25,6 +29,10 @@ internal sealed class WalRecordBuffer : IBufferWriter<byte>, IDisposable
     public void Advance(int count)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(count);
+        if (_reservationLimit != _limit && count > _limit - _written)
+        {
+            throw new InvalidDataException("Serialized WAL record exceeds WalMaxRecordBytes.");
+        }
         ArgumentOutOfRangeException.ThrowIfGreaterThan(count, Math.Min(_buffer.Length, _limit) - _written);
         _written += count;
     }
@@ -33,21 +41,21 @@ internal sealed class WalRecordBuffer : IBufferWriter<byte>, IDisposable
     {
         ArgumentOutOfRangeException.ThrowIfNegative(sizeHint);
         int required = Math.Max(sizeHint, 1);
-        if (required > _limit - _written)
+        if (required > _reservationLimit - _written)
         {
             throw new InvalidDataException("Serialized WAL record exceeds WalMaxRecordBytes.");
         }
 
         if (required > _buffer.Length - _written)
         {
-            int capacity = (int)Math.Min(_limit, Math.Max((long)_written + required, (long)_buffer.Length * 2));
+            int capacity = (int)Math.Min(_reservationLimit, Math.Max((long)_written + required, (long)_buffer.Length * 2));
             byte[] replacement = _pool.Rent(capacity);
             _buffer.AsSpan(0, _written).CopyTo(replacement);
             ReturnBuffer();
             _buffer = replacement;
         }
 
-        return _buffer.AsMemory(_written, Math.Min(_buffer.Length, _limit) - _written);
+        return _buffer.AsMemory(_written, Math.Min(_buffer.Length, _reservationLimit) - _written);
     }
 
     public Span<byte> GetSpan(int sizeHint = 0) => GetMemory(sizeHint).Span;

@@ -42,16 +42,21 @@ public sealed partial class WriteAheadLogger
     {
         _recordBuffer.Reset();
         WalRecordEncoding.Serialize(payload, _recordBuffer);
+        return await EnqueueEncodedAsync(_recordBuffer.WrittenMemory, 1, cancellationToken);
+    }
 
-        int length = _recordBuffer.WrittenMemory.Length;
-        await _admission.ReserveAsync(length, cancellationToken);
+    private async Task<PendingAppend> EnqueueEncodedAsync(
+        ReadOnlyMemory<byte> serialized, int records, CancellationToken cancellationToken)
+    {
+        int length = serialized.Length;
+        await _admission.ReserveAsync(records, length, cancellationToken);
         byte[]? rented = null;
         bool queued = false;
         try
         {
             rented = _recordPool.Rent(length);
-            _recordBuffer.WrittenMemory.CopyTo(rented);
-            PendingAppend pending = new PendingAppend(rented, length);
+            serialized.CopyTo(rented);
+            PendingAppend pending = new PendingAppend(rented, length, records);
             if (!_pending.Writer.TryWrite(pending))
             {
                 _operations.ThrowIfFailed();
@@ -69,7 +74,7 @@ public sealed partial class WriteAheadLogger
                 {
                     _recordPool.Return(rented, clearArray: true);
                 }
-                _admission.Release(length);
+                _admission.Release(records, length);
             }
         }
     }
@@ -83,16 +88,18 @@ public sealed partial class WriteAheadLogger
             while (await reader.WaitToReadAsync())
             {
                 int bytes = 0;
-                while (group.Count < _limits.FlushRecords
-                    && reader.TryPeek(out PendingAppend? next)
+                int records = 0;
+                while (reader.TryPeek(out PendingAppend? next)
+                    && next.Records <= _limits.FlushRecords - records
                     && next.Length <= _limits.FlushBytes - bytes)
                 {
                     PendingAppend entry = await reader.ReadAsync();
                     group.Add(entry);
                     bytes += entry.Length;
+                    records += entry.Records;
                 }
 
-                await FlushGroupAsync(group);
+                await FlushGroupAsync(group, records);
                 CompleteGroup(group, null);
                 group.Clear();
             }
@@ -108,7 +115,7 @@ public sealed partial class WriteAheadLogger
         }
     }
 
-    private async Task FlushGroupAsync(List<PendingAppend> group)
+    private async Task FlushGroupAsync(List<PendingAppend> group, int records)
     {
         long flushStartTicks = Stopwatch.GetTimestamp();
         await _synchronization.File.WaitAsync();
@@ -121,8 +128,8 @@ public sealed partial class WriteAheadLogger
             }
             await _file.FlushAsync();
 
-            Interlocked.Add(ref _uncommittedRecords, group.Count);
-            _statistics.Record(group.Count, Stopwatch.GetElapsedTime(flushStartTicks));
+            Interlocked.Add(ref _uncommittedRecords, records);
+            _statistics.Record(records, Stopwatch.GetElapsedTime(flushStartTicks));
         }
         catch (Exception error)
         {
@@ -145,7 +152,7 @@ public sealed partial class WriteAheadLogger
     private void CompleteAppend(PendingAppend entry, Exception? error)
     {
         _recordPool.Return(entry.Buffer, clearArray: true);
-        _admission.Release(entry.Length);
+        _admission.Release(entry.Records, entry.Length);
         if (error is null)
         {
             entry.Completion.TrySetResult();
@@ -158,14 +165,16 @@ public sealed partial class WriteAheadLogger
 
     private sealed class PendingAppend
     {
-        public PendingAppend(byte[] buffer, int length)
+        public PendingAppend(byte[] buffer, int length, int records)
         {
             Buffer = buffer;
             Length = length;
+            Records = records;
         }
 
         public byte[] Buffer { get; }
         public int Length { get; }
+        public int Records { get; }
         public TaskCompletionSource Completion { get; } = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 }

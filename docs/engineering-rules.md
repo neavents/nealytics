@@ -51,6 +51,10 @@ No latency gain may come from weakening persistence or changing producer behavio
 Every implementation package includes tests and a second review against its brief and acceptance
 criteria. The owner requires extensive verification, not a minimal happy-path test.
 
+Use focused tests during implementation. The owner's later instruction is to avoid rerunning
+every suite for each change. Consolidate full-suite, coverage, mutation and platform qualification
+at meaningful implementation milestones, and repeat them when failures or later changes justify it.
+
 | Layer | Required evidence |
 | --- | --- |
 | Unit and component | Normal, boundary, invalid, empty/null where applicable, policy, and error behavior; isolated deterministic tests for pure logic |
@@ -106,6 +110,7 @@ named feat/correctness-and-safety cannot also contain child refs beneath that sa
 | A1 | feat/correctness-and-safety-a1-latency-baseline |
 | A2 | feat/correctness-and-safety-a2-compatibility-and-durability |
 | A3 | feat/correctness-and-safety-a3-bounded-wal-admission |
+| A3b | feat/correctness-and-safety-a3b-encoding-reservations |
 | A4 | feat/correctness-and-safety-a4-streaming-recovery |
 | A5 | feat/correctness-and-safety-a5-rollup-readiness |
 | B1 | feat/ingestion-performance-b1-wal-io-boundary |

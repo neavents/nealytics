@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Serialization;
 using Nealytics.Engine.Infrastructure.Storage;
@@ -12,6 +13,65 @@ public sealed class NativeStartupIntegrationTests : IDisposable
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "nealytics-native-startup-" + Guid.NewGuid().ToString("N"));
 
     public NativeStartupIntegrationTests() => Directory.CreateDirectory(_directory);
+
+    [Theory]
+    [InlineData("managed")]
+    [InlineData("io_uring")]
+    [InlineData("auto")]
+    public async Task BoundedGroupsPersistEveryRecordThroughOnePhysicalBarrier(string backend)
+    {
+        GlobalTelemetryPayload[] events = Enumerable.Range(0, 4).Select(_ => Event(Guid.NewGuid())).ToArray();
+        TelemetryEngineOptions options = new()
+        {
+            WriteAheadLogDirectory = _directory,
+            WalIoBackend = backend,
+            WalMaxFlushRecords = 4,
+            WalMaxPendingRecords = 8
+        };
+        await using (WriteAheadLogger wal = new(Options.Create(options)))
+        {
+            Assert.Equal(backend == "managed" ? "managed" : "io_uring", wal.Selection.Backend);
+            WalBatchAppendResult result = await wal.AppendBatchAsync(events, CancellationToken.None);
+            result.ThrowIfFailed();
+            Assert.Equal(4, result.Count);
+            Assert.Equal(1, wal.FlushGroupCount);
+            Assert.Equal(4, wal.FlushedRecordCount);
+            Assert.Equal(4, wal.UncommittedRecordCount);
+            Assert.Equal(0, wal.PendingRecordCount);
+            Assert.Equal(0, wal.PendingByteCount);
+        }
+        options.WalIoBackend = "managed";
+        await using WriteAheadLogger restarted = new(Options.Create(options));
+        Assert.Equal(events.Select(item => item.EventId),
+            (await restarted.ReplayUncommittedAsync()).Select(item => item.EventId));
+    }
+
+    [Theory]
+    [InlineData("managed")]
+    [InlineData("io_uring")]
+    [InlineData("auto")]
+    public async Task ExactFramedByteBudgetsApplyToManagedAndNativeWriters(string backend)
+    {
+        GlobalTelemetryPayload payload = new()
+        {
+            ProjectId = "p", TenantId = "t", SessionId = "s", EventType = "e",
+            MetadataJson = JsonSerializer.Serialize(new string('x', 2_200), TelemetryAotContext.Default.String)
+        };
+        byte[] expected = [.. JsonSerializer.SerializeToUtf8Bytes(payload, TelemetryAotContext.Default.GlobalTelemetryPayload), (byte)'\n'];
+        TelemetryEngineOptions options = new()
+        {
+            WriteAheadLogDirectory = _directory,
+            WalIoBackend = backend,
+            WalMaxRecordBytes = expected.Length,
+            WalMaxFlushBytes = expected.Length,
+            WalMaxPendingBytes = expected.Length * 2
+        };
+        await using WriteAheadLogger wal = new(Options.Create(options));
+        Assert.Equal(backend == "managed" ? "managed" : "io_uring", wal.Selection.Backend);
+        await wal.AppendAsync(payload, CancellationToken.None);
+        Assert.Equal(1, wal.UncommittedRecordCount);
+        Assert.Equal(expected, await File.ReadAllBytesAsync(Path.Combine(_directory, "telemetry_wal.log")));
+    }
 
     [Theory]
     [InlineData("io_uring")]

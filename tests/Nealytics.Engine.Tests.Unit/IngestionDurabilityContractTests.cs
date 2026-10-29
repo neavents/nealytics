@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
@@ -16,16 +17,105 @@ namespace Nealytics.Engine.Tests.Unit;
 
 public sealed class IngestionDurabilityContractTests
 {
-    [Theory]
-    [InlineData("?k=unit-key-1", null, HttpStatusCode.Accepted)]
-    [InlineData("", "unit-key-1", HttpStatusCode.Accepted)]
-    [InlineData("?k=wrong", "unit-key-1", HttpStatusCode.Accepted)]
-    [InlineData("?k=unit-key-1", "wrong", HttpStatusCode.Unauthorized)]
-    [InlineData("?k=wrong", null, HttpStatusCode.Unauthorized)]
-    public async Task TrackPreservesCredentialPrecedenceAndDurableAcknowledgment(
-        string query, string? header, HttpStatusCode expected)
+    public static TheoryData<string, string, string, bool> CompressedCases
     {
-        await using ContractFactory factory = new();
+        get
+        {
+            TheoryData<string, string, string, bool> cases = new();
+            foreach (string path in new[] { "managed", "custom" })
+            {
+                foreach (string route in new[] { "track", "beacon" })
+                {
+                    foreach (string encoding in new[] { "gzip", "br", "deflate" })
+                    {
+                        cases.Add(path, route, encoding, false);
+                        cases.Add(path, route, encoding, true);
+                    }
+                }
+            }
+            return cases;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(CompressedCases))]
+    public async Task BothExecutionPathsPreserveDecompressionAndDecodedBodyLimits(
+        string executionPath, string route, string encoding, bool oversized)
+    {
+        await using ContractFactory factory = new(path: executionPath, bodyLimit: 1_024);
+        using HttpClient client = factory.CreateClient();
+        Guid id = Guid.NewGuid();
+        string body = EventJson(id);
+        if (oversized)
+        {
+            body = body[..^1] + ",\"metadataJson\":\"" + new string('x', 2_048) + "\"}";
+        }
+        if (route == "beacon")
+        {
+            body = "[" + body + "]";
+        }
+        using MemoryStream compressed = new();
+        using (Stream compressor = encoding switch
+        {
+            "gzip" => new GZipStream(compressed, CompressionLevel.Fastest, leaveOpen: true),
+            "br" => new BrotliStream(compressed, CompressionLevel.Fastest, leaveOpen: true),
+            _ => new ZLibStream(compressed, CompressionLevel.Fastest, leaveOpen: true)
+        })
+        {
+            await compressor.WriteAsync(Encoding.UTF8.GetBytes(body));
+        }
+        using ByteArrayContent content = new(compressed.ToArray());
+        content.Headers.ContentEncoding.Add(encoding);
+        using HttpResponseMessage response = await client.PostAsync(
+            "/api/v1/telemetry/" + route + "?k=unit-key-1", content);
+        HttpStatusCode expected = oversized ? HttpStatusCode.RequestEntityTooLarge
+            : route == "track" ? HttpStatusCode.Accepted : HttpStatusCode.NoContent;
+        Assert.Equal(expected, response.StatusCode);
+        if (oversized)
+        {
+            Assert.Empty(await File.ReadAllBytesAsync(factory.WalPath));
+        }
+        else
+        {
+            await AssertDurableAsync(factory, id);
+        }
+    }
+
+    [Theory]
+    [InlineData("managed")]
+    [InlineData("custom")]
+    public async Task TrackKeepsSanitizationAndRejectionResponseHeaders(string executionPath)
+    {
+        await using ContractFactory factory = new(path: executionPath);
+        using HttpClient client = factory.CreateClient();
+        string body = EventJson(Guid.NewGuid());
+        body = body[..^1] + ",\"dimensions\":{\"undeclared_tag\":\"x\"},\"measures\":{\"undeclared_value\":\"1\"}}";
+        using HttpResponseMessage accepted = await client.PostAsync("/api/v1/telemetry/track?k=unit-key-1",
+            new StringContent(body, Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Accepted, accepted.StatusCode);
+        Assert.Equal("undeclared_tag,undeclared_value", Assert.Single(accepted.Headers.GetValues("X-Nealytics-Dropped")));
+        using HttpResponseMessage rejected = await client.PostAsync("/api/v1/telemetry/track?k=unit-key-1",
+            new StringContent("""{"projectId":"p","tenantId":"t","eventType":"e"}""", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        Assert.Equal("missing_session_id", Assert.Single(rejected.Headers.GetValues("X-Nealytics-Rejected")));
+        Assert.Equal(1, factory.Services.GetRequiredService<WriteAheadLogger>().UncommittedRecordCount);
+    }
+
+    [Theory]
+    [InlineData("managed", "?k=unit-key-1", null, HttpStatusCode.Accepted)]
+    [InlineData("managed", "", "unit-key-1", HttpStatusCode.Accepted)]
+    [InlineData("managed", "?k=wrong", "unit-key-1", HttpStatusCode.Accepted)]
+    [InlineData("managed", "?k=unit-key-1", "wrong", HttpStatusCode.Unauthorized)]
+    [InlineData("managed", "?k=wrong", null, HttpStatusCode.Unauthorized)]
+    [InlineData("custom", "?k=unit-key-1", null, HttpStatusCode.Accepted)]
+    [InlineData("custom", "", "unit-key-1", HttpStatusCode.Accepted)]
+    [InlineData("custom", "?k=wrong", "unit-key-1", HttpStatusCode.Accepted)]
+    [InlineData("custom", "?k=unit-key-1", "wrong", HttpStatusCode.Unauthorized)]
+    [InlineData("custom", "?k=wrong", null, HttpStatusCode.Unauthorized)]
+    public async Task TrackPreservesCredentialPrecedenceAndDurableAcknowledgment(
+        string executionPath, string query, string? header, HttpStatusCode expected)
+    {
+        await using ContractFactory factory = new(path: executionPath);
         using HttpClient client = factory.CreateClient();
         Guid eventId = Guid.NewGuid();
         using HttpRequestMessage request = new(HttpMethod.Post, "/api/v1/telemetry/track" + query)
@@ -57,10 +147,12 @@ public sealed class IngestionDurabilityContractTests
         }
     }
 
-    [Fact]
-    public async Task BeaconSkipsInvalidElementsAndPublishesOnlyDurableValidEvents()
+    [Theory]
+    [InlineData("managed")]
+    [InlineData("custom")]
+    public async Task BeaconSkipsInvalidElementsAndPublishesOnlyDurableValidEvents(string executionPath)
     {
-        await using ContractFactory factory = new();
+        await using ContractFactory factory = new(path: executionPath);
         using HttpClient client = factory.CreateClient();
         Guid first = Guid.NewGuid();
         Guid last = Guid.NewGuid();
@@ -82,11 +174,13 @@ public sealed class IngestionDurabilityContractTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task StreamedBeaconKeepsItsDurablePrefixAfterMalformedTailOrDisconnect(bool disconnect)
+    [InlineData("managed", false)]
+    [InlineData("managed", true)]
+    [InlineData("custom", false)]
+    [InlineData("custom", true)]
+    public async Task StreamedBeaconKeepsItsDurablePrefixAfterMalformedTailOrDisconnect(string executionPath, bool disconnect)
     {
-        await using ContractFactory factory = new();
+        await using ContractFactory factory = new(path: executionPath);
         using HttpClient client = factory.CreateClient();
         WriteAheadLogger wal = factory.Services.GetRequiredService<WriteAheadLogger>();
         using TcpClient socket = new();
@@ -121,10 +215,12 @@ public sealed class IngestionDurabilityContractTests
         await AssertDurableAsync(factory, eventId);
     }
 
-    [Fact]
-    public async Task DisconnectedIncompleteTrackDoesNotCreateAWalRecord()
+    [Theory]
+    [InlineData("managed")]
+    [InlineData("custom")]
+    public async Task DisconnectedIncompleteTrackDoesNotCreateAWalRecord(string executionPath)
     {
-        await using ContractFactory factory = new();
+        await using ContractFactory factory = new(path: executionPath);
         using HttpClient client = factory.CreateClient();
         WriteAheadLogger wal = factory.Services.GetRequiredService<WriteAheadLogger>();
         using TcpClient socket = new();
@@ -136,7 +232,14 @@ public sealed class IngestionDurabilityContractTests
         await stream.WriteAsync(Encoding.ASCII.GetBytes(request));
         socket.Client.Shutdown(SocketShutdown.Send);
         using StreamReader reader = new(stream, Encoding.ASCII);
-        await reader.ReadToEndAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        try
+        {
+            await reader.ReadToEndAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        catch (IOException error) when (error.InnerException is SocketException { SocketErrorCode: SocketError.ConnectionReset })
+        {
+            // Kestrel may reset an incomplete request instead of returning a response.
+        }
 
         using HttpResponseMessage health = await client.GetAsync("/health");
         Assert.Equal(HttpStatusCode.OK, health.StatusCode);
@@ -146,6 +249,38 @@ public sealed class IngestionDurabilityContractTests
 
     private static string EventJson(Guid id) =>
         $$"""{"eventId":"{{id}}","projectId":"p","tenantId":"t","sessionId":"s","eventType":"e"}""";
+
+    [Theory]
+    [InlineData("managed", 1)]
+    [InlineData("managed", 64)]
+    [InlineData("custom", 1)]
+    [InlineData("custom", 64)]
+    public async Task ConfigurableBeaconGroupingPreservesTheExistingHttpAndDurabilityContract(string executionPath, int records)
+    {
+        await using ContractFactory factory = new(records, executionPath);
+        using HttpClient client = factory.CreateClient();
+        Guid[] ids = Enumerable.Range(0, 8).Select(_ => Guid.NewGuid()).ToArray();
+        string body = "[" + string.Join(",", ids.Select(EventJson)) + "]";
+        using HttpResponseMessage response = await client.PostAsync(
+            "/api/v1/telemetry/beacon?k=unit-key-1", new StringContent(body, Encoding.UTF8, "text/plain"));
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Empty(await response.Content.ReadAsByteArrayAsync());
+        WriteAheadLogger wal = factory.Services.GetRequiredService<WriteAheadLogger>();
+        Assert.Equal(8, wal.FlushedRecordCount);
+        Assert.InRange(wal.FlushGroupCount, 1, 8);
+        if (records == 1)
+        {
+            Assert.Equal(8, wal.FlushGroupCount);
+        }
+        TelemetryChannelBroker broker = factory.Services.GetRequiredService<TelemetryChannelBroker>();
+        List<Guid> published = [];
+        while (broker.Reader.TryRead(out GlobalTelemetryPayload? payload))
+        {
+            published.Add(payload.EventId);
+        }
+        Assert.Equal(ids, published);
+        await AssertDurableAsync(factory, ids);
+    }
 
     private static async Task WriteChunkAsync(Stream stream, string value)
     {
@@ -178,9 +313,15 @@ public sealed class IngestionDurabilityContractTests
     {
         private readonly string _directory = Path.Combine(Path.GetTempPath(), "nealytics-contract-" + Guid.NewGuid().ToString("N"));
         private readonly string _backend = Environment.GetEnvironmentVariable("NEALYTICS_TEST_WAL_BACKEND") ?? "managed";
+        private readonly int _records;
+        private readonly string _path;
+        private readonly int _bodyLimit;
 
-        public ContractFactory()
+        public ContractFactory(int records = 64, string path = "managed", int bodyLimit = 1_048_576)
         {
+            _records = records;
+            _path = path;
+            _bodyLimit = bodyLimit;
             UseKestrel(0);
         }
 
@@ -210,6 +351,9 @@ public sealed class IngestionDurabilityContractTests
                 {
                     options.WriteAheadLogDirectory = _directory;
                     options.WalIoBackend = _backend;
+                    options.BeaconWalBatchRecords = _records;
+                    options.IngestionExecutionPath = _path;
+                    options.MaxRequestBodyBytes = _bodyLimit;
                 });
             });
         }
