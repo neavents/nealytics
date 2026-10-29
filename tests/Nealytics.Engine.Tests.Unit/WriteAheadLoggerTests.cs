@@ -273,8 +273,9 @@ public class WriteAheadLoggerTests : UnitTestBase, IAsyncDisposable
     [Fact]
     public async Task AnExistingEmptyReplayFileDoesNotReportUncommittedData()
     {
-        await using var wal = new WriteAheadLogger(_options);
+        Directory.CreateDirectory(_tempDir);
         await File.WriteAllBytesAsync(Path.Combine(_tempDir, "telemetry_wal.replay"), []);
+        await using var wal = new WriteAheadLogger(_options);
         Assert.False(wal.HasSealedSegment);
         Assert.Empty(await wal.ReplayUncommittedAsync());
     }

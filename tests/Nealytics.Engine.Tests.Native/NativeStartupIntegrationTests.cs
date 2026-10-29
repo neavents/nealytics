@@ -70,7 +70,10 @@ public sealed class NativeStartupIntegrationTests : IDisposable
         Assert.Equal(backend == "managed" ? "managed" : "io_uring", wal.Selection.Backend);
         await wal.AppendAsync(payload, CancellationToken.None);
         Assert.Equal(1, wal.UncommittedRecordCount);
-        Assert.Equal(expected, await File.ReadAllBytesAsync(Path.Combine(_directory, "telemetry_wal.log")));
+        byte[] persisted = [.. JsonSerializer.SerializeToUtf8Bytes(payload, TelemetryAotContext.Default.GlobalTelemetryPayload), (byte)'\n'];
+        Assert.NotEqual(Guid.Empty, payload.WalRecordId);
+        Assert.Equal(expected.Length, persisted.Length);
+        Assert.Equal(persisted, await File.ReadAllBytesAsync(Path.Combine(_directory, "telemetry_wal.log")));
     }
 
     [Theory]

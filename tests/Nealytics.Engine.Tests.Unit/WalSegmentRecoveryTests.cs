@@ -71,6 +71,56 @@ public sealed class WalSegmentRecoveryTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RecoveryStatusChangesOnlyAfterItsDirectoryCheckpointIsDurable(bool failBarrier)
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "nealytics-recovery-status-" + Guid.NewGuid().ToString("N"));
+        var options = Options.Create(new TelemetryEngineOptions { WriteAheadLogDirectory = directory });
+        try
+        {
+            await using (var seed = new WriteAheadLogger(options))
+            {
+                await seed.AppendAsync(Event(), CancellationToken.None);
+            }
+            bool deleting = false;
+            IOException failure = new("recovery directory barrier failed");
+            WriteAheadLogger? owned = null;
+            await using var wal = new WriteAheadLogger(options, file: null, directorySynchronize: path =>
+            {
+                if (deleting)
+                {
+                    Assert.True(owned!.HasSealedSegment);
+                    Assert.Empty(Directory.GetFiles(directory, "telemetry_wal.replay*"));
+                    if (failBarrier)
+                    {
+                        throw failure;
+                    }
+                }
+                Nealytics.Engine.Infrastructure.Storage.Wal.WalDirectoryDurability.Synchronize(path);
+            });
+            owned = wal;
+            Assert.True(wal.HasSealedSegment);
+            deleting = true;
+            if (failBarrier)
+            {
+                Assert.Same(failure, await Assert.ThrowsAsync<IOException>(() => wal.DeleteSealedSegmentAsync()));
+                Assert.True(wal.HasSealedSegment);
+                await Assert.ThrowsAsync<IOException>(() => wal.AppendAsync(Event(), CancellationToken.None));
+            }
+            else
+            {
+                await wal.DeleteSealedSegmentAsync();
+                Assert.False(wal.HasSealedSegment);
+            }
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
     private static GlobalTelemetryPayload Event() => new()
     {
         ProjectId = "p", TenantId = "t", SessionId = "s", EventType = "e"

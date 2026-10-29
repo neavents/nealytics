@@ -14,20 +14,7 @@ using Nealytics.Engine.Infrastructure.Storage.Wal;
 
 public sealed partial class WriteAheadLogger
 {
-    public bool HasSealedSegment
-    {
-        get
-        {
-            foreach (string path in _recoveryPaths)
-            {
-                if (File.Exists(path) && new FileInfo(path).Length > 0)
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-    }
+    public bool HasSealedSegment => Volatile.Read(ref _hasSealedSegment) != 0;
 
     public async Task<IReadOnlyList<GlobalTelemetryPayload>> ReplayUncommittedAsync()
     {
@@ -87,6 +74,7 @@ public sealed partial class WriteAheadLogger
                 _directory.DeleteRecovery(_recoveryPaths);
                 _backlog.Release(bytes, _sealedRecords);
                 _sealedRecords = 0;
+                Volatile.Write(ref _hasSealedSegment, 0);
             }
             catch (Exception error)
             {

@@ -23,6 +23,7 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
     private long _persistedBytes;
     private long _persistedRecords;
     private long _sealedRecords;
+    private int _hasSealedSegment;
     private readonly WalRecordBuffer _recordBuffer;
     private readonly WalRecordBuffer _batchBuffer;
     private readonly ArrayPool<byte> _recordPool;
@@ -83,7 +84,12 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
             long recoveredBytes = 0;
             foreach (string path in _recoveryPaths)
             {
-                recoveredBytes = checked(recoveredBytes + new FileInfo(path).Length);
+                long length = new FileInfo(path).Length;
+                recoveredBytes = checked(recoveredBytes + length);
+                if (length > 0)
+                {
+                    _hasSealedSegment = 1;
+                }
                 _sealedRecords = checked(_sealedRecords + WalDirectory.CountFrames(path));
             }
             long byteCapacity = Math.Min(engineOptions.WalMaxBacklogBytes, engineOptions.DeliveryJournalMaxBytes / 2);
