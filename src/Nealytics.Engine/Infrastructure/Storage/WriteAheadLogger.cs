@@ -2,199 +2,120 @@ namespace Nealytics.Engine.Infrastructure.Storage;
 
 using System;
 using System.Buffers;
-using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 using Nealytics.Engine.Infrastructure.Configuration;
-using Nealytics.Engine.Infrastructure.Serialization;
+using Nealytics.Engine.Infrastructure.Storage.Wal;
 
-public sealed class WriteAheadLogger : IAsyncDisposable
+public sealed partial class WriteAheadLogger : IAsyncDisposable
 {
     private readonly string _logFilePath;
     private readonly string _sealedFilePath;
-    private readonly FileStream _fileStream;
-    private readonly SemaphoreSlim _fileLock;
+    private readonly IWalFile _file;
+    private readonly WalLimits _limits;
+    private readonly WalAdmission _admission;
+    private readonly WalRecordBuffer _recordBuffer;
+    private readonly ArrayPool<byte> _recordPool;
+    private readonly WalOperationGate _operations = new WalOperationGate();
+    private readonly WalFlushStatistics _statistics = new WalFlushStatistics();
+    private readonly WalSynchronization _synchronization;
+    private readonly object _disposeSync = new object();
     private readonly Channel<PendingAppend> _pending;
     private readonly Task _flushLoop;
+    private Task? _disposeTask;
     private long _uncommittedRecords;
-    private long _flushGroupCount;
-    private long _flushedRecordCount;
-    private long _flushDurationTicks;
-
-    [ThreadStatic]
-    private static ArrayBufferWriter<byte>? _threadBuffer;
 
     public WriteAheadLogger(IOptions<TelemetryEngineOptions> options)
+        : this(options, file: null)
+    {
+    }
+
+    public WriteAheadLogger(IOptions<TelemetryEngineOptions> options, ILogger<WriteAheadLogger> logger)
+        : this(options)
+    {
+        try
+        {
+            LogFileSelection(logger, Selection.Backend, Selection.RegisteredFile, Selection.FallbackReason);
+        }
+        catch
+        {
+            DisposeAsync().GetAwaiter().GetResult();
+            throw;
+        }
+    }
+
+    internal WriteAheadLogger(
+        IOptions<TelemetryEngineOptions> options,
+        IWalFile? file,
+        ArrayPool<byte>? recordPool = null,
+        ArrayPool<byte>? serializationPool = null,
+        WalSynchronization? synchronization = null,
+        WalFileFactory? fileFactory = null)
     {
         TelemetryEngineOptions engineOptions = options.Value;
+        _limits = new WalLimits(engineOptions);
+        WalFileFactory factory = fileFactory ?? new WalFileFactory(engineOptions);
         string directory = engineOptions.WriteAheadLogDirectory;
-        if (!Directory.Exists(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        _synchronization = synchronization ?? new WalSynchronization();
+        _admission = new WalAdmission(_limits.PendingRecords, _limits.PendingBytes);
+        _recordBuffer = new WalRecordBuffer(_limits.RecordBytes, serializationPool);
+        _recordPool = recordPool ?? ArrayPool<byte>.Shared;
         _logFilePath = Path.Combine(directory, "telemetry_wal.log");
         _sealedFilePath = Path.Combine(directory, "telemetry_wal.replay");
-
-        SealExistingLogForRecovery();
-
-        int bufferSize = engineOptions.WalFileBufferBytes > 0 ? engineOptions.WalFileBufferBytes : 65_536;
-
-        _fileStream = new FileStream(
-            _logFilePath,
-            FileMode.Append,
-            FileAccess.Write,
-            FileShare.Read,
-            bufferSize,
-            FileOptions.Asynchronous);
-
-        _fileLock = new SemaphoreSlim(1, 1);
-        _uncommittedRecords = 0;
-
-        _pending = Channel.CreateUnbounded<PendingAppend>(
-            new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
-
-        _flushLoop = Task.Run(RunFlushLoopAsync);
+        IWalFile? ownedFile = file;
+        try
+        {
+            Directory.CreateDirectory(directory);
+            SealExistingLogForRecovery();
+            Selection = file is null
+                ? factory.Create(_logFilePath, _limits)
+                : new WalFileSelection(file, "injected", string.Empty, false);
+            ownedFile = Selection.File;
+            _file = ownedFile;
+            _pending = Channel.CreateBounded<PendingAppend>(_limits.CreateChannelOptions());
+            _flushLoop = Task.Run(RunFlushLoopAsync);
+        }
+        catch (Exception startupFailure)
+        {
+            try
+            {
+                if (ownedFile is not null)
+                {
+                    ownedFile.DisposeAsync().GetAwaiter().GetResult();
+                }
+            }
+            catch (Exception cleanupFailure)
+            {
+                throw new AggregateException("WAL startup and file cleanup both failed.", startupFailure, cleanupFailure);
+            }
+            finally
+            {
+                _synchronization.Dispose();
+            }
+            throw;
+        }
     }
+
+    internal WalFileSelection Selection { get; }
+
+    [LoggerMessage(EventId = 9010, Level = LogLevel.Information,
+        Message = "WAL file backend {Backend}; registered file {RegisteredFile}; startup fallback {FallbackReason}")]
+    private static partial void LogFileSelection(ILogger logger, string backend, bool registeredFile, string fallbackReason);
+
+    internal int PendingRecordCount => _admission.PendingRecords;
+    internal int PendingByteCount => _admission.PendingBytes;
 
     public long UncommittedRecordCount => Interlocked.Read(ref _uncommittedRecords);
 
-    internal long FlushGroupCount => Interlocked.Read(ref _flushGroupCount);
-    internal long FlushedRecordCount => Interlocked.Read(ref _flushedRecordCount);
-    internal double AverageGroupSize
-    {
-        get
-        {
-            long groups = Interlocked.Read(ref _flushGroupCount);
-            return groups == 0 ? 0 : (double)Interlocked.Read(ref _flushedRecordCount) / groups;
-        }
-    }
-    internal double AverageFlushMilliseconds
-    {
-        get
-        {
-            long groups = Interlocked.Read(ref _flushGroupCount);
-            if (groups == 0)
-            {
-                return 0;
-            }
-            double seconds = (double)Interlocked.Read(ref _flushDurationTicks) / Stopwatch.Frequency;
-            return seconds / groups * 1000.0;
-        }
-    }
-
-    private void SealExistingLogForRecovery()
-    {
-        if (!File.Exists(_logFilePath) || new FileInfo(_logFilePath).Length == 0)
-        {
-            return;
-        }
-
-        if (File.Exists(_sealedFilePath))
-        {
-            using FileStream source = new FileStream(_logFilePath, FileMode.Open, FileAccess.Read, FileShare.None);
-            using FileStream destination = new FileStream(_sealedFilePath, FileMode.Append, FileAccess.Write, FileShare.None);
-            source.CopyTo(destination);
-            source.Close();
-            File.Delete(_logFilePath);
-            return;
-        }
-
-        File.Move(_logFilePath, _sealedFilePath);
-    }
-
-    public async Task AppendAsync(GlobalTelemetryPayload payload, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        ArrayBufferWriter<byte> buffer = _threadBuffer ??= new ArrayBufferWriter<byte>(512);
-        buffer.ResetWrittenCount();
-
-        using (Utf8JsonWriter jsonWriter = new Utf8JsonWriter(buffer, new JsonWriterOptions { SkipValidation = true }))
-        {
-            JsonSerializer.Serialize(jsonWriter, payload, TelemetryAotContext.Default.GlobalTelemetryPayload);
-        }
-
-        ReadOnlySpan<byte> written = buffer.WrittenSpan;
-        int length = written.Length + 1;
-        byte[] rented = ArrayPool<byte>.Shared.Rent(length);
-        written.CopyTo(rented);
-        rented[written.Length] = (byte)'\n';
-
-        PendingAppend pending = new PendingAppend(rented, length);
-        await _pending.Writer.WriteAsync(pending, cancellationToken);
-        await pending.Completion.Task.WaitAsync(cancellationToken);
-    }
-
-    private async Task RunFlushLoopAsync()
-    {
-        ChannelReader<PendingAppend> reader = _pending.Reader;
-        List<PendingAppend> group = new List<PendingAppend>(256);
-
-        while (await reader.WaitToReadAsync())
-        {
-            group.Clear();
-            while (reader.TryRead(out PendingAppend? item))
-            {
-                group.Add(item);
-            }
-
-            await FlushGroupAsync(group);
-        }
-    }
-
-    private async Task FlushGroupAsync(List<PendingAppend> group)
-    {
-        if (group.Count == 0)
-        {
-            return;
-        }
-
-        long flushStartTicks = Stopwatch.GetTimestamp();
-        await _fileLock.WaitAsync();
-        try
-        {
-            for (int i = 0; i < group.Count; i++)
-            {
-                PendingAppend entry = group[i];
-                await _fileStream.WriteAsync(entry.Buffer.AsMemory(0, entry.Length));
-            }
-
-            await _fileStream.FlushAsync();
-            _fileStream.Flush(true);
-
-            Interlocked.Add(ref _uncommittedRecords, group.Count);
-            Interlocked.Increment(ref _flushGroupCount);
-            Interlocked.Add(ref _flushedRecordCount, group.Count);
-            Interlocked.Add(ref _flushDurationTicks, Stopwatch.GetTimestamp() - flushStartTicks);
-        }
-        catch (Exception ex)
-        {
-            for (int i = 0; i < group.Count; i++)
-            {
-                PendingAppend entry = group[i];
-                ArrayPool<byte>.Shared.Return(entry.Buffer);
-                entry.Completion.TrySetException(ex);
-            }
-            return;
-        }
-        finally
-        {
-            _fileLock.Release();
-        }
-
-        for (int i = 0; i < group.Count; i++)
-        {
-            PendingAppend entry = group[i];
-            ArrayPool<byte>.Shared.Return(entry.Buffer);
-            entry.Completion.TrySetResult();
-        }
-    }
+    internal long FlushGroupCount => _statistics.GroupCount;
+    internal long FlushedRecordCount => _statistics.RecordCount;
+    internal double AverageGroupSize => _statistics.AverageGroupSize;
+    internal double AverageFlushMilliseconds => _statistics.AverageFlushMilliseconds;
 
     public async Task AcknowledgeCommitAsync(int committedCount)
     {
@@ -203,116 +124,93 @@ public sealed class WriteAheadLogger : IAsyncDisposable
             return;
         }
 
-        await _fileLock.WaitAsync();
+        _operations.Enter();
         try
         {
-            long remaining = Interlocked.Add(ref _uncommittedRecords, -committedCount);
-            if (remaining <= 0)
+            await _synchronization.File.WaitAsync();
+            try
             {
-                Interlocked.Exchange(ref _uncommittedRecords, 0);
-                _fileStream.SetLength(0);
-                await _fileStream.FlushAsync();
+                _operations.ThrowIfFailed();
+                long remaining = Math.Max(0, Interlocked.Read(ref _uncommittedRecords) - committedCount);
+                if (remaining == 0)
+                {
+                    await _file.TruncateAsync();
+                }
+                Interlocked.Exchange(ref _uncommittedRecords, remaining);
+            }
+            catch (Exception error)
+            {
+                throw SignalFailure(error);
+            }
+            finally
+            {
+                _synchronization.File.Release();
             }
         }
         finally
         {
-            _fileLock.Release();
+            _operations.Exit();
         }
     }
 
     public async Task TruncateAsync()
     {
-        await _fileLock.WaitAsync();
+        _operations.Enter();
         try
         {
-            _fileStream.SetLength(0);
-            await _fileStream.FlushAsync();
-            Interlocked.Exchange(ref _uncommittedRecords, 0);
+            await _synchronization.File.WaitAsync();
+            try
+            {
+                _operations.ThrowIfFailed();
+                await _file.TruncateAsync();
+                Interlocked.Exchange(ref _uncommittedRecords, 0);
+            }
+            catch (Exception error)
+            {
+                throw SignalFailure(error);
+            }
+            finally
+            {
+                _synchronization.File.Release();
+            }
         }
         finally
         {
-            _fileLock.Release();
+            _operations.Exit();
         }
     }
 
-    public bool HasSealedSegment => File.Exists(_sealedFilePath) && new FileInfo(_sealedFilePath).Length > 0;
-
-    public async Task<IReadOnlyList<GlobalTelemetryPayload>> ReplayUncommittedAsync()
+    private Exception SignalFailure(Exception error)
     {
-        List<GlobalTelemetryPayload> recovered = new List<GlobalTelemetryPayload>();
-
-        if (!File.Exists(_sealedFilePath))
-        {
-            return recovered;
-        }
-
-        using FileStream readStream = new FileStream(_sealedFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using StreamReader reader = new StreamReader(readStream);
-
-        while (await reader.ReadLineAsync() is { } line)
-        {
-            if (line.Length == 0)
-            {
-                continue;
-            }
-
-            try
-            {
-                GlobalTelemetryPayload? payload = JsonSerializer.Deserialize(
-                    line,
-                    TelemetryAotContext.Default.GlobalTelemetryPayload);
-
-                if (payload is not null
-                    && !string.IsNullOrEmpty(payload.ProjectId)
-                    && !string.IsNullOrEmpty(payload.TenantId)
-                    && !string.IsNullOrEmpty(payload.EventType))
-                {
-                    recovered.Add(payload);
-                }
-            }
-            catch (JsonException)
-            {
-            }
-        }
-        return recovered;
+        Exception failure = _operations.Fail(error);
+        _pending.Writer.TryComplete(failure);
+        _admission.Close(failure);
+        return failure;
     }
 
-    public Task DeleteSealedSegmentAsync()
+    public ValueTask DisposeAsync()
     {
-        if (File.Exists(_sealedFilePath))
+        lock (_disposeSync)
         {
-            File.Delete(_sealedFilePath);
+            _disposeTask ??= DisposeCoreAsync();
+            return new ValueTask(_disposeTask);
         }
-        return Task.CompletedTask;
     }
 
-    public async ValueTask DisposeAsync()
+    private async Task DisposeCoreAsync()
     {
+        Task idle = _operations.Stop();
+        _admission.Close(new ObjectDisposedException(nameof(WriteAheadLogger)));
         _pending.Writer.TryComplete();
-
         try
         {
-            await _flushLoop;
+            await Task.WhenAll(_flushLoop, idle);
+            await _file.DisposeAsync();
         }
-        catch
+        finally
         {
+            _recordBuffer.Dispose();
+            _synchronization.Dispose();
         }
-
-        await _fileStream.DisposeAsync();
-        _fileLock.Dispose();
-    }
-
-    private sealed class PendingAppend
-    {
-        public PendingAppend(byte[] buffer, int length)
-        {
-            Buffer = buffer;
-            Length = length;
-            Completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        }
-
-        public byte[] Buffer { get; }
-        public int Length { get; }
-        public TaskCompletionSource Completion { get; }
     }
 }
