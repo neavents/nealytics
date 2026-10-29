@@ -54,10 +54,11 @@ def snapshot(repository, revision, destination):
     destination.mkdir(parents=True, exist_ok=False)
     data = subprocess.check_output(["git", "archive", revision], cwd=repository)
     with tarfile.open(fileobj=io.BytesIO(data)) as archive:
-        archive.extractall(destination, filter="data")
+        archive.extractall(destination)
 
 
 def build(repository, output, revision, name, native):
+    print("Building", name, revision, flush=True)
     source = output / "sources" / name
     snapshot(repository, revision, source)
     binary_directory = output / "binaries" / name
