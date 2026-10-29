@@ -82,6 +82,60 @@ public sealed class IngestionDurabilityContractTests
     }
 
     [Theory]
+    [InlineData("managed", "track")]
+    [InlineData("managed", "beacon")]
+    [InlineData("custom", "track")]
+    [InlineData("custom", "beacon")]
+    public async Task AnExplicitZeroEventUuidKeepsItsAcceptedContractAndCanBeReplayed(string path, string route)
+    {
+        await using ContractFactory factory = new(path: path);
+        using HttpClient client = factory.CreateClient();
+        string body = EventJson(Guid.Empty);
+        if (route == "beacon")
+        {
+            body = "[" + body + "]";
+        }
+        using var response = await client.PostAsync("/api/v1/telemetry/" + route + "?k=unit-key-1",
+            new StringContent(body, Encoding.UTF8, "application/json"));
+        Assert.Equal(route == "track" ? HttpStatusCode.Accepted : HttpStatusCode.NoContent, response.StatusCode);
+        await AssertDurableAsync(factory, Guid.Empty);
+        using MemoryStream records = new(await File.ReadAllBytesAsync(factory.WalPath));
+        int count = 0;
+        var replay = new Nealytics.Engine.Infrastructure.Storage.Wal.WalReplayReader(4096);
+        await foreach (var record in replay.ReadAsync(records))
+        {
+            Assert.Equal(Guid.Empty, record.Payload.EventId);
+            count++;
+        }
+        Assert.Equal(1, count);
+    }
+
+    [Theory]
+    [InlineData("managed", "track")]
+    [InlineData("managed", "beacon")]
+    [InlineData("custom", "track")]
+    [InlineData("custom", "beacon")]
+    public async Task PrivateWalMetadataRemainsAnIgnoredUnknownCallerField(string path, string route)
+    {
+        await using ContractFactory factory = new(path: path);
+        using HttpClient client = factory.CreateClient();
+        Guid identity = Guid.NewGuid();
+        string body = EventJson(identity);
+        body = body[..^1] + ",\"_walRecordId\":{\"arbitrary\":true}}";
+        if (route == "beacon")
+        {
+            body = "[" + body + "]";
+        }
+        using var response = await client.PostAsync("/api/v1/telemetry/" + route + "?k=unit-key-1",
+            new StringContent(body, Encoding.UTF8, "application/json"));
+        Assert.Equal(route == "track" ? HttpStatusCode.Accepted : HttpStatusCode.NoContent, response.StatusCode);
+        await AssertDurableAsync(factory, identity);
+        var payload = JsonSerializer.Deserialize(await File.ReadAllTextAsync(factory.WalPath),
+            TelemetryAotContext.Default.GlobalTelemetryPayload)!;
+        Assert.NotEqual(Guid.Empty, payload.WalRecordId);
+    }
+
+    [Theory]
     [InlineData("managed")]
     [InlineData("custom")]
     public async Task TrackKeepsSanitizationAndRejectionResponseHeaders(string executionPath)

@@ -87,3 +87,69 @@ public class ClickHouseBatchWriterTests
         columns.Should().NotContainEquivalentOf("item_id");
     }
 }
+
+
+public sealed class BatchWriterRejectionDiagnosticsTests
+{
+    [Fact]
+    public async Task RejectedCellsReportTheirDeclaredNamesCountsAndTypesBeforeStorageAcquisition()
+    {
+        var settings = new TelemetryEngineOptions
+        {
+            ClickHouseConnectionString = "Host=127.0.0.1;Port=9;Database=nealytics_core;User=default;Password=;",
+            ConnectionAcquireTimeoutSeconds = 1,
+            Dimensions =
+            [
+                new DimensionOptions { Name = "numeric_d", Type = "Int64" },
+                new DimensionOptions { Name = "text_d", Type = "String" }
+            ],
+            Measures =
+            [
+                new MeasureOptions { Name = "numeric_m", Type = "Float64", Minimum = 0, Maximum = 10 },
+                new MeasureOptions { Name = "valid_m", Type = "Float64" }
+            ]
+        };
+        var options = Microsoft.Extensions.Options.Options.Create(settings);
+        var dimensions = new DimensionRegistry(settings);
+        await using var factory = new Nealytics.Engine.Infrastructure.Storage.ClickHouseConnectionFactory(options);
+        var logger = new RejectionLogger();
+        var writer = new ClickHouseBatchWriter(factory, dimensions, new MeasureRegistry(settings, dimensions), options, logger);
+        Nealytics.Engine.Infrastructure.Serialization.GlobalTelemetryPayload[] items =
+        [
+            new()
+            {
+                Dimensions = new() { ["numeric_d"] = "invalid", ["text_d"] = "text" },
+                Measures = new() { ["numeric_m"] = "invalid", ["valid_m"] = "1" }
+            },
+            new()
+            {
+                Dimensions = new() { ["numeric_d"] = "42" },
+                Measures = new() { ["numeric_m"] = "1000", ["valid_m"] = "2" }
+            },
+            new()
+            {
+                Dimensions = new() { ["numeric_d"] = "9" },
+                Measures = new() { ["numeric_m"] = "4" }
+            }
+        ];
+        await Assert.ThrowsAnyAsync<Exception>(() => writer.WriteAsync(items, 3, CancellationToken.None));
+        Assert.Equal(2, logger.Entries.Count);
+        Assert.Contains(logger.Entries, entry => entry.Id == 9101
+            && entry.Message.Contains("numeric_d") && entry.Message.Contains("1 value(s)")
+            && entry.Message.Contains("batch of 3") && entry.Message.Contains("Int64"));
+        Assert.Contains(logger.Entries, entry => entry.Id == 9102
+            && entry.Message.Contains("numeric_m") && entry.Message.Contains("2 value(s)")
+            && entry.Message.Contains("batch of 3") && entry.Message.Contains("Float64"));
+    }
+
+    private sealed class RejectionLogger : Microsoft.Extensions.Logging.ILogger<ClickHouseBatchWriter>
+    {
+        public List<(int Id, string Message)> Entries { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+            TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((eventId.Id, formatter(state, exception)));
+    }
+}

@@ -222,6 +222,7 @@ def crash_check(output, binary, backend, execution):
         tenant = uuid.uuid4().hex
         events = [{"eventId": str(uuid.uuid4()), "projectId": "crash", "tenantId": tenant,
                    "sessionId": "s", "eventType": "e"} for _ in range(48)]
+        events[0]["eventId"] = "00000000-0000-0000-0000-000000000000"
         (output / ("crash-" + backend + "-" + execution + "-expected.json")).write_text(json.dumps(events, indent=2))
         for event in events[:32]:
             assert request(target["port"], "POST", "/api/v1/telemetry/track?k=b6-key", json.dumps(event))[0] == 202

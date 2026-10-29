@@ -298,6 +298,54 @@ public sealed class IngestionCapacityTests : IAsyncDisposable
         Assert.Equal(int.MaxValue, TelemetryPayloadMemory.Estimate(payload));
     }
 
+    [Fact]
+    public async Task ShutdownDrainSplitsAQueuedSuffixBeforeItsByteBudgetIsExceeded()
+    {
+        var settings = Settings();
+        settings.DatabaseBatchByteCapacity = TelemetryPayloadMemory.Estimate(Payload()) * 2;
+        var options = Options.Create(settings);
+        await using var wal = new WriteAheadLogger(options);
+        var broker = new TelemetryChannelBroker(options);
+        var target = new RecordingWriter();
+        using var processor = new TelemetryBatchProcessor(broker, wal, target, Substitute.For<IHostApplicationLifetime>(),
+            options, NullLogger<TelemetryBatchProcessor>.Instance);
+        var items = Enumerable.Range(0, 4).Select(_ => Payload()).ToArray();
+        foreach (var item in items)
+        {
+            await wal.AppendAsync(item, CancellationToken.None);
+        }
+        foreach (var item in items.Skip(1))
+        {
+            await broker.PublishAsync(item, CancellationToken.None);
+        }
+        var method = typeof(TelemetryBatchProcessor).GetMethod("ExecuteCriticalDrainLoopAsync",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        await (Task)method.Invoke(processor, new object[] { new List<GlobalTelemetryPayload> { items[0] } })!;
+        Assert.Equal(new[] { 2, 2 }, target.Batches.Select(batch => batch.Length));
+        Assert.Equal(items.Select(item => item.EventId), target.Batches.SelectMany(batch => batch).Select(item => item.EventId));
+        Assert.Equal(0, wal.UncommittedRecordCount);
+    }
+
+    [Fact]
+    public async Task ANewLowerBatchBudgetRefusesAnOversizedLegacyEventWithoutRemovingItsWal()
+    {
+        var settings = Settings();
+        await using (var seed = new WriteAheadLogger(Options.Create(settings)))
+        {
+            await seed.AppendAsync(Payload(), CancellationToken.None);
+        }
+        settings.DatabaseBatchByteCapacity = 1;
+        var options = Options.Create(settings);
+        await using var wal = new WriteAheadLogger(options);
+        var target = new RecordingWriter();
+        using var processor = new TelemetryBatchProcessor(new TelemetryChannelBroker(options), wal, target,
+            Substitute.For<IHostApplicationLifetime>(), options, NullLogger<TelemetryBatchProcessor>.Instance);
+        await processor.StartAsync(CancellationToken.None);
+        await Assert.ThrowsAsync<IOException>(() => processor.ExecuteTask!);
+        Assert.True(wal.HasSealedSegment);
+        Assert.Empty(target.Batches);
+    }
+
     private sealed class RecordingWriter : ITelemetryBatchWriter
     {
         public readonly List<GlobalTelemetryPayload[]> Batches = [];

@@ -20,7 +20,7 @@ internal static class TrackRequestReader
                 if (result.IsCompleted)
                 {
                     Utf8JsonReader json = new Utf8JsonReader(buffer);
-                    return JsonSerializer.Deserialize(ref json, TelemetryAotContext.Default.GlobalTelemetryPayload);
+                    return JsonSerializer.Deserialize(ref json, TelemetryRequestJson.Payload);
                 }
                 reader.AdvanceTo(buffer.Start, buffer.End);
             }

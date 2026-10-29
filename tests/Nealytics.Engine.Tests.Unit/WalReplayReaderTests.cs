@@ -145,6 +145,14 @@ public sealed class WalReplayReaderTests
         Assert.Equal(0, pool.Outstanding);
     }
 
+    [Fact]
+    public async Task AnExplicitZeroUuidAcceptedByIngestionRemainsStableDuringReplay()
+    {
+        using MemoryStream source = new(Frame(Guid.Empty));
+        var recovered = Assert.Single(await CollectAsync(new WalReplayReader(4096), source));
+        Assert.Equal(Guid.Empty, recovered.Payload.EventId);
+    }
+
     public static IEnumerable<object[]> MissingFields()
     {
         string identity = "11111111-1111-4111-8111-111111111111";
@@ -152,7 +160,6 @@ public sealed class WalReplayReaderTests
         yield return ["{}"];
         yield return ["{\"projectId\":\"p\",\"tenantId\":\"t\",\"eventType\":\"e\"}"];
         yield return ["{\"eventId\":\"" + Guid.Empty + "\"}"];
-        yield return ["{\"eventId\":\"" + Guid.Empty + "\",\"projectId\":\"p\",\"tenantId\":\"t\",\"eventType\":\"e\"}"];
         foreach (string missing in new[] { "projectId", "tenantId", "eventType" })
         {
             foreach (string value in new[] { "null", "\"\"" })

@@ -97,7 +97,7 @@ public static partial class BeaconTelemetryEndpoint
         try
         {
             IAsyncEnumerable<GlobalTelemetryPayload?> payloads = JsonSerializer.DeserializeAsyncEnumerable(
-                bodyReader, TelemetryAotContext.Default.GlobalTelemetryPayload, cancellationToken);
+                bodyReader, TelemetryRequestJson.Payload, cancellationToken);
             return await ingestor.IngestAsync(payloads, policy, DateTime.UtcNow, cancellationToken);
         }
         finally

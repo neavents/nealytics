@@ -14,7 +14,9 @@ and CRLF framing remain readable. A torn final frame has no durable acknowledgme
 ignored after its complete prefix is recovered. A complete malformed frame, missing stable event
 identity, missing required scope/type or over-budget frame fails recovery and retains the sealed
 file. Silent skipping of a complete corrupt frame is an existing data-loss defect and is corrected
-deliberately. Do not change inbound API default identity generation.
+deliberately. An explicitly supplied zero UUID is stable and remains valid because ingestion
+already accepts it; distinguish it from an absent or malformed identity. Do not change inbound API
+default identity generation.
 
 Cancellation, reader disposal, partial reads, I/O faults and parse faults must return and clear
 owned pooled buffers. Stopping enumeration must close the file. Recovery must not decrement live

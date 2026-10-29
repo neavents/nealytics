@@ -97,9 +97,9 @@ internal sealed class WalReplayReader
 
         try
         {
-            Guid identity = ReadIdentity(bytes);
+            Guid? identity = ReadIdentity(bytes);
             GlobalTelemetryPayload? payload = JsonSerializer.Deserialize(bytes, TelemetryAotContext.Default.GlobalTelemetryPayload);
-            if (payload is null || identity == Guid.Empty || payload.EventId != identity
+            if (payload is null || !identity.HasValue || payload.EventId != identity.Value
                 || string.IsNullOrEmpty(payload.ProjectId)
                 || string.IsNullOrEmpty(payload.TenantId)
                 || string.IsNullOrEmpty(payload.EventType))
@@ -126,7 +126,7 @@ internal sealed class WalReplayReader
         return true;
     }
 
-    private static Guid ReadIdentity(ReadOnlySpan<byte> bytes)
+    private static Guid? ReadIdentity(ReadOnlySpan<byte> bytes)
     {
         Utf8JsonReader reader = new Utf8JsonReader(bytes);
         while (reader.Read())
@@ -139,8 +139,8 @@ internal sealed class WalReplayReader
             reader.Read();
             return reader.TokenType == JsonTokenType.String && reader.TryGetGuid(out Guid value)
                 ? value
-                : Guid.Empty;
+                : null;
         }
-        return Guid.Empty;
+        return null;
     }
 }

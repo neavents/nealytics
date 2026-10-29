@@ -59,10 +59,36 @@ public sealed class ReplayDeliveryIntegrationTests
                 await connection.OpenAsync();
                 await using var query = connection.CreateCommand(
                     $"SELECT uniqExact(ingested_at), min(toUnixTimestamp64Milli(ingested_at)) FROM nealytics_core.global_events WHERE project_id = '{project.Id}'");
-                await using var reader = await query.ExecuteReaderAsync();
-                Assert.True(await reader.ReadAsync());
-                Assert.Equal((ulong)1, reader.GetFieldValue<ulong>(0));
-                Assert.Equal(frozen.ToUnixTimeMilliseconds(), reader.GetInt64(1));
+                await using (var reader = await query.ExecuteReaderAsync())
+                {
+                    Assert.True(await reader.ReadAsync());
+                    Assert.Equal((ulong)1, reader.GetFieldValue<ulong>(0));
+                    Assert.Equal(frozen.ToUnixTimeMilliseconds(), reader.GetInt64(1));
+                }
+                await using (var flush = connection.CreateCommand("SYSTEM FLUSH LOGS"))
+                {
+                    await flush.ExecuteNonQueryAsync();
+                }
+                string token = ambiguous.Attempt.Id.ToString("N");
+                await using (var logged = connection.CreateCommand(
+                    "SELECT query FROM system.query_log WHERE type='QueryFinish' AND query_kind='Insert' "
+                    + $"AND position(replaceAll(query, ' ', ''), 'insert_deduplication_token=\"{token}\"') > 0"))
+                {
+                    logged.CommandText = logged.CommandText.Replace("\"", "''");
+                    await using var entries = await logged.ExecuteReaderAsync();
+                    int attempts = 0;
+                    while (await entries.ReadAsync())
+                    {
+                        string text = entries.GetString(0).Replace(" ", "");
+                        Assert.Contains("async_insert=0", text);
+                        Assert.Contains("insert_deduplicate=1", text);
+                        Assert.Contains("deduplicate_blocks_in_dependent_materialized_views=1", text);
+                        Assert.Contains("min_insert_block_size_rows=0", text);
+                        Assert.Contains("min_insert_block_size_bytes=0", text);
+                        attempts++;
+                    }
+                    Assert.Equal(2, attempts);
+                }
                 await wal.DeleteSealedSegmentAsync();
                 await writer.CheckpointAsync();
                 Assert.Empty(Directory.GetFiles(Path.Combine(directory, "delivery")));
@@ -175,6 +201,9 @@ public sealed class ReplayDeliveryIntegrationTests
             options, NullLogger<ClickHouseBatchWriter>.Instance);
         await Assert.ThrowsAsync<InvalidOperationException>(() => writer.GetSourceIdAsync(timeout.Token));
         await Execute("ALTER TABLE nealytics_core.global_events MODIFY SETTING non_replicated_deduplication_window = 100000");
+        Assert.NotEqual(Guid.Empty, await writer.GetSourceIdAsync(timeout.Token));
+        await Assert.ThrowsAnyAsync<Exception>(() => writer.WriteAsync(
+            [new GlobalTelemetryPayload { ProjectId = "p", TenantId = "t", EventType = "e" }], 1, timeout.Token));
         Assert.NotEqual(Guid.Empty, await writer.GetSourceIdAsync(timeout.Token));
         await Execute("DROP DATABASE nealytics_core SYNC");
         await Execute("CREATE DATABASE nealytics_core");
