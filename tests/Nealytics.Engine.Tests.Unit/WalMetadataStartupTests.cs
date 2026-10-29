@@ -58,4 +58,33 @@ public sealed class WalMetadataStartupTests
             Directory.Delete(directory, true);
         }
     }
+    [Fact]
+    public async Task FailedDeliveryMetadataCleanupStopsNewAcknowledgmentsAndPreservesItsOriginalFailure()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "nealytics-checkpoint-failure-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var options = Options.Create(new TelemetryEngineOptions { WriteAheadLogDirectory = directory });
+            await using var wal = new WriteAheadLogger(options);
+            IOException failure = new("delivery checkpoint failed");
+            Assert.Same(failure, await Assert.ThrowsAsync<IOException>(() =>
+                wal.CheckpointDeliveryAsync(() => throw failure)));
+            Assert.Same(failure, await Assert.ThrowsAsync<IOException>(() => wal.AppendAsync(
+                new Nealytics.Engine.Infrastructure.Serialization.GlobalTelemetryPayload
+                {
+                    ProjectId = "p", TenantId = "t", EventType = "e"
+                }, CancellationToken.None)));
+            Assert.Equal(0, wal.UncommittedRecordCount);
+            Assert.Equal(0, wal.PendingByteCount);
+            bool repeated = false;
+            Assert.Same(failure, await Assert.ThrowsAsync<IOException>(() =>
+                wal.CheckpointDeliveryAsync(() => repeated = true)));
+            Assert.False(repeated);
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
 }
