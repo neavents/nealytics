@@ -34,6 +34,22 @@ payloads and 256 configured requests, keeping the same sixteen-MiB budget. Apply
 supported settings to both versions and record settings that the original does not implement.
 This is operator tuning; producer endpoints, payloads and acknowledgment durability do not change.
 
+The first stock run exposed both admission rejection and retained-generation exhaustion. A
+second profile instead preserves the original one-MiB body limit and uses 256 configured
+requests with a 256-MiB raw-body reservation budget. It raises the delivery journal to eight
+GiB/four million records and the requested WAL backlog to four GiB. These are bounded disk
+and metadata budgets, not measured resident-memory allocations. Keep the engine at one CPU
+and 512 MiB so memory pressure can still disqualify a point. Record actual process and cgroup
+peaks alongside the larger configured reservation ceiling. Never describe this profile as
+fixing continuous-traffic generation reclamation: it only extends the measured window before
+the same finite-generation limit is reached.
+
+Reuse the exact hash-verified candidate executable with --reuse-candidate-from and its explicit
+revision. This avoids rebuilding the engine between profiles. The benchmark client and schema
+remain matched across versions. A final old-build control checks for drift; a separate CPU
+scaling experiment must name its changed CPU allocation and cannot be mixed into the one-CPU
+comparison. Preserve failed and overloaded observations alongside every eligible peak.
+
 Run bench/stress_ingestion.py with a fresh output directory and the hash-verified original
 binary from the preliminary matrix. Save manifests, samples, logs, binary hashes and partial
 results after every point. Heavy qualification processes must finish before timed stress starts.

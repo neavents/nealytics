@@ -655,6 +655,46 @@ public sealed class DeliveryJournalTests : IAsyncDisposable
     }
 
     [Fact]
+    public void EncodingAndRecoveryAllowAUnitInsideTheConfiguredExpansionAllowance()
+    {
+        var settings = Settings();
+        settings.DatabaseBatchByteCapacity = 256;
+        settings.DeliveryJournalMaxBytes = 16_384;
+        var unit = Unit();
+        unit.Items[0].MetadataJson = string.Empty;
+        int overhead = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(unit,
+            TelemetryAotContext.Default.TelemetryDeliveryUnit).Length;
+        unit.Items[0].MetadataJson = new string('x', 4500 - overhead);
+        var journal = new TelemetryDeliveryJournal(Options.Create(settings));
+
+        journal.Prepare(unit);
+
+        Assert.Equal(4565, new FileInfo(Assert.Single(Directory.GetFiles(Path.Combine(_directory, "delivery")))).Length);
+        Assert.Equal(unit.Id, Assert.Single(journal.Load()).Id);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(100)]
+    public void EncodingIsBoundedByRemainingCapacityBeforeAnotherManifestCanBePublished(int remainingBodyBytes)
+    {
+        var settings = Settings();
+        var unit = Unit();
+        int length = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(unit,
+            TelemetryAotContext.Default.TelemetryDeliveryUnit).Length + 65;
+        settings.DeliveryJournalMaxBytes = length + 65 + remainingBodyBytes;
+        var journal = new TelemetryDeliveryJournal(Options.Create(settings));
+        journal.Prepare(unit);
+
+        var failure = Assert.Throws<InvalidDataException>(() => journal.Prepare(Unit()));
+
+        Assert.Contains("Serialized WAL record exceeds WalMaxRecordBytes", failure.Message);
+        Assert.Equal(unit.Id.ToString("N") + ".json",
+            Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_directory, "delivery")))));
+        Assert.Equal(unit.Id, Assert.Single(new TelemetryDeliveryJournal(Options.Create(settings)).Load()).Id);
+    }
+
+    [Fact]
     public void RecoveryChecksThePerUnitLimitBeforeReadingOrAllocatingTheManifest()
     {
         var settings = Settings();

@@ -69,4 +69,12 @@ three surviving mutations: unchecked recovery byte addition, unchecked recovery 
 and removing the checkpoint failure check after acquiring the file gate. New tests inject
 metadata measurements that overflow each total while preserving files and directory ownership,
 and queue a checkpoint behind a failing durable flush to assert that its cleanup never runs.
-These focused regressions pass; the new platform run must establish mutation detection.
+These focused regressions pass. Subsequent runs at 44fe741 and 12a6781 passed both actual
+architectures, including the selected native-boundary mutation gate. The broad A6/A7 managed
+mutation scope remains a separate unfinished gate.
+
+The [saturation protocol](b6-saturation-protocol.md) extends the offered-load matrix to measure
+throughput bounds and overload behavior. Stock-profile refusal under retained-generation
+pressure prevents treating a successful short peak as sustained capacity. A larger-budget
+profile is operator tuning and cannot replace continuous-traffic reclamation or justify a
+default switch by itself.

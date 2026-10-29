@@ -20,13 +20,13 @@ checks, platform requirements, and applicable coverage/mutation gates have passe
 | B3 native integration and operator fallback | Implemented; platform/artifact gates passed | Both actual architectures passed run 40830818024 after the terminal-channel regression; shared recovery/HTTP contracts passed; aggregate crash qualification remains |
 | B4 bounded beacon microbatches | Implemented; consolidated qualification open | 1,760 unit, 148 ClickHouse, 24 native and eleven real-native HTTP cases passed; see the B4 checkpoint |
 | B5 custom ingestion dispatcher | Implemented; final qualification open | HTTP parity passes; 57 assertion kills and eight timeout detections, zero survivors/uncovered mutants; aggregate artifact qualification remains |
-| B6 combined qualification/default selection | Exploratory matrix complete; final qualification open | Thirty runs, 435,000 events, zero request errors/count mismatches; noisy timings require a clean final matrix and all-mode crash checks |
-| Full build, unit, integration and published-artifact end-to-end | In progress | Capturing the unchanged baseline before implementation |
+| B6 combined qualification/default selection | Saturation findings under review; final qualification open | The new 1,024-caller sweep exposes stock admission and retained-generation refusals; larger-budget measurements cannot close continuous-traffic reclamation |
+| Full build, unit, integration and published-artifact end-to-end | Milestone suites passed; aggregate crash qualification open | CI and actual Linux x64/ARM64 artifact jobs passed at 12a6781; isolated 184-case ClickHouse suite passed at 1d63a4b; further changes require verification |
 | Changed maintained-code line/branch coverage | Pending | Baseline unit collector includes generated source; classify and combine with integration evidence |
 | Stryker mutation checks | Partial | Shared WAL: 174 killed, 54 timeout detections; measurement helpers: 120 killed, one timeout; native boundary: 87 killed, 14 timeout detections; all three scopes have zero survivors, surrounding harness remains |
-| Source style, architecture and domain neutrality guards | Baseline passed | Included in the 1,303-test unit run |
+| Source style, architecture and domain neutrality guards | Latest CI passed | Included in the feature-branch unit jobs at 12a6781; Archy remains unavailable without configured layer rules |
 
-Current measured results and remaining gates: [2026-10-29 sweep checkpoint](performance-sweep-checkpoint.md).
+Current measured results and remaining gates: [sweep checkpoint updated 2026-10-30](performance-sweep-checkpoint.md).
 The historical counts below identify the source state at each earlier milestone.
 
 Baseline snapshot: engine f1cfe3e0c4e69bbbafc6096c02659a68986d0836; planning commit 90babda.

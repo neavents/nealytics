@@ -1,6 +1,6 @@
 # Correctness and ingestion sweep: measured checkpoint
 
-Recorded 2026-10-29. This is an unfinished qualification checkpoint, not release evidence.
+Updated 2026-10-30. This is an unfinished qualification checkpoint, not release evidence.
 The engine remains on feature branches; nothing was merged into main.
 
 ## Preliminary latency measurements
@@ -67,19 +67,36 @@ justify enabling it by default.
 | B5 | Implemented; mutation gate passed at 977978a, combined artifact qualification open |
 | B6 | Exploratory matrix complete; final clean matrix, all-mode crash checks and default decision open |
 
-The latest general CI at source 81b2ba9 passed build, unit, integration, benchmark and smoke
-jobs: https://github.com/neavents/nealytics/actions/runs/40951681940.
-The separate actual Linux x64 and ARM64 run was still running when this checkpoint was written:
-https://github.com/neavents/nealytics/actions/runs/40951682055.
-The preceding platform run passed 2,013 unit and 24 native cases on both architectures but
-failed its coverage gate on three checkpoint-failure lines. A new fault regression covers
-that path; its platform rerun is not assumed successful until the jobs complete.
+General CI at source 12a6781 passed build, unit, integration, benchmark and smoke jobs:
+https://github.com/neavents/nealytics/actions/runs/40960013642.
+Both actual Linux x64 and ARM64 jobs passed their platform, native coverage/sanitizer,
+published-artifact and selected native-boundary mutation gates:
+https://github.com/neavents/nealytics/actions/runs/40960013745.
+The earlier three native-boundary survivors are closed by overflow and queued-checkpoint
+failure regressions. This selected native gate does not replace broad A6/A7 mutation qualification.
 
-A full isolated real-ClickHouse suite passed 182 cases at source 71e2657. Later production
-changes and new tests still require final same-source qualification. The corrected standalone
+A full isolated real-ClickHouse suite passed 184 cases at source 1d63a4b, with zero skips.
+The preceding full portable unit run passed 2,037 cases; later focused regressions passed.
+Further source changes still require final same-source qualification. The corrected standalone
 custom/managed crash fixture recovered all 48 accepted identifiers after a forced process kill;
 all four modes remain to be qualified together. This does not establish whole-host power-loss
 behavior. The B5 mutation rerun at source 977978a detected all 65 executable mutants: 57 assertion
 kills and eight timeout detections, with zero survivors or uncovered mutants. Seven selected
-mutants could not compile. The broad A6/A7 mutation run has surviving mutants under investigation. The sweep is
-not 100% complete.
+mutants could not compile. The broad A6/A7 mutation run has surviving mutants under investigation.
+A later unit-only sweep reached 98.79%: 403 assertion kills, five timeout detections, five survivors,
+zero uncovered mutants and fifty selected compile errors. Pool integration qualification remains
+separate. Follow-up regressions and a redundant flush removal are awaiting verification.
+The sweep is not 100% complete.
+
+## Throughput stress qualification
+
+The new saturation experiment reuses the hash-verified original executable and candidate
+12a6781. Its [protocol](packages/b6-saturation-protocol.md) ramps to 1,024 callers, repeats
+eligible rates twice for thirty seconds, verifies unique stored sessions and tests fixed
+arrivals above the selected short peak. Fresh databases and WAL volumes isolate every point.
+
+Stock-profile stress exposed request admission rejection and exhaustion of retained WAL
+generations under continuous traffic. A short successful acknowledgment peak cannot establish
+sustained capacity when the longer run returns errors. Increasing finite retention budgets
+is a separately labeled hardware-probing experiment and does not close live generation
+reclamation. Keep all overload failures visible and leave the default-selection gate open.

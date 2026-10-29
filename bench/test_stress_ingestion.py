@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -8,6 +9,21 @@ import stress_ingestion as stress
 
 
 class SaturationAssessmentTests(unittest.TestCase):
+    def test_executable_reuse_requires_the_expected_revision_and_unchanged_bytes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            executable = output / "engine"
+            executable.write_bytes(b"published executable")
+            binary = {"revision": "expected", "binary": str(executable),
+                      "sha256": hashlib.sha256(executable.read_bytes()).hexdigest()}
+            (output / "summary.json").write_text(json.dumps({"binaries": {"candidate": binary}}))
+            self.assertEqual(binary, stress.reused_binary(output, "candidate", "expected"))
+            with self.assertRaisesRegex(AssertionError, "revision"):
+                stress.reused_binary(output, "candidate", "other")
+            executable.write_bytes(b"changed executable")
+            with self.assertRaisesRegex(AssertionError, "hash"):
+                stress.reused_binary(output, "candidate", "expected")
+
     def setUp(self):
         self.level = {"eventsSent": 2000, "errors": 0, "ok": 2000, "throughput": 200,
                       "elapsedSeconds": 10, "visibilityTimeouts": 0, "visibilityDropped": 0, "p99": 50}

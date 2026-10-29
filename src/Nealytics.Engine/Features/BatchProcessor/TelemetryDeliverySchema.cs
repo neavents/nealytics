@@ -43,7 +43,6 @@ internal static class TelemetryDeliverySchema
             }
             writer.WriteEndArray();
             writer.WriteEndArray();
-            writer.Flush();
         }
         return Convert.ToHexString(SHA256.HashData(buffer.WrittenSpan));
     }

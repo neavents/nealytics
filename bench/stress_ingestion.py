@@ -22,6 +22,13 @@ CONFIGURATIONS = {
 }
 
 
+def reused_binary(output, label, revision):
+    binary = json.loads((output / "summary.json").read_text())["binaries"][label]
+    assert binary["revision"] == revision, "Reused executable revision does not match"
+    assert hashlib.sha256(Path(binary["binary"]).read_bytes()).hexdigest() == binary["sha256"], "Reused executable hash does not match"
+    return binary
+
+
 def classify(level, counts, state, drain_seconds, duration, offered_rate=0):
     acknowledged = level["eventsSent"]
     exact = counts["stored"] == acknowledged and counts["uniqueSessions"] == acknowledged
@@ -100,7 +107,10 @@ def measure(repository, output, client, binaries, args, label, mode, concurrency
     print("Starting", name, flush=True)
     overrides = {"TelemetryEngine__MaxConcurrentIngestionRequests": str(args.admission_concurrency),
                  "TelemetryEngine__IngestionRequestByteBudget": str(args.request_byte_budget),
-                 "TelemetryEngine__MaxRequestBodyBytes": str(args.max_body_bytes)}
+                 "TelemetryEngine__MaxRequestBodyBytes": str(args.max_body_bytes),
+                 "TelemetryEngine__DeliveryJournalMaxBytes": str(args.delivery_journal_bytes),
+                 "TelemetryEngine__DeliveryJournalMaxRecords": str(args.delivery_journal_records),
+                 "TelemetryEngine__WalMaxBacklogBytes": str(args.wal_backlog_bytes)}
     with qualification.deployment(output, binary["binary"], backend, execution,
                                   settings_overrides=overrides, engine_cpus=args.engine_cpus,
                                   engine_memory=args.engine_memory) as target:
@@ -225,6 +235,7 @@ def main():
     parser.add_argument("--baseline", default="f1cfe3e0c4e69bbbafc6096c02659a68986d0836")
     parser.add_argument("--candidate", default="HEAD")
     parser.add_argument("--reuse-baseline-from", type=Path, required=True)
+    parser.add_argument("--reuse-candidate-from", type=Path)
     parser.add_argument("--configurations", default=",".join(CONFIGURATIONS))
     parser.add_argument("--concurrency", default="1,8,16,64,256,1024")
     parser.add_argument("--duration", type=int, default=10)
@@ -234,6 +245,9 @@ def main():
     parser.add_argument("--admission-concurrency", type=int, default=64)
     parser.add_argument("--request-byte-budget", type=int, default=16_777_216)
     parser.add_argument("--max-body-bytes", type=int, default=1_048_576)
+    parser.add_argument("--delivery-journal-bytes", type=int, default=268_435_456)
+    parser.add_argument("--delivery-journal-records", type=int, default=100_000)
+    parser.add_argument("--wal-backlog-bytes", type=int, default=1_073_741_824)
     parser.add_argument("--engine-cpus", type=float, default=1)
     parser.add_argument("--engine-memory", default="512m")
     args = parser.parse_args()
@@ -244,16 +258,23 @@ def main():
     assert concurrency and all(value > 0 for value in concurrency)
     assert min(args.duration, args.warmup_seconds, args.confirmation_seconds, args.confirmation_repetitions) > 0
     assert args.admission_concurrency > 0 and args.max_body_bytes > 0 and args.request_byte_budget >= args.max_body_bytes
+    assert min(args.delivery_journal_bytes, args.delivery_journal_records, args.wal_backlog_bytes) > 0
     assert math.isfinite(args.engine_cpus) and args.engine_cpus > 0
     repository = Path(__file__).resolve().parent.parent
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     baseline = qualification.run("git", "-C", str(repository), "rev-parse", args.baseline)
     candidate = qualification.run("git", "-C", str(repository), "rev-parse", args.candidate)
-    previous = json.loads((args.reuse_baseline_from / "summary.json").read_text())["binaries"]["baseline"]
-    assert previous["revision"] == baseline
-    assert hashlib.sha256(Path(previous["binary"]).read_bytes()).hexdigest() == previous["sha256"]
-    binaries = {"baseline": previous, "candidate": qualification.build(repository, output, candidate, "candidate", native=True)}
+    previous = reused_binary(args.reuse_baseline_from, "baseline", baseline)
+    if args.reuse_candidate_from:
+        current = reused_binary(args.reuse_candidate_from, "candidate", candidate)
+        source = output / "sources" / "candidate"
+        source.mkdir(parents=True)
+        (source / "clickhouse-init.sql").write_text(qualification.run("git", "-C", str(repository),
+                                                                  "show", candidate + ":clickhouse-init.sql"))
+    else:
+        current = qualification.build(repository, output, candidate, "candidate", native=True)
+    binaries = {"baseline": previous, "candidate": current}
     client_directory = output / "client"
     client_directory.mkdir()
     with (output / "client-build.log").open("w") as log:
@@ -261,7 +282,9 @@ def main():
                         "--output", str(client_directory)], check=True, stdout=log, stderr=subprocess.STDOUT)
     client = client_directory / "Nealytics.Engine.Bench.dll"
     summary = {"host": platform.platform(), "binaries": binaries, "settings": vars(args) | {"output": str(output),
-               "reuse_baseline_from": str(args.reuse_baseline_from)}, "runs": [], "ceilings": {},
+               "reuse_baseline_from": str(args.reuse_baseline_from),
+               "reuse_candidate_from": str(args.reuse_candidate_from) if args.reuse_candidate_from else None},
+               "runs": [], "ceilings": {},
                "notes": ["One fresh database and WAL volume per point; durable fsync and synchronous inserts.",
                          "Eligibility requires zero errors, exact unique stored session counts and at most three seconds of conservative post-load overhead/drain.",
                          "Overload beacon failures can persist partial request prefixes; extra stored rows are not labeled duplicates or loss.",
