@@ -41,7 +41,7 @@ jobs:
           python3 - "$result_directory/qualification.log" <<'PY'
           from pathlib import Path
           import sys
-          text = Path(sys.argv[1]).read_text()[-12000:]
+          text = Path(sys.argv[1]).read_text()[-2500:]
           text = text.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
           print('::error title=Native qualification failed::' + text)
           PY
