@@ -31,7 +31,6 @@ internal sealed class BeaconBatchIngestor
         MeasureSanitizer measures,
         IOptions<TelemetryEngineOptions> options)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(options.Value.BeaconWalBatchRecords, 1);
         _wal = wal;
         _broker = broker;
         _gate = gate;
@@ -52,21 +51,20 @@ internal sealed class BeaconBatchIngestor
         List<GlobalTelemetryPayload> buffer = new List<GlobalTelemetryPayload>(_records);
         using CancellationTokenSource parsing = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         await using IAsyncEnumerator<GlobalTelemetryPayload?> source = payloads.GetAsyncEnumerator(parsing.Token);
-        ValueTask<bool> move = default;
-        bool outstanding = false;
+        ValueTask<bool>? outstanding = null;
         int accepted = 0;
         int rejected = 0;
         try
         {
             while (true)
             {
-                move = source.MoveNextAsync();
-                outstanding = true;
-                if (!move.IsCompleted && buffer.Count > 0)
+                ValueTask<bool> move = source.MoveNextAsync();
+                outstanding = move;
+                if (!move.IsCompleted)
                 {
                     accepted += await FlushAsync(buffer, cancellationToken, cancellationToken);
                 }
-                outstanding = false;
+                outstanding = null;
                 if (!await move)
                 {
                     accepted += await FlushAsync(buffer, cancellationToken, cancellationToken);
@@ -87,26 +85,22 @@ internal sealed class BeaconBatchIngestor
         }
         catch
         {
-            if (buffer.Count > 0)
-            {
-                await FlushAsync(buffer, CancellationToken.None, cancellationToken);
-            }
+            await FlushAsync(buffer, CancellationToken.None, cancellationToken);
             throw;
         }
         finally
         {
-            if (outstanding)
+            if (outstanding.HasValue)
             {
                 parsing.Cancel();
                 try
                 {
-                    await move;
+                    await outstanding.Value;
                 }
                 catch (Exception)
                 {
                 }
             }
-            buffer.Clear();
         }
     }
 

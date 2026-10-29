@@ -18,6 +18,38 @@ public sealed class NativeStartupIntegrationTests : IDisposable
     [InlineData("managed")]
     [InlineData("io_uring")]
     [InlineData("auto")]
+    public async Task BoundedGroupsPersistEveryRecordThroughOnePhysicalBarrier(string backend)
+    {
+        GlobalTelemetryPayload[] events = Enumerable.Range(0, 4).Select(_ => Event(Guid.NewGuid())).ToArray();
+        TelemetryEngineOptions options = new()
+        {
+            WriteAheadLogDirectory = _directory,
+            WalIoBackend = backend,
+            WalMaxFlushRecords = 4,
+            WalMaxPendingRecords = 8
+        };
+        await using (WriteAheadLogger wal = new(Options.Create(options)))
+        {
+            Assert.Equal(backend == "managed" ? "managed" : "io_uring", wal.Selection.Backend);
+            WalBatchAppendResult result = await wal.AppendBatchAsync(events, CancellationToken.None);
+            result.ThrowIfFailed();
+            Assert.Equal(4, result.Count);
+            Assert.Equal(1, wal.FlushGroupCount);
+            Assert.Equal(4, wal.FlushedRecordCount);
+            Assert.Equal(4, wal.UncommittedRecordCount);
+            Assert.Equal(0, wal.PendingRecordCount);
+            Assert.Equal(0, wal.PendingByteCount);
+        }
+        options.WalIoBackend = "managed";
+        await using WriteAheadLogger restarted = new(Options.Create(options));
+        Assert.Equal(events.Select(item => item.EventId),
+            (await restarted.ReplayUncommittedAsync()).Select(item => item.EventId));
+    }
+
+    [Theory]
+    [InlineData("managed")]
+    [InlineData("io_uring")]
+    [InlineData("auto")]
     public async Task ExactFramedByteBudgetsApplyToManagedAndNativeWriters(string backend)
     {
         GlobalTelemetryPayload payload = new()

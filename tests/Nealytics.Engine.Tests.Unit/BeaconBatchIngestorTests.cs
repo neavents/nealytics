@@ -1,5 +1,8 @@
 using System.Text.Json;
 using System.Threading.Tasks.Sources;
+using System.IO.Pipelines;
+using System.Text;
+using System.Diagnostics.Metrics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Features.IngestTelemetry;
@@ -15,6 +18,34 @@ namespace Nealytics.Engine.Tests.Unit;
 public sealed class BeaconBatchIngestorTests
 {
     private static readonly DateTime ReceivedAt = new(2026, 10, 29, 0, 0, 0, DateTimeKind.Utc);
+
+    [Fact]
+    public async Task RejectionCountersKeepTheirReasonAndBeaconTransportTags()
+    {
+        List<(long Count, KeyValuePair<string, object?>[] Tags)> rejected = [];
+        using MeterListener listener = new();
+        listener.InstrumentPublished = (instrument, current) =>
+        {
+            if (instrument.Name == "nealytics_events_rejected_total")
+            {
+                current.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((_, count, tags, _) => rejected.Add((count, tags.ToArray())));
+        listener.Start();
+        await using Harness harness = new();
+        BeaconIngestResult result = await harness.IngestAsync(new Source([null, new(), Event()]));
+        Assert.Equal(2, result.Rejected);
+        Assert.Equal(2, rejected.Count);
+        Assert.All(rejected, measurement =>
+        {
+            Assert.Equal(1, measurement.Count);
+            Assert.Equal(new KeyValuePair<string, object?>[]
+            {
+                new("reason", "missing_project_id"), new("transport", "beacon")
+            }, measurement.Tags);
+        });
+    }
 
     [Theory]
     [InlineData(1)]
@@ -245,6 +276,34 @@ public sealed class BeaconBatchIngestorTests
         Assert.Equal(0, harness.File.Flushes);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TheBodyReaderIsCompletedAfterSuccessfulOrMalformedInput(bool malformed)
+    {
+        await using Harness harness = new();
+        string json = malformed ? "not-json" : "[" + Encoding.UTF8.GetString(Frame(Event())) + "]";
+        TrackingReader reader = new(PipeReader.Create(new MemoryStream(Encoding.UTF8.GetBytes(json))));
+        if (malformed)
+        {
+            await Assert.ThrowsAsync<JsonException>(() => BeaconTelemetryEndpoint.IngestBodyAsync(
+                reader, harness.Ingestor, IngestionKeyPolicy.Unpinned, CancellationToken.None));
+        }
+        else
+        {
+            BeaconIngestResult result = await BeaconTelemetryEndpoint.IngestBodyAsync(
+                reader, harness.Ingestor, IngestionKeyPolicy.Unpinned, CancellationToken.None);
+            Assert.Equal(1, result.Accepted);
+        }
+        Assert.Equal(1, reader.Completions);
+    }
+
+    [Fact]
+    public void DefaultBeaconGroupingIsExplicitAndBounded()
+    {
+        Assert.Equal(64, new TelemetryEngineOptions().BeaconWalBatchRecords);
+    }
+
     private static async Task UntilAsync(Func<bool> condition)
     {
         using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(5));
@@ -377,6 +436,28 @@ public sealed class BeaconBatchIngestorTests
         }
     }
 
+    private sealed class TrackingReader : PipeReader
+    {
+        private readonly PipeReader _inner;
+        public int Completions { get; private set; }
+        public TrackingReader(PipeReader inner) => _inner = inner;
+        public override void AdvanceTo(SequencePosition consumed) => _inner.AdvanceTo(consumed);
+        public override void AdvanceTo(SequencePosition consumed, SequencePosition examined) => _inner.AdvanceTo(consumed, examined);
+        public override void CancelPendingRead() => _inner.CancelPendingRead();
+        public override void Complete(Exception? exception = null)
+        {
+            Completions++;
+            _inner.Complete(exception);
+        }
+        public override async ValueTask CompleteAsync(Exception? exception = null)
+        {
+            Completions++;
+            await _inner.CompleteAsync(exception);
+        }
+        public override ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default) => _inner.ReadAsync(cancellationToken);
+        public override bool TryRead(out ReadResult result) => _inner.TryRead(out result);
+    }
+
     private sealed class Source : IAsyncEnumerable<GlobalTelemetryPayload?>, IAsyncEnumerator<GlobalTelemetryPayload?>, IValueTaskSource<bool>
     {
         private readonly GlobalTelemetryPayload?[] _items;
@@ -448,8 +529,8 @@ public sealed class BeaconBatchIngestorTests
         }
         public bool GetResult(short token)
         {
-            Assert.True(Outstanding);
             PendingResults++;
+            Assert.True(Outstanding);
             try
             {
                 return _pending.GetResult(token);

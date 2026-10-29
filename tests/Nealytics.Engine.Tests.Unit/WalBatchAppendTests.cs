@@ -10,6 +10,66 @@ namespace Nealytics.Engine.Tests.Unit;
 
 public sealed class WalBatchAppendTests
 {
+    [Fact]
+    public async Task ReadyLogicalGroupsCannotOverflowTheRemainingRecordBudgetOfOneBarrier()
+    {
+        RecordingFile file = new() { HoldFlush = true };
+        await using Harness harness = new(file, configure: options =>
+        {
+            options.WalMaxFlushRecords = 3;
+            options.WalMaxPendingRecords = 6;
+        });
+        Task first = harness.Wal.AppendAsync(Event(), CancellationToken.None);
+        await file.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Task<WalBatchAppendResult> second = harness.Wal.AppendBatchAsync([Event(), Event()], CancellationToken.None);
+        Task<WalBatchAppendResult> third = harness.Wal.AppendBatchAsync([Event(), Event()], CancellationToken.None);
+        Assert.Equal(5, harness.Wal.PendingRecordCount);
+        file.Release.TrySetResult();
+        await Task.WhenAll(first, second, third).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal([1, 2, 2], file.BarrierRecords);
+        Assert.Equal(5, harness.Wal.FlushedRecordCount);
+    }
+
+    [Fact]
+    public async Task EmptyInputDoesNotWaitBehindAnotherSerializationOwner()
+    {
+        WalSynchronization synchronization = new();
+        await using Harness harness = new(new RecordingFile(), synchronization: synchronization);
+        await synchronization.Serialization.WaitAsync();
+        try
+        {
+            Task<WalBatchAppendResult> empty = harness.Wal.AppendBatchAsync([], CancellationToken.None);
+            Assert.True(empty.IsCompletedSuccessfully);
+            Assert.Equal(0, (await empty).Count);
+        }
+        finally
+        {
+            synchronization.Serialization.Release();
+        }
+    }
+
+    [Fact]
+    public async Task AWaitingSerializerChecksTerminalFailureBeforeReadingItsInput()
+    {
+        IOException failure = new("truncate failed");
+        WalSynchronization synchronization = new();
+        await using Harness harness = new(new RecordingFile { TruncateFailure = failure }, synchronization: synchronization);
+        await synchronization.Serialization.WaitAsync();
+        ThrowingInput input = new();
+        Task<WalBatchAppendResult> waiting = harness.Wal.AppendBatchAsync(input, CancellationToken.None);
+        try
+        {
+            Assert.Same(failure, await Assert.ThrowsAsync<IOException>(() => harness.Wal.TruncateAsync()));
+        }
+        finally
+        {
+            synchronization.Serialization.Release();
+        }
+        Assert.Same(failure, await Assert.ThrowsAsync<IOException>(() => waiting));
+        Assert.False(input.Read);
+        Assert.Equal(0, harness.Wal.PendingRecordCount);
+    }
+
     [Theory]
     [InlineData(-1)]
     [InlineData(2)]
@@ -249,7 +309,7 @@ public sealed class WalBatchAppendTests
         public WriteAheadLogger Wal { get; }
 
         public Harness(RecordingFile file, Action<TelemetryEngineOptions>? configure = null,
-            TrackingPool? pending = null, TrackingPool? scratch = null)
+            TrackingPool? pending = null, TrackingPool? scratch = null, WalSynchronization? synchronization = null)
         {
             _file = file;
             TelemetryEngineOptions options = new()
@@ -262,7 +322,7 @@ public sealed class WalBatchAppendTests
                 WalMaxFlushBytes = 16_384
             };
             configure?.Invoke(options);
-            Wal = new WriteAheadLogger(Options.Create(options), file, pending, scratch);
+            Wal = new WriteAheadLogger(Options.Create(options), file, pending, scratch, synchronization);
         }
 
         public async ValueTask DisposeAsync()
@@ -279,12 +339,15 @@ public sealed class WalBatchAppendTests
         public bool HoldFlush { get; init; }
         public IOException? WriteFailure { get; init; }
         public IOException? FlushFailure { get; init; }
+        public IOException? TruncateFailure { get; init; }
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public byte[] Bytes => _bytes.ToArray();
         public int Appends { get; private set; }
         public int Flushes { get; private set; }
         public int Truncations { get; private set; }
+        public List<int> BarrierRecords { get; } = [];
+        private int _barrierTotal;
 
         public ValueTask AppendAsync(ReadOnlyMemory<byte> data)
         {
@@ -300,6 +363,9 @@ public sealed class WalBatchAppendTests
         public async ValueTask FlushAsync()
         {
             Flushes++;
+            int total = _bytes.ToArray().Count(value => value == (byte)'\n');
+            BarrierRecords.Add(total - _barrierTotal);
+            _barrierTotal = total;
             Entered.TrySetResult();
             if (HoldFlush)
             {
@@ -313,8 +379,13 @@ public sealed class WalBatchAppendTests
 
         public ValueTask TruncateAsync()
         {
+            if (TruncateFailure is not null)
+            {
+                throw TruncateFailure;
+            }
             Truncations++;
             _bytes.SetLength(0);
+            _barrierTotal = 0;
             return ValueTask.CompletedTask;
         }
 
@@ -324,6 +395,22 @@ public sealed class WalBatchAppendTests
             _bytes.Dispose();
             return ValueTask.CompletedTask;
         }
+    }
+
+    private sealed class ThrowingInput : IReadOnlyList<GlobalTelemetryPayload>
+    {
+        public bool Read { get; private set; }
+        public int Count => 1;
+        public GlobalTelemetryPayload this[int index]
+        {
+            get
+            {
+                Read = true;
+                throw new InvalidDataException("terminal input must not be read");
+            }
+        }
+        public IEnumerator<GlobalTelemetryPayload> GetEnumerator() => throw new NotSupportedException();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     private sealed class TrackingPool : ArrayPool<byte>

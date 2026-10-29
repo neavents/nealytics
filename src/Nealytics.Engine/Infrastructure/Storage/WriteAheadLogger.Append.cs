@@ -89,8 +89,7 @@ public sealed partial class WriteAheadLogger
             {
                 int bytes = 0;
                 int records = 0;
-                while (records < _limits.FlushRecords
-                    && reader.TryPeek(out PendingAppend? next)
+                while (reader.TryPeek(out PendingAppend? next)
                     && next.Records <= _limits.FlushRecords - records
                     && next.Length <= _limits.FlushBytes - bytes)
                 {

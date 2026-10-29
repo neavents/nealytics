@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO.Pipelines;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -38,7 +40,8 @@ public static partial class BeaconTelemetryEndpoint
                 null,
                 context.Request.Query["k"].ToString());
 
-            if (clientProjectKey.Length == 0 || !keyValidator.TryResolve(clientProjectKey, out IngestionKeyPolicy? policy))
+            IngestionKeyPolicy? policy = null;
+            if (clientProjectKey.Length == 0 || !keyValidator.TryResolve(clientProjectKey, out policy))
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 return;
@@ -56,19 +59,7 @@ public static partial class BeaconTelemetryEndpoint
             {
                 PipeReader bodyReader = PipeReader.Create(
                     new LengthLimitedStream(context.Request.Body, options.Value.MaxRequestBodyBytes));
-                BeaconIngestResult result;
-                try
-                {
-                    IAsyncEnumerable<GlobalTelemetryPayload?> payloads = JsonSerializer.DeserializeAsyncEnumerable(
-                        bodyReader,
-                        TelemetryAotContext.Default.GlobalTelemetryPayload,
-                        context.RequestAborted);
-                    result = await ingestor.IngestAsync(payloads, policy!, DateTime.UtcNow, context.RequestAborted);
-                }
-                finally
-                {
-                    await bodyReader.CompleteAsync();
-                }
+                BeaconIngestResult result = await IngestBodyAsync(bodyReader, ingestor, policy!, context.RequestAborted);
 
                 activity?.SetTag("nealytics.beacon_events", result.Accepted);
                 activity?.SetTag("nealytics.beacon_rejected", result.Rejected);
@@ -94,5 +85,20 @@ public static partial class BeaconTelemetryEndpoint
         })
         .RequireRateLimiting("ingestion")
         .RequireCors("beacon");
+    }
+
+    internal static async Task<BeaconIngestResult> IngestBodyAsync(
+        PipeReader bodyReader, BeaconBatchIngestor ingestor, IngestionKeyPolicy policy, CancellationToken cancellationToken)
+    {
+        try
+        {
+            IAsyncEnumerable<GlobalTelemetryPayload?> payloads = JsonSerializer.DeserializeAsyncEnumerable(
+                bodyReader, TelemetryAotContext.Default.GlobalTelemetryPayload, cancellationToken);
+            return await ingestor.IngestAsync(payloads, policy, DateTime.UtcNow, cancellationToken);
+        }
+        finally
+        {
+            await bodyReader.CompleteAsync();
+        }
     }
 }

@@ -147,6 +147,36 @@ public sealed class IngestionDurabilityContractTests
     private static string EventJson(Guid id) =>
         $$"""{"eventId":"{{id}}","projectId":"p","tenantId":"t","sessionId":"s","eventType":"e"}""";
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(64)]
+    public async Task ConfigurableBeaconGroupingPreservesTheExistingHttpAndDurabilityContract(int records)
+    {
+        await using ContractFactory factory = new(records);
+        using HttpClient client = factory.CreateClient();
+        Guid[] ids = Enumerable.Range(0, 8).Select(_ => Guid.NewGuid()).ToArray();
+        string body = "[" + string.Join(",", ids.Select(EventJson)) + "]";
+        using HttpResponseMessage response = await client.PostAsync(
+            "/api/v1/telemetry/beacon?k=unit-key-1", new StringContent(body, Encoding.UTF8, "text/plain"));
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Empty(await response.Content.ReadAsByteArrayAsync());
+        WriteAheadLogger wal = factory.Services.GetRequiredService<WriteAheadLogger>();
+        Assert.Equal(8, wal.FlushedRecordCount);
+        Assert.InRange(wal.FlushGroupCount, 1, 8);
+        if (records == 1)
+        {
+            Assert.Equal(8, wal.FlushGroupCount);
+        }
+        TelemetryChannelBroker broker = factory.Services.GetRequiredService<TelemetryChannelBroker>();
+        List<Guid> published = [];
+        while (broker.Reader.TryRead(out GlobalTelemetryPayload? payload))
+        {
+            published.Add(payload.EventId);
+        }
+        Assert.Equal(ids, published);
+        await AssertDurableAsync(factory, ids);
+    }
+
     private static async Task WriteChunkAsync(Stream stream, string value)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(value);
@@ -178,9 +208,11 @@ public sealed class IngestionDurabilityContractTests
     {
         private readonly string _directory = Path.Combine(Path.GetTempPath(), "nealytics-contract-" + Guid.NewGuid().ToString("N"));
         private readonly string _backend = Environment.GetEnvironmentVariable("NEALYTICS_TEST_WAL_BACKEND") ?? "managed";
+        private readonly int _records;
 
-        public ContractFactory()
+        public ContractFactory(int records = 64)
         {
+            _records = records;
             UseKestrel(0);
         }
 
@@ -210,6 +242,7 @@ public sealed class IngestionDurabilityContractTests
                 {
                     options.WriteAheadLogDirectory = _directory;
                     options.WalIoBackend = _backend;
+                    options.BeaconWalBatchRecords = _records;
                 });
             });
         }
