@@ -7,6 +7,7 @@ using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Storage;
 using Nealytics.Engine.Infrastructure.Storage.Rollups;
 using Octonica.ClickHouseClient.Exceptions;
+using Testcontainers.ClickHouse;
 
 namespace Nealytics.Engine.Tests.Integration;
 
@@ -23,18 +24,77 @@ public sealed class RollupReadinessIntegrationTests : IAsyncLifetime
     public Task InitializeAsync() => Task.CompletedTask;
 
     [Fact]
+    public async Task FreshServerCreatesTheReadinessSchemaBeforePublishingAnyRollup()
+    {
+        await using ClickHouseContainer server = new ClickHouseBuilder(
+            "clickhouse/clickhouse-server:25.3.14.14@sha256:b627d7a9bc0e0c1bac26cdbe9d2fc6316faa29c5d8a174f28f5abd57d0fa6ba2")
+            .WithDatabase("nealytics_core")
+            .WithUsername("readiness")
+            .WithPassword("readiness-test-only")
+            .WithLabel("nealytics.scope", "a5-cold-start")
+            .WithCreateParameterModifier(parameters =>
+            {
+                parameters.HostConfig!.Memory = 2_147_483_648;
+                parameters.HostConfig.NanoCPUs = 2_000_000_000;
+            })
+            .Build();
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(60));
+        await server.StartAsync(timeout.Token);
+        DirectoryInfo? directory = new(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "clickhouse-init.sql")))
+        {
+            directory = directory.Parent;
+        }
+        Assert.NotNull(directory);
+        var initialization = await server.ExecScriptAsync(
+            await File.ReadAllTextAsync(Path.Combine(directory.FullName, "clickhouse-init.sql"), timeout.Token), timeout.Token);
+        Assert.Equal(0, initialization.ExitCode);
+        Octonica.ClickHouseClient.ClickHouseConnectionStringBuilder connection = new()
+        {
+            Host = server.Hostname,
+            Port = server.GetMappedPublicPort(9000),
+            Database = "nealytics_core",
+            User = "readiness",
+            Password = "readiness-test-only"
+        };
+        var current = Build(connectionString: connection.ToString());
+        await current.Migrator.StartAsync(timeout.Token);
+        Assert.Empty(current.Logger.Errors);
+        Assert.Single(current.Registry.Routable);
+        Assert.Contains(current.Logger.Entries, entry => entry.Id == 8120 && entry.Message.Contains(_name));
+        await using PooledClickHouseConnection pooled = await current.Factory.AcquireAsync(timeout.Token);
+        await using var schema = pooled.Connection.CreateCommand(
+            "SELECT name, type FROM system.columns WHERE database = 'nealytics_core' AND table = 'rollup_readiness' ORDER BY position");
+        await using var reader = await schema.ExecuteReaderAsync(timeout.Token);
+        List<(string, string)> columns = [];
+        while (await reader.ReadAsync(timeout.Token))
+        {
+            columns.Add((reader.GetString(0), reader.GetString(1)));
+        }
+        Assert.Equal(new (string, string)[]
+        {
+            ("source_id", "UUID"), ("table_id", "UUID"), ("view_id", "UUID"),
+            ("declared_definition", "FixedString(64)"), ("stored_definition", "FixedString(64)"),
+            ("backfilled", "UInt8"), ("completed_at", "DateTime64(3, 'UTC')")
+        }, columns);
+    }
+
+    [Fact]
     public async Task HistoricalCompletionSurvivesFreshStartupWithoutReinserting()
     {
         await SeedAsync();
         var first = Build();
         Assert.Empty(first.Registry.Routable);
         await first.Migrator.StartAsync(CancellationToken.None);
+        Assert.Empty(first.Logger.Errors);
+        Assert.Contains(first.Logger.Entries, entry => entry.Id == 8120 && entry.Message.Contains(_name));
         Assert.True(first.Registry.IsRoutable(first.Registry.Declared[0]));
         Assert.Equal(2, await StoredEventsAsync());
         await AssertResultAsync(first.Registry, first.Factory, "rollup:" + _name, 2);
 
         var restarted = Build();
         await restarted.Migrator.StartAsync(CancellationToken.None);
+        Assert.Empty(restarted.Logger.Errors);
         Assert.True(restarted.Registry.IsRoutable(restarted.Registry.Declared[0]));
         Assert.Equal(2, await StoredEventsAsync());
         await using PooledClickHouseConnection pooled = await first.Factory.AcquireAsync(CancellationToken.None);
@@ -49,6 +109,8 @@ public sealed class RollupReadinessIntegrationTests : IAsyncLifetime
         await SeedAsync();
         var forward = Build(backfill: false);
         await forward.Migrator.StartAsync(CancellationToken.None);
+        Assert.Empty(forward.Logger.Errors);
+        Assert.Contains(forward.Logger.Entries, entry => entry.Id == 8122 && entry.Message.Contains(_name));
         Assert.True(forward.Registry.IsRoutable(forward.Registry.Declared[0]));
         Assert.Equal(0, await StoredEventsAsync());
 
@@ -99,7 +161,10 @@ public sealed class RollupReadinessIntegrationTests : IAsyncLifetime
         Assert.False(current.Registry.IsRoutable(rollup));
         Assert.Equal(1, await StoredEventsAsync());
         await using PooledClickHouseConnection pooled = await current.Factory.AcquireAsync(CancellationToken.None);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => new ClickHouseRollupReadiness(pooled).CaptureAsync(rollup, CancellationToken.None));
+        InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => new ClickHouseRollupReadiness(pooled).CaptureAsync(rollup, CancellationToken.None));
+        Assert.Equal("Rollup '" + rollup.Name + "' is missing its table or view.", error.Message);
+        Assert.Contains(current.Logger.Entries, entry => entry.Id == 8124 && entry.Message.Contains("completion has not been verified"));
     }
 
     [Theory]
@@ -117,7 +182,7 @@ public sealed class RollupReadinessIntegrationTests : IAsyncLifetime
         await ClickHouseTestSupport.ExecuteAsync($"DROP VIEW nealytics_core.{rollup.ViewName}");
         if (replaceTable)
         {
-            await ClickHouseTestSupport.ExecuteAsync($"DROP TABLE nealytics_core.{rollup.TableName} SYNC");
+            await ClickHouseTestSupport.ExecuteAsync($"DROP TABLE IF EXISTS nealytics_core.rollup_{_name} SYNC");
         }
         await CreateStorageAsync(rollup);
         RollupStorageIdentity replacement = await CaptureAsync(readiness, rollup);
@@ -141,6 +206,7 @@ public sealed class RollupReadinessIntegrationTests : IAsyncLifetime
         var restarted = Build();
         await restarted.Migrator.StartAsync(CancellationToken.None);
         Assert.False(restarted.Registry.IsRoutable(restarted.Registry.Declared[0]));
+        Assert.Contains(restarted.Logger.Entries, entry => entry.Id == 8124 && entry.Message.Contains("completion has not been verified"));
         await AssertResultAsync(restarted.Registry, restarted.Factory, "raw", 2);
     }
 
@@ -154,6 +220,61 @@ public sealed class RollupReadinessIntegrationTests : IAsyncLifetime
         await restarted.Migrator.StartAsync(CancellationToken.None);
         Assert.False(restarted.Registry.IsRoutable(restarted.Registry.Declared[0]));
         await AssertResultAsync(restarted.Registry, restarted.Factory, "raw", 2);
+    }
+
+    [Fact]
+    public async Task ChangedDeclaredShapeKeepsItsSpecificDriftDiagnostic()
+    {
+        await SeedAsync();
+        var initial = Build();
+        await initial.Migrator.StartAsync(CancellationToken.None);
+        var drifted = Build(dimensions: "object_id");
+        await drifted.Migrator.StartAsync(CancellationToken.None);
+        Assert.Empty(drifted.Registry.Routable);
+        Assert.Equal("stored definition differs from the declared one", drifted.Registry.UnroutableReason(drifted.Registry.Declared[0]));
+        Assert.Contains(drifted.Logger.Entries, entry => entry.Id == 8121 && entry.Message.Contains(_name));
+        Assert.DoesNotContain(drifted.Logger.Entries, entry => entry.Id == 8124);
+        Assert.Empty(drifted.Logger.Errors);
+        await AssertResultAsync(drifted.Registry, drifted.Factory, "raw", 2);
+    }
+
+    [Fact]
+    public async Task MissingStorageCannotProduceAnIdentityEvenWhenTheViewExists()
+    {
+        var current = Build();
+        Rollup rollup = current.Registry.Declared[0];
+        await CreateStorageAsync(rollup);
+        await using PooledClickHouseConnection pooled = await current.Factory.AcquireAsync(CancellationToken.None);
+        Rollup missing = rollup with { TableName = "missing_" + Guid.NewGuid().ToString("N") };
+        InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => new ClickHouseRollupReadiness(pooled).CaptureAsync(missing, CancellationToken.None));
+        Assert.Equal("Rollup '" + rollup.Name + "' is missing its table or view.", error.Message);
+    }
+
+    [Fact]
+    public async Task NoRollupDeclarationRequiresNoReadinessSchemaPrivileges()
+    {
+        string user = "no_rollup_" + Guid.NewGuid().ToString("N");
+        await ClickHouseTestSupport.ExecuteAsync($"CREATE USER {user} IDENTIFIED WITH no_password");
+        try
+        {
+            await ClickHouseTestSupport.ExecuteAsync($"GRANT SELECT, ALTER TABLE ON nealytics_core.global_events TO {user}");
+            await ClickHouseTestSupport.ExecuteAsync($"GRANT SELECT ON system.* TO {user}");
+            Octonica.ClickHouseClient.ClickHouseConnectionStringBuilder connection = new(ClickHouseTestSupport.ConnectionString)
+            {
+                User = user,
+                Password = string.Empty
+            };
+            var current = Build(connectionString: connection.ToString(), declareRollup: false);
+            await current.Migrator.StartAsync(CancellationToken.None);
+            Assert.Empty(current.Registry.Declared);
+            Assert.Empty(current.Logger.Errors);
+            Assert.Contains(current.Logger.Entries, entry => entry.Id == 8002);
+        }
+        finally
+        {
+            await ClickHouseTestSupport.ExecuteAsync($"DROP USER IF EXISTS {user}");
+        }
     }
 
     [Theory]
@@ -254,27 +375,31 @@ public sealed class RollupReadinessIntegrationTests : IAsyncLifetime
         }
     }
 
-    private (ClickHouseSchemaMigrator Migrator, RollupRegistry Registry, ClickHouseConnectionFactory Factory) Build(
+    private (ClickHouseSchemaMigrator Migrator, RollupRegistry Registry, ClickHouseConnectionFactory Factory, ErrorLogger Logger) Build(
         bool backfill = true,
         string eventTypes = "ready_e",
         string? connectionString = null,
-        ILogger<ClickHouseSchemaMigrator>? logger = null)
+        ErrorLogger? logger = null,
+        string dimensions = "",
+        bool declareRollup = true)
     {
         TelemetryEngineOptions options = new()
         {
             ClickHouseConnectionString = connectionString ?? ClickHouseTestSupport.ConnectionString,
             ConnectionPoolSize = 2,
             BackfillRollups = backfill,
-            Rollups = [new RollupOptions { Name = _name, Grain = "day", EventTypes = eventTypes }]
+            Rollups = declareRollup
+                ? [new RollupOptions { Name = _name, Grain = "day", EventTypes = eventTypes, Dimensions = dimensions }]
+                : []
         };
         ClickHouseConnectionFactory factory = new(Options.Create(options));
         _factories.Add(factory);
-        DimensionRegistry dimensions = new(options);
-        MeasureRegistry measures = new(options, dimensions);
-        RollupRegistry registry = new(options, dimensions, measures);
-        ClickHouseSchemaMigrator migrator = new(factory, dimensions, measures, registry, Options.Create(options),
-            logger ?? NullLogger<ClickHouseSchemaMigrator>.Instance);
-        return (migrator, registry, factory);
+        DimensionRegistry dimensionRegistry = new(options);
+        MeasureRegistry measures = new(options, dimensionRegistry);
+        RollupRegistry registry = new(options, dimensionRegistry, measures);
+        logger ??= new ErrorLogger();
+        ClickHouseSchemaMigrator migrator = new(factory, dimensionRegistry, measures, registry, Options.Create(options), logger);
+        return (migrator, registry, factory, logger);
     }
 
     private async Task<RollupStorageIdentity> CaptureAsync(ClickHouseRollupReadiness readiness, Rollup rollup)
@@ -356,12 +481,14 @@ public sealed class RollupReadinessIntegrationTests : IAsyncLifetime
     private sealed class ErrorLogger : ILogger<ClickHouseSchemaMigrator>
     {
         public List<Exception> Errors { get; } = [];
+        public List<(int Id, string Message)> Entries { get; } = [];
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => true;
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state,
             Exception? exception, Func<TState, Exception?, string> formatter)
         {
+            Entries.Add((eventId.Id, formatter(state, exception)));
             if (exception is not null)
             {
                 Errors.Add(exception);

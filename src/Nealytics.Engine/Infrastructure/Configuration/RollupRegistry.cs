@@ -377,6 +377,9 @@ public sealed class RollupRegistry
     public bool IsRoutable(Rollup rollup) =>
         rollup is not null && !_unroutable.ContainsKey(rollup.Name);
 
+    internal string? UnroutableReason(Rollup rollup) =>
+        _unroutable.TryGetValue(rollup.Name, out string? reason) ? reason : null;
+
     private static string[] Split(string? value) =>
         (value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 

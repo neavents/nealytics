@@ -26,6 +26,7 @@ public sealed class RollupReadinessTests
         canceled.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => migrator.StartAsync(canceled.Token));
         Assert.Empty(registry.Routable);
+        Assert.Equal("completion has not been verified", registry.UnroutableReason(registry.Declared[0]));
     }
 
     [Theory]
@@ -62,6 +63,7 @@ public sealed class RollupReadinessTests
         Assert.Equal(2, registry.Declared.Count);
         Assert.Empty(registry.Routable);
         Assert.All(registry.Declared, rollup => Assert.False(registry.IsRoutable(rollup)));
+        Assert.All(registry.Declared, rollup => Assert.Equal("completion has not been verified", registry.UnroutableReason(rollup)));
         Assert.False(registry.IsRoutable(null!));
     }
 
@@ -74,10 +76,12 @@ public sealed class RollupReadinessTests
         registry.MarkRoutable(first);
         Assert.Same(first, Assert.Single(registry.Routable));
         Assert.True(registry.IsRoutable(first));
+        Assert.Null(registry.UnroutableReason(first));
         Assert.False(registry.IsRoutable(second));
         registry.MarkUnroutable(first, "incomplete backfill");
         Assert.Empty(registry.Routable);
         Assert.False(registry.IsRoutable(first));
+        Assert.Equal("incomplete backfill", registry.UnroutableReason(first));
         registry.MarkRoutable(second);
         Assert.Same(second, Assert.Single(registry.Routable));
     }

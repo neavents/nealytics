@@ -25,7 +25,7 @@ internal sealed class ClickHouseRollupReadiness
             + "stored_definition FixedString(64), backfilled UInt8, completed_at DateTime64(3, 'UTC')) "
             + "ENGINE = ReplacingMergeTree ORDER BY "
             + "(source_id, table_id, view_id, declared_definition, stored_definition, backfilled)");
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task<RollupStorageIdentity> CaptureAsync(Rollup rollup, CancellationToken cancellationToken)
@@ -40,10 +40,10 @@ internal sealed class ClickHouseRollupReadiness
         Guid sourceId = Guid.Empty;
         Guid tableId = Guid.Empty;
         Guid viewId = Guid.Empty;
-        string tableDefinition = string.Empty;
-        string viewDefinition = string.Empty;
-        await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        string? tableDefinition = null;
+        string? viewDefinition = null;
+        await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
         {
             string name = reader.GetString(0);
             Guid identity = reader.GetGuid(1);
@@ -62,6 +62,10 @@ internal sealed class ClickHouseRollupReadiness
                 viewDefinition = reader.GetString(2);
             }
         }
+        if (tableDefinition is null || viewDefinition is null)
+        {
+            throw new InvalidOperationException("Rollup '" + rollup.Name + "' is missing its table or view.");
+        }
         return new RollupStorageIdentity(sourceId, tableId, viewId,
             Fingerprint(RollupRegistry.BuildTableDdl(rollup), RollupRegistry.BuildViewDdl(rollup)),
             Fingerprint(tableDefinition, viewDefinition));
@@ -75,7 +79,7 @@ internal sealed class ClickHouseRollupReadiness
             + "AND (backfilled = 1 OR {require_backfill:UInt8} = 0)");
         AddIdentity(command, identity);
         command.Parameters.Add(new ClickHouseParameter { ParameterName = "require_backfill", Value = requireBackfill ? (byte)1 : (byte)0 });
-        object? count = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        object? count = await command.ExecuteScalarAsync(cancellationToken);
         return Convert.ToInt64(count, CultureInfo.InvariantCulture) > 0;
     }
 
@@ -88,7 +92,7 @@ internal sealed class ClickHouseRollupReadiness
             + "{stored_definition:FixedString(64)}, {backfilled:UInt8}, now64(3))");
         AddIdentity(command, identity);
         command.Parameters.Add(new ClickHouseParameter { ParameterName = "backfilled", Value = backfilled ? (byte)1 : (byte)0 });
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     internal static string Fingerprint(string table, string view) =>
