@@ -16,6 +16,7 @@ using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Diagnostics;
 using Nealytics.Engine.Infrastructure.Security;
 using Nealytics.Engine.Infrastructure.Serialization;
+using Nealytics.Engine.Infrastructure.Storage;
 
 public static partial class BeaconTelemetryEndpoint
 {
@@ -28,6 +29,7 @@ public static partial class BeaconTelemetryEndpoint
     public static void MapBeaconIngestion(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapPost("/api/v1/telemetry/beacon", HandleAsync)
+            .WithMetadata(new ClickHouseWorkloadMetadata(ClickHouseWorkload.Write))
             .RequireRateLimiting("ingestion")
             .RequireCors("beacon");
     }

@@ -1,199 +1,92 @@
 namespace Nealytics.Engine.Infrastructure.Storage;
 
 using System;
-using System.Collections.Concurrent;
-using System.Data;
-using System.Diagnostics;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Octonica.ClickHouseClient;
 
+public enum ClickHouseWorkload
+{
+    Read,
+    Write,
+    Probe,
+    Maintenance
+}
+
+public sealed record ClickHouseWorkloadMetadata(ClickHouseWorkload Workload);
+
 public sealed class ClickHouseConnectionFactory : IAsyncDisposable
 {
-    private readonly TelemetryEngineOptions _options;
-    private readonly string _connectionString;
-    private readonly SemaphoreSlim? _acquireGate;
-    private readonly ConcurrentQueue<IdleConnection> _idleConnections;
-    private readonly TimeSpan _maxIdle;
-    private int _totalCreated;
-    private volatile bool _disposed;
-
-    private readonly record struct IdleConnection(ClickHouseConnection Connection, long IdleSinceTicks);
+    private readonly ClickHouseConnectionPool[] _pools;
 
     public ClickHouseConnectionFactory(IOptions<TelemetryEngineOptions> options)
     {
-        _options = options.Value;
-        _connectionString = BuildConnectionString(_options);
-        _acquireGate = _options.ConnectionPoolSize > 0
-            ? new SemaphoreSlim(_options.ConnectionPoolSize, _options.ConnectionPoolSize)
-            : null;
-        _idleConnections = new ConcurrentQueue<IdleConnection>();
-        _maxIdle = _options.ConnectionMaxIdleSeconds > 0
-            ? TimeSpan.FromSeconds(_options.ConnectionMaxIdleSeconds)
-            : Timeout.InfiniteTimeSpan;
+        TelemetryEngineOptions configuration = options.Value;
+        ArgumentOutOfRangeException.ThrowIfNegative(configuration.ConnectionPoolSize);
+        ArgumentOutOfRangeException.ThrowIfLessThan(configuration.UnpooledConnectionLimit, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(configuration.WriteConnectionPoolSize, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(configuration.ProbeConnectionPoolSize, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(configuration.MaintenanceConnectionPoolSize, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(configuration.ConnectionAcquireTimeoutSeconds, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(configuration.ProbeTimeoutSeconds, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(configuration.ConnectionAcquireTimeoutSeconds, 4_294_967);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(configuration.ProbeTimeoutSeconds, 4_294_967);
+        ClickHouseConnectionStringBuilder builder = new ClickHouseConnectionStringBuilder(configuration.ClickHouseConnectionString)
+        {
+            Compress = configuration.EnableWireCompression
+        };
+        string connectionString = builder.ToString();
+        TimeSpan timeout = TimeSpan.FromSeconds(configuration.ConnectionAcquireTimeoutSeconds);
+        TimeSpan maxIdle = configuration.ConnectionMaxIdleSeconds > 0
+            ? TimeSpan.FromSeconds(configuration.ConnectionMaxIdleSeconds) : Timeout.InfiniteTimeSpan;
+        int reads = configuration.ConnectionPoolSize == 0
+            ? configuration.UnpooledConnectionLimit : configuration.ConnectionPoolSize;
+        _pools =
+        [
+            new ClickHouseConnectionPool(connectionString, reads, configuration.ConnectionPoolSize, timeout, maxIdle),
+            new ClickHouseConnectionPool(connectionString, configuration.WriteConnectionPoolSize,
+                configuration.WriteConnectionPoolSize, timeout, maxIdle),
+            new ClickHouseConnectionPool(connectionString, configuration.ProbeConnectionPoolSize,
+                configuration.ProbeConnectionPoolSize, timeout, maxIdle),
+            new ClickHouseConnectionPool(connectionString, configuration.MaintenanceConnectionPoolSize,
+                configuration.MaintenanceConnectionPoolSize, timeout, maxIdle)
+        ];
+        ProbeTimeout = TimeSpan.FromSeconds(configuration.ProbeTimeoutSeconds);
+        MaximumConcurrentConnections = (long)reads + configuration.WriteConnectionPoolSize
+            + configuration.ProbeConnectionPoolSize + configuration.MaintenanceConnectionPoolSize;
     }
 
-    internal bool IsStale(long idleSinceTicks, long nowTicks) =>
-        _maxIdle != Timeout.InfiniteTimeSpan
-        && Stopwatch.GetElapsedTime(idleSinceTicks, nowTicks) >= _maxIdle;
+    public long MaximumConcurrentConnections { get; }
+    internal TimeSpan ProbeTimeout { get; }
 
-    private static string BuildConnectionString(TelemetryEngineOptions options)
-    {
-        ClickHouseConnectionStringBuilder builder =
-            new ClickHouseConnectionStringBuilder(options.ClickHouseConnectionString)
-            {
-                Compress = options.EnableWireCompression
-            };
-        return builder.ToString();
-    }
+    internal bool IsStale(long idleSinceTicks, long nowTicks) => _pools[0].IsStale(idleSinceTicks, nowTicks);
 
-    public async Task<PooledClickHouseConnection> AcquireAsync(CancellationToken cancellationToken)
-    {
-        if (_acquireGate is not null)
-        {
-            await _acquireGate.WaitAsync(cancellationToken);
-        }
+    public Task<PooledClickHouseConnection> AcquireAsync(CancellationToken cancellationToken) =>
+        AcquireAsync(ClickHouseWorkload.Read, cancellationToken);
 
-        try
-        {
-            long now = Stopwatch.GetTimestamp();
+    public Task<PooledClickHouseConnection> AcquireAsync(ClickHouseWorkload workload, CancellationToken cancellationToken) =>
+        Pool(workload).AcquireAsync(cancellationToken);
 
-            while (_idleConnections.TryDequeue(out IdleConnection pooled))
-            {
-                if (pooled.Connection.State == ConnectionState.Open
-                    && !IsStale(pooled.IdleSinceTicks, now))
-                {
-                    return new PooledClickHouseConnection(pooled.Connection, this);
-                }
+    public int EvictIdle() => EvictIdle(ClickHouseWorkload.Read);
 
-                Interlocked.Decrement(ref _totalCreated);
-                pooled.Connection.Dispose();
-            }
-
-            ClickHouseConnection connection = new ClickHouseConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
-            Interlocked.Increment(ref _totalCreated);
-            return new PooledClickHouseConnection(connection, this);
-        }
-        catch
-        {
-            ReleaseGate();
-            throw;
-        }
-    }
-
-    public int EvictIdle()
-    {
-        int evicted = 0;
-
-        while (_idleConnections.TryDequeue(out IdleConnection idle))
-        {
-            Interlocked.Decrement(ref _totalCreated);
-            idle.Connection.Dispose();
-            evicted++;
-        }
-
-        return evicted;
-    }
-
-    internal void Evict(ClickHouseConnection connection)
-    {
-        try
-        {
-            Interlocked.Decrement(ref _totalCreated);
-            connection.Dispose();
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-        finally
-        {
-            ReleaseGate();
-        }
-    }
-
-    internal void Return(ClickHouseConnection connection)
-    {
-        try
-        {
-            if (_disposed || connection.State != ConnectionState.Open
-                || Volatile.Read(ref _totalCreated) > _options.ConnectionPoolSize)
-            {
-                Interlocked.Decrement(ref _totalCreated);
-                connection.Dispose();
-                return;
-            }
-
-            _idleConnections.Enqueue(new IdleConnection(connection, Stopwatch.GetTimestamp()));
-        }
-        finally
-        {
-            ReleaseGate();
-        }
-    }
-
-    private void ReleaseGate()
-    {
-        if (_acquireGate is null)
-        {
-            return;
-        }
-
-        try
-        {
-            _acquireGate.Release();
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-        catch (SemaphoreFullException)
-        {
-        }
-    }
+    public int EvictIdle(ClickHouseWorkload workload) => Pool(workload).EvictIdle();
 
     public async ValueTask DisposeAsync()
     {
-        _disposed = true;
-        while (_idleConnections.TryDequeue(out IdleConnection idle))
+        Task[] shutdowns = new Task[_pools.Length];
+        for (int index = 0; index < _pools.Length; index++)
         {
-            await idle.Connection.DisposeAsync();
+            shutdowns[index] = _pools[index].DisposeAsync().AsTask();
         }
-
-        _acquireGate?.Dispose();
-    }
-}
-
-public readonly struct PooledClickHouseConnection : IAsyncDisposable
-{
-    private readonly ClickHouseConnection _connection;
-    private readonly ClickHouseConnectionFactory _factory;
-    private readonly StrongBox<bool> _discarded;
-
-    internal PooledClickHouseConnection(ClickHouseConnection connection, ClickHouseConnectionFactory factory)
-    {
-        _connection = connection;
-        _factory = factory;
-        _discarded = new StrongBox<bool>(false);
+        await Task.WhenAll(shutdowns);
     }
 
-    public ClickHouseConnection Connection => _connection;
-
-    public void Discard() => _discarded.Value = true;
-
-    public ValueTask DisposeAsync()
+    private ClickHouseConnectionPool Pool(ClickHouseWorkload workload)
     {
-        if (_discarded.Value)
-        {
-            _factory.Evict(_connection);
-        }
-        else
-        {
-            _factory.Return(_connection);
-        }
-
-        return ValueTask.CompletedTask;
+        ArgumentOutOfRangeException.ThrowIfNegative((int)workload);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((int)workload, _pools.Length);
+        return _pools[(int)workload];
     }
 }

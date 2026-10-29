@@ -146,6 +146,12 @@ public sealed class TelemetryEngineOptions
     public int RetryBackoffCeilingMs { get; set; } = 30_000;
     public int DefaultSessionQueryRangeHours { get; set; } = 24;
     public int ConnectionPoolSize { get; set; } = 16;
+    public int UnpooledConnectionLimit { get; set; } = 16;
+    public int WriteConnectionPoolSize { get; set; } = 1;
+    public int ProbeConnectionPoolSize { get; set; } = 1;
+    public int MaintenanceConnectionPoolSize { get; set; } = 1;
+    public int ConnectionAcquireTimeoutSeconds { get; set; } = 10;
+    public int ProbeTimeoutSeconds { get; set; } = 2;
 
     public int ConnectionMaxIdleSeconds { get; set; } = 300;
     public int WalReplayRetryDelayMs { get; set; } = 10_000;

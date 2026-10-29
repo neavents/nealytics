@@ -305,15 +305,17 @@ if (engineOpts.EnablePrometheusScrape)
 
 app.MapGet("/health", () => Results.Ok());
 
-app.MapGet("/ready", async (ClickHouseConnectionFactory connectionFactory) =>
+app.MapGet("/ready", async (HttpContext context, ClickHouseConnectionFactory connectionFactory) =>
 {
+    using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+    timeout.CancelAfter(connectionFactory.ProbeTimeout);
     try
     {
         await using PooledClickHouseConnection lease =
-            await connectionFactory.AcquireAsync(CancellationToken.None);
+            await connectionFactory.AcquireAsync(ClickHouseWorkload.Probe, timeout.Token);
         await using ClickHouseCommand cmd = lease.Connection.CreateCommand();
         cmd.CommandText = "SELECT 1";
-        await cmd.ExecuteScalarAsync(CancellationToken.None);
+        await cmd.ExecuteScalarAsync(timeout.Token);
         return Results.Ok();
     }
     catch (Exception)

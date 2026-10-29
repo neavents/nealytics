@@ -14,12 +14,14 @@ using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Diagnostics;
 using Nealytics.Engine.Infrastructure.Security;
 using Nealytics.Engine.Infrastructure.Serialization;
+using Nealytics.Engine.Infrastructure.Storage;
 
 public static class IngestTelemetryEndpoint
 {
     public static void MapTelemetryIngestion(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapPost("/api/v1/telemetry/track", HandleAsync)
+            .WithMetadata(new ClickHouseWorkloadMetadata(ClickHouseWorkload.Write))
             .RequireRateLimiting("ingestion");
     }
 

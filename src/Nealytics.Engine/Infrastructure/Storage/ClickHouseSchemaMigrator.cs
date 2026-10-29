@@ -221,7 +221,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
     private async Task ReconcileAsync(CancellationToken cancellationToken)
     {
         await using PooledClickHouseConnection pooled =
-            await _connectionFactory.AcquireAsync(cancellationToken).ConfigureAwait(false);
+            await _connectionFactory.AcquireAsync(ClickHouseWorkload.Maintenance, cancellationToken).ConfigureAwait(false);
 
         foreach (string statement in CoreStatementsFor(_onCluster))
         {

@@ -88,7 +88,7 @@ public sealed partial class ClickHouseBatchWriter : ITelemetryBatchWriter
         Dictionary<string, object?> columns = buffers.BuildColumns();
 
         await using PooledClickHouseConnection lease =
-            await _connectionFactory.AcquireAsync(cancellationToken);
+            await _connectionFactory.AcquireAsync(ClickHouseWorkload.Write, cancellationToken);
 
         try
         {
