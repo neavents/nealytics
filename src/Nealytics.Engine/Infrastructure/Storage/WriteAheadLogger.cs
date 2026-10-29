@@ -63,7 +63,7 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         _synchronization = synchronization ?? new WalSynchronization();
         _admission = new WalAdmission(_limits.PendingRecords, _limits.PendingBytes);
-        _recordBuffer = new WalRecordBuffer(_limits.RecordBytes, serializationPool);
+        _recordBuffer = new WalRecordBuffer(_limits.RecordBytes, serializationPool, reserveForEncoding: true);
         _recordPool = recordPool ?? ArrayPool<byte>.Shared;
         _logFilePath = Path.Combine(directory, "telemetry_wal.log");
         _sealedFilePath = Path.Combine(directory, "telemetry_wal.replay");
