@@ -204,7 +204,12 @@ public sealed class MeasurementTests
             "RateLimitPermitCount", "RateLimitWindowSeconds", "RateLimitQueueSize",
             "ConnectionPoolSize", "WalFileBufferBytes", "EnableAsyncInsert", "EnableWireCompression",
             "WalBackend", "IngestionPipeline", "WalMaxPendingRecords", "WalMaxPendingBytes",
-            "WalMaxRecordBytes", "WalMaxFlushRecords", "WalMaxFlushBytes"
+            "WalMaxRecordBytes", "WalMaxFlushRecords", "WalMaxFlushBytes",
+            "WalIoBackend", "IngestionExecutionPath", "BeaconWalBatchRecords", "WalRingEntries",
+            "MaxConcurrentIngestionRequests", "IngestionRequestByteBudget", "MaxRequestBodyBytes",
+            "MemoryChannelByteCapacity", "DatabaseBatchByteCapacity", "WalMaxBacklogBytes",
+            "WriteConnectionPoolSize", "ProbeConnectionPoolSize", "MaintenanceConnectionPoolSize",
+            "DeliveryJournalMaxRecords", "DeliveryJournalMaxBytes", "DeliveryRetryMaxAgeSeconds"
         ];
 
         Dictionary<string, string> settings = BenchmarkManifest.CaptureSettings(key => key);

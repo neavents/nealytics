@@ -120,22 +120,23 @@ public sealed class ReplayDeliveryIntegrationTests
     [Fact]
     public async Task TokenEvictionIsExplicitlyOutsideTheDeduplicationGuarantee()
     {
-        string table = "delivery_window_" + Guid.NewGuid().ToString("N");
+        string database = "delivery_window_" + Guid.NewGuid().ToString("N");
         try
         {
-            await ClickHouseTestSupport.ExecuteAsync($"CREATE TABLE nealytics_core.{table} (id UInt64) ENGINE=MergeTree ORDER BY id SETTINGS non_replicated_deduplication_window=1");
+            await ClickHouseTestSupport.ExecuteAsync($"CREATE DATABASE {database}");
+            await ClickHouseTestSupport.ExecuteAsync($"CREATE TABLE {database}.events (id UInt64) ENGINE=MergeTree ORDER BY id SETTINGS non_replicated_deduplication_window=1");
             foreach (string token in new[] { "original", "replacement", "original" })
             {
-                await ClickHouseTestSupport.ExecuteAsync($"INSERT INTO nealytics_core.{table} SETTINGS insert_deduplication_token='{token}' VALUES (1)");
+                await ClickHouseTestSupport.ExecuteAsync($"INSERT INTO {database}.events SETTINGS insert_deduplication_token='{token}' VALUES (1)");
             }
             await using var connection = new ClickHouseConnection(ClickHouseTestSupport.ConnectionString);
             await connection.OpenAsync();
-            await using var command = connection.CreateCommand($"SELECT count() FROM nealytics_core.{table}");
+            await using var command = connection.CreateCommand($"SELECT count() FROM {database}.events");
             Assert.Equal((ulong)3, await command.ExecuteScalarAsync());
         }
         finally
         {
-            await ClickHouseTestSupport.ExecuteAsync($"DROP TABLE IF EXISTS nealytics_core.{table} SYNC");
+            await ClickHouseTestSupport.ExecuteAsync($"DROP DATABASE IF EXISTS {database} SYNC");
         }
     }
 

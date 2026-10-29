@@ -42,6 +42,10 @@ public sealed partial class TelemetryBatchProcessor
             }
             cancellationToken.ThrowIfCancellationRequested();
             await _wal.DeleteSealedSegmentAsync();
+            if (_writer is IDeliveryCheckpoint checkpoint)
+            {
+                await checkpoint.CheckpointAsync();
+            }
             LogWalRecovery(_logger, recovered);
         }
         finally
