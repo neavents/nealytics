@@ -234,6 +234,13 @@ public sealed class WalFileSelectionTests : IDisposable
         Assert.Equal(1, context.FlushCalls);
         Assert.Equal(0, wal.UncommittedRecordCount);
         Assert.False(File.Exists(PathName));
+        System.Reflection.FieldInfo pending = typeof(WriteAheadLogger).GetField(
+            "_pending", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        object channel = pending.GetValue(wal)!;
+        object reader = channel.GetType().GetProperty("Reader")!.GetValue(channel)!;
+        Task completion = (Task)reader.GetType().GetProperty("Completion")!.GetValue(reader)!;
+        Assert.Same(failure, await Assert.ThrowsAsync<IOException>(
+            () => completion.WaitAsync(TimeSpan.FromSeconds(10))));
     }
 
     [Fact]
