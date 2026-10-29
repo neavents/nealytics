@@ -94,7 +94,7 @@ public sealed class NativeWalContextTests : IDisposable
     public void ConstructorFailuresReleaseEveryAcquiredResource(string operation, bool createdHandle)
     {
         TestApi api = new() { FailureOperation = operation };
-        IOException error = Assert.Throws<IOException>(() => new LiburingWalContext(PathName, 4096, 8, api));
+        IOException error = Assert.ThrowsAny<IOException>(() => new LiburingWalContext(PathName, 4096, 8, api));
         Assert.Equal(createdHandle ? 1 : 0, api.DestroyCalls);
         if (operation != "create-status")
         {
@@ -114,7 +114,7 @@ public sealed class NativeWalContextTests : IDisposable
     public void AReportedSuccessCannotReturnAnInvalidNativeHandle(int handle)
     {
         TestApi api = new() { CreatedHandle = handle };
-        IOException error = Assert.Throws<IOException>(() => new LiburingWalContext(PathName, 4096, 8, api));
+        IOException error = Assert.ThrowsAny<IOException>(() => new LiburingWalContext(PathName, 4096, 8, api));
         Assert.Contains("invalid handle", error.Message);
         Assert.Equal(0, api.DestroyCalls);
         using FileStream exclusive = new(PathName, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
@@ -128,7 +128,7 @@ public sealed class NativeWalContextTests : IDisposable
     {
         TestApi api = new() { FailureOperation = operation };
         using LiburingWalContext context = new(PathName, 4096, 8, api);
-        IOException error = Assert.Throws<IOException>(() =>
+        NativeWalException error = Assert.Throws<NativeWalException>(() =>
         {
             switch (operation)
             {
@@ -146,7 +146,7 @@ public sealed class NativeWalContextTests : IDisposable
     {
         TestApi api = new() { DestroyStatus = -16 };
         LiburingWalContext context = new(PathName, 4096, 8, api);
-        IOException error = Assert.Throws<IOException>(() => context.Dispose());
+        NativeWalException error = Assert.Throws<NativeWalException>(() => context.Dispose());
         Assert.Contains("process restart required", error.Message);
         Assert.Equal(16, Assert.IsType<Win32Exception>(error.InnerException).NativeErrorCode);
         Assert.Equal(1, api.DestroyCalls);

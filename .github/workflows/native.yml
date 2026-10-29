@@ -1,0 +1,38 @@
+name: Native WAL
+
+on:
+  push:
+    branches: ['feat/correctness-and-safety*', 'feat/ingestion-performance*']
+  pull_request:
+    branches: [main, 'feat/correctness-and-safety*', 'feat/ingestion-performance*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    name: Linux ${{ matrix.architecture }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x64
+            runner: ubuntu-24.04
+            rid: linux-x64
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+            rid: linux-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Qualify actual host architecture and native artifact
+        run: bash native/qualify.sh '${{ matrix.rid }}'
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-${{ matrix.rid }}
+          path: artifacts/platform/${{ matrix.rid }}

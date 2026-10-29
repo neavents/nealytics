@@ -147,6 +147,8 @@ public sealed class TelemetryEngineOptions
     public int ConnectionMaxIdleSeconds { get; set; } = 300;
     public int WalReplayRetryDelayMs { get; set; } = 10_000;
     public int WalFileBufferBytes { get; set; } = 65_536;
+    public string WalIoBackend { get; set; } = "managed";
+    public int WalRingEntries { get; set; } = 8;
     public int WalMaxPendingRecords { get; set; } = 4_096;
     public int WalMaxPendingBytes { get; set; } = 33_554_432;
     public int WalMaxRecordBytes { get; set; } = 16_777_216;

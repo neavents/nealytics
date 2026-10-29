@@ -8,8 +8,28 @@ Its MIT license is embedded in the managed assembly.
 
 The current implementation targets Linux x64 and ARM64 with write and fsync operation support
 (Linux 5.6 or newer). Actual qualification so far uses Linux ARM64, kernel 6.12.76-linuxkit.
-Real x64 execution, single-executable extraction and live-ingestion selection remain open gates.
-The production engine still uses managed WAL I/O by default at the B2 step.
+Real x64 execution remains an open gate. ARM64 single-executable extraction and live-ingestion
+selection now have clean-container evidence. Managed remains the initial default.
+
+## Startup selection
+
+Set `TelemetryEngine__WalIoBackend` to `managed`, `io_uring` or `auto` and optionally set
+`TelemetryEngine__WalRingEntries` within 8–4096 (default 8). Unknown modes and invalid bounds fail
+before renaming a WAL. Existing HTTP clients, credentials and event bodies remain unchanged.
+Explicit native mode fails on an unsupported host or unavailable bridge. Auto falls back only
+for a missing library, an unsupported process platform, ring-create EPERM/EACCES/ENOSYS/EOPNOTSUPP,
+or an unsupported startup preflight operation. Ordinary disk, allocation and ABI failures remain
+errors. A structured startup event reports the selected backend, fixed-file status and fallback
+reason. Backend selection never runs again after an admitted write or I/O failure.
+
+The previous active WAL is sealed before opening the selected file. Native startup performs an
+empty write/full-fsync preflight and transfers the context to its completion owner only after
+that barrier succeeds. A failed preflight closes its context. An empty serializer scratch buffer
+has no rented storage during constructor failure; shutdown owns scratch disposal after use.
+
+The packaged bridge targets glibc-based Linux. The ARM64 artifact's inspected symbol references
+require GLIBC 2.17 and 2.25; the complete executable was tested on the pinned runtime-dependencies
+image, rather than certified against every older distribution. Musl/Alpine is not a native target.
 
 ## Build
 
@@ -35,8 +55,40 @@ dotnet publish src/Nealytics.Engine --configuration Release --runtime linux-arm6
 ```
 
 `IncludeNativeLibrariesForSelfExtract` packages native libraries inside the executable. The .NET
-bundle extraction cache must be writable by the engine user. Its clean-host behavior must be
-verified with the published artifact before enabling native ingestion.
+bundle extraction cache must be writable by the engine user and permit executable library
+mappings. A `noexec` cache mount prevents loading the extracted bridge. Production code never
+changes mount policy; operators select a suitable cache path. Clean-host artifact tests pass only
+the executable into a non-root, read-only runtime-dependencies container with bounded temporary
+WAL/cache mounts, no SDK, no installed .NET runtime and no separate liburing installation.
+
+`python3 native/test_artifact.py <published-executable> --backend io_uring --permit-native` checks
+native extraction, existing track/beacon requests, ClickHouse visibility and graceful shutdown.
+Use `--backend auto` without the permission flag to check the default Docker denial and managed
+startup fallback. Each run owns its network, ClickHouse instance, engine and temporary data;
+cleanup does not truncate an existing developer database. The permission flag affects only that
+test's engine container. Actual x64 qualification remains separate from local ARM64 checks.
+The reusable denied test now explicitly denies the three io_uring syscalls in its own container,
+so a future Docker default-profile change cannot silently turn that negative check positive.
+Artifact WAL/cache mounts are temporary test storage; these checks establish packaging, API,
+visibility and shutdown behavior, and do not claim physical power-loss qualification.
+
+The ordinary Dockerfile builds and embeds the bridge for the target architecture. Its native
+compiler and pinned liburing remain in build stages; the runtime contains one application
+executable and optional configuration. Its non-root user owns the default WAL and extraction
+directories. `--engine-image <image>` exercises that image through the same artifact verifier.
+
+## Qualification automation
+
+`bash native/qualify.sh linux-x64` or `linux-arm64` requires a matching actual Linux host. It runs
+native faults/sanitizers, full portable tests, real native startup/file tests, native HTTP
+contracts, explicit kernel denial, the maintained-code coverage gate, standalone/container
+artifact checks and complete-level mutation testing. Stryker stops on any initial test failure.
+Reports are retained under `artifacts/platform/<rid>/`.
+
+The feature-branch workflow uses GitHub's `ubuntu-24.04` and `ubuntu-24.04-arm` runners, as listed
+in the [runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+It verifies the host architecture and does not substitute emulation for hardware evidence.
+Adding the workflow does not mean either remote job has passed.
 
 ## Native checks
 

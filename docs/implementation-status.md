@@ -16,7 +16,7 @@ checks, platform requirements, and applicable coverage/mutation gates have passe
 | Reserved read/write/probe capacity and bounded admission | Pending | Current connection factory is shared |
 | B1 shared WAL I/O contract with managed baseline | Implemented; aggregate qualification open | Managed file class: 100% line/branch coverage, six executable mutants killed; 42 focused WAL/HTTP cases passed |
 | B2 native io_uring backend and packaging | Implemented; platform/artifact qualification open | Real ARM64 bridge/backend, native fault/sanitizer checks and 100% scoped coverage/mutation passed; actual x64 and standalone artifact checks remain |
-| B3 native integration and operator fallback | Pending | Native/managed parity, unsupported-host and crash tests required |
+| B3 native integration and operator fallback | Implemented; qualification open | ARM64 selection, denied kernel, real native HTTP and standalone/container checks passed; mutation, x64 and crash qualification remain |
 | B4 bounded beacon microbatches | Pending | Preserve accepted-prefix, rejection and cancellation semantics |
 | B5 custom ingestion dispatcher | Pending | Existing HTTP requests and policy behavior must remain compatible |
 | B6 combined qualification/default selection | Pending | Matched-load four-combination latency/CPU/memory/visibility evidence required |
@@ -118,3 +118,13 @@ The native managed mutation rerun detects all 101 executable mutants: 87 asserti
 fourteen progress/lifecycle timeout detections, with no survivors or uncovered mutants. The
 earlier 84.16% run drove stronger checks; no threshold was reduced. See the
 [B2 review](packages/b2-native-backend.md) for timeout interpretation and open platform gates.
+
+B3 current evidence: 1,578 full unit cases and eighteen native file/startup cases passed on actual
+Linux ARM64 with zero skips. Nine existing real-Kestrel contract cases passed with io_uring.
+Explicit native failure and auto-to-managed fallback passed under Docker's default denial.
+Standalone and ordinary-container artifacts ingested track/beacon events, verified ClickHouse
+visibility and shut down cleanly, with no SDK, installed .NET runtime or separate liburing.
+The maintained startup/native coverage gate passed all 434 executable lines and 88 branch
+outcomes. The separate unchanged C bridge gate passed 145 statements and 112 branch outcomes.
+The broader mutation checks and final integration rerun are still in progress; remote native
+jobs and crash/performance qualification remain open. This does not mark category A or B complete.

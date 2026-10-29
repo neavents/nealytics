@@ -42,6 +42,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Update="stryker-config*.json" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <ItemGroup>
     <EmbeddedResource Include="Infrastructure/Storage/Wal/Native/liburing.LICENSE" />
   </ItemGroup>
 

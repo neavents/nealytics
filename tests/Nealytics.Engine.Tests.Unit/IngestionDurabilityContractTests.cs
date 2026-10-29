@@ -177,6 +177,7 @@ public sealed class IngestionDurabilityContractTests
     private sealed class ContractFactory : NoDatabaseWebFactory
     {
         private readonly string _directory = Path.Combine(Path.GetTempPath(), "nealytics-contract-" + Guid.NewGuid().ToString("N"));
+        private readonly string _backend = Environment.GetEnvironmentVariable("NEALYTICS_TEST_WAL_BACKEND") ?? "managed";
 
         public ContractFactory()
         {
@@ -184,6 +185,13 @@ public sealed class IngestionDurabilityContractTests
         }
 
         public string WalPath => Path.Combine(_directory, "telemetry_wal.log");
+
+        public new HttpClient CreateClient()
+        {
+            HttpClient client = base.CreateClient();
+            Assert.Equal(_backend, Services.GetRequiredService<WriteAheadLogger>().Selection.Backend);
+            return client;
+        }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -198,7 +206,11 @@ public sealed class IngestionDurabilityContractTests
                 {
                     services.Remove(processor);
                 }
-                services.PostConfigure<TelemetryEngineOptions>(options => options.WriteAheadLogDirectory = _directory);
+                services.PostConfigure<TelemetryEngineOptions>(options =>
+                {
+                    options.WriteAheadLogDirectory = _directory;
+                    options.WalIoBackend = _backend;
+                });
             });
         }
 

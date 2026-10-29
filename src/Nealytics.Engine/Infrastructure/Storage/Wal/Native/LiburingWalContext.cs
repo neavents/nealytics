@@ -1,7 +1,6 @@
 namespace Nealytics.Engine.Infrastructure.Storage.Wal.Native;
 
 using System;
-using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
@@ -78,8 +77,7 @@ internal sealed class LiburingWalContext : INativeWalContext
     {
         if (status < 0)
         {
-            throw new IOException("Native WAL " + operation + " failed with errno " + -status + ".",
-                new Win32Exception(-status));
+            throw new NativeWalException(-status, operation);
         }
     }
 

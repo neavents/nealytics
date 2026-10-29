@@ -132,7 +132,7 @@ public sealed class NativeFileIntegrationTests : IDisposable
         string path = Path.Combine(_directory, "capacity.log");
         using LiburingWalContext context = new(path, 8, 8);
         context.Append("first"u8.ToArray());
-        IOException error = Assert.Throws<IOException>(() => context.Append(new byte[4]));
+        IOException error = Assert.Throws<NativeWalException>(() => context.Append(new byte[4]));
         Assert.Contains("errno 7", error.Message);
         context.Flush();
         Assert.Equal("first", File.ReadAllText(path));
@@ -144,7 +144,7 @@ public sealed class NativeFileIntegrationTests : IDisposable
         string path = Path.Combine(_directory, "dirty.log");
         using LiburingWalContext context = new(path, 4096, 8);
         context.Append("pending\n"u8.ToArray());
-        IOException error = Assert.Throws<IOException>(() => context.Truncate());
+        IOException error = Assert.Throws<NativeWalException>(() => context.Truncate());
         Assert.Contains("errno 16", error.Message);
         context.Flush();
         Assert.Equal("pending\n", File.ReadAllText(path));
@@ -169,9 +169,9 @@ public sealed class NativeFileIntegrationTests : IDisposable
     {
         using LiburingWalContext context = new("/dev/full", 4096, 8);
         context.Append("record\n"u8.ToArray());
-        IOException first = Assert.Throws<IOException>(() => context.Flush());
+        IOException first = Assert.Throws<NativeWalException>(() => context.Flush());
         Assert.Contains("errno 28", first.Message);
-        IOException next = Assert.Throws<IOException>(() => context.Flush());
+        IOException next = Assert.Throws<NativeWalException>(() => context.Flush());
         Assert.Contains("errno 28", next.Message);
     }
 

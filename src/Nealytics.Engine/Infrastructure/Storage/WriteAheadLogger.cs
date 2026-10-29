@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Storage.Wal;
 
@@ -29,8 +30,22 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
     private long _uncommittedRecords;
 
     public WriteAheadLogger(IOptions<TelemetryEngineOptions> options)
-        : this(options, null)
+        : this(options, file: null)
     {
+    }
+
+    public WriteAheadLogger(IOptions<TelemetryEngineOptions> options, ILogger<WriteAheadLogger> logger)
+        : this(options)
+    {
+        try
+        {
+            LogFileSelection(logger, Selection.Backend, Selection.RegisteredFile, Selection.FallbackReason);
+        }
+        catch
+        {
+            DisposeAsync().GetAwaiter().GetResult();
+            throw;
+        }
     }
 
     internal WriteAheadLogger(
@@ -38,24 +53,59 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
         IWalFile? file,
         ArrayPool<byte>? recordPool = null,
         ArrayPool<byte>? serializationPool = null,
-        WalSynchronization? synchronization = null)
+        WalSynchronization? synchronization = null,
+        WalFileFactory? fileFactory = null)
     {
         TelemetryEngineOptions engineOptions = options.Value;
         _limits = new WalLimits(engineOptions);
+        WalFileFactory factory = fileFactory ?? new WalFileFactory(engineOptions);
+        string directory = engineOptions.WriteAheadLogDirectory;
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         _synchronization = synchronization ?? new WalSynchronization();
         _admission = new WalAdmission(_limits.PendingRecords, _limits.PendingBytes);
         _recordBuffer = new WalRecordBuffer(_limits.RecordBytes, serializationPool);
         _recordPool = recordPool ?? ArrayPool<byte>.Shared;
-        string directory = engineOptions.WriteAheadLogDirectory;
-        Directory.CreateDirectory(directory);
         _logFilePath = Path.Combine(directory, "telemetry_wal.log");
         _sealedFilePath = Path.Combine(directory, "telemetry_wal.replay");
-        SealExistingLogForRecovery();
-
-        _file = file ?? new ManagedWalFile(_logFilePath, _limits.FileBufferBytes);
-        _pending = Channel.CreateBounded<PendingAppend>(_limits.CreateChannelOptions());
-        _flushLoop = Task.Run(RunFlushLoopAsync);
+        IWalFile? ownedFile = file;
+        try
+        {
+            Directory.CreateDirectory(directory);
+            SealExistingLogForRecovery();
+            Selection = file is null
+                ? factory.Create(_logFilePath, _limits)
+                : new WalFileSelection(file, "injected", string.Empty, false);
+            ownedFile = Selection.File;
+            _file = ownedFile;
+            _pending = Channel.CreateBounded<PendingAppend>(_limits.CreateChannelOptions());
+            _flushLoop = Task.Run(RunFlushLoopAsync);
+        }
+        catch (Exception startupFailure)
+        {
+            try
+            {
+                if (ownedFile is not null)
+                {
+                    ownedFile.DisposeAsync().GetAwaiter().GetResult();
+                }
+            }
+            catch (Exception cleanupFailure)
+            {
+                throw new AggregateException("WAL startup and file cleanup both failed.", startupFailure, cleanupFailure);
+            }
+            finally
+            {
+                _synchronization.Dispose();
+            }
+            throw;
+        }
     }
+
+    internal WalFileSelection Selection { get; }
+
+    [LoggerMessage(EventId = 9010, Level = LogLevel.Information,
+        Message = "WAL file backend {Backend}; registered file {RegisteredFile}; startup fallback {FallbackReason}")]
+    private static partial void LogFileSelection(ILogger logger, string backend, bool registeredFile, string fallbackReason);
 
     internal int PendingRecordCount => _admission.PendingRecords;
     internal int PendingByteCount => _admission.PendingBytes;

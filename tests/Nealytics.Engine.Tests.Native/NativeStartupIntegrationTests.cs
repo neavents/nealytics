@@ -1,0 +1,100 @@
+using Microsoft.Extensions.Options;
+using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Serialization;
+using Nealytics.Engine.Infrastructure.Storage;
+using Nealytics.Engine.Infrastructure.Storage.Wal;
+using Nealytics.Engine.Infrastructure.Storage.Wal.Native;
+
+namespace Nealytics.Engine.Tests.Native;
+
+public sealed class NativeStartupIntegrationTests : IDisposable
+{
+    private readonly string _directory = Path.Combine(Path.GetTempPath(), "nealytics-native-startup-" + Guid.NewGuid().ToString("N"));
+
+    public NativeStartupIntegrationTests() => Directory.CreateDirectory(_directory);
+
+    [Theory]
+    [InlineData("io_uring")]
+    [InlineData("auto")]
+    [InlineData("managed")]
+    public async Task SelectedBackendSealsBeforeOpeningAndCanRestartWithManagedRecovery(string backend)
+    {
+        TelemetryEngineOptions options = new() { WriteAheadLogDirectory = _directory };
+        Guid previous = Guid.NewGuid();
+        await using (WriteAheadLogger original = new(Options.Create(options)))
+        {
+            await original.AppendAsync(Event(previous), CancellationToken.None);
+        }
+        string path = Path.Combine(_directory, "telemetry_wal.log");
+        byte[] previousBytes = await File.ReadAllBytesAsync(path);
+        options.WalIoBackend = backend;
+        Guid next = Guid.NewGuid();
+        await using (WriteAheadLogger current = new(Options.Create(options)))
+        {
+            Assert.Equal(backend == "managed" ? "managed" : "io_uring", current.Selection.Backend);
+            Assert.Empty(current.Selection.FallbackReason);
+            Assert.Equal(previous, Assert.Single(await current.ReplayUncommittedAsync()).EventId);
+            await current.AppendAsync(Event(next), CancellationToken.None);
+            Assert.Equal(previousBytes, await File.ReadAllBytesAsync(Path.Combine(_directory, "telemetry_wal.replay")));
+            Assert.Contains(next.ToString(), await File.ReadAllTextAsync(path));
+            Assert.DoesNotContain(previous.ToString(), await File.ReadAllTextAsync(path));
+            await current.DeleteSealedSegmentAsync();
+        }
+        options.WalIoBackend = "managed";
+        await using WriteAheadLogger recovered = new(Options.Create(options));
+        Assert.Equal(next, Assert.Single(await recovered.ReplayUncommittedAsync()).EventId);
+    }
+
+    [Fact]
+    public void StartupPreflightReportsARealFileBarrierFailureWithoutFallback()
+    {
+        TelemetryEngineOptions options = new() { WalIoBackend = "auto" };
+        WalFileFactory factory = new(options);
+        NativeWalException error = Assert.Throws<NativeWalException>(() => factory.Create("/dev/full", new WalLimits(options)));
+        Assert.Equal("flush", error.Operation);
+        Assert.Contains(error.ErrorCode, new[] { 22, 28 });
+        Assert.False(WalFileFactory.CanFallBack(error));
+    }
+
+    [Fact]
+    public async Task StartupHonorsTheExplicitlySelectedKernelPolicy()
+    {
+        bool denied = Environment.GetEnvironmentVariable("NEALYTICS_EXPECT_NATIVE_DENIED") == "1";
+        TelemetryEngineOptions options = new() { WriteAheadLogDirectory = _directory, WalIoBackend = "io_uring" };
+        if (denied)
+        {
+            NativeWalException error = Assert.Throws<NativeWalException>(() => new WriteAheadLogger(Options.Create(options)));
+            Assert.Equal("create", error.Operation);
+            Assert.Contains(error.ErrorCode, new[] { 1, 13 });
+        }
+        else
+        {
+            await using WriteAheadLogger explicitNative = new(Options.Create(options));
+            Assert.Equal("io_uring", explicitNative.Selection.Backend);
+        }
+        options.WalIoBackend = "auto";
+        await using WriteAheadLogger automatic = new(Options.Create(options));
+        Assert.Equal(denied ? "managed" : "io_uring", automatic.Selection.Backend);
+        if (denied)
+        {
+            Assert.Contains("Native WAL create failed with errno", automatic.Selection.FallbackReason);
+        }
+        else
+        {
+            Assert.Empty(automatic.Selection.FallbackReason);
+        }
+        await automatic.AppendAsync(Event(Guid.NewGuid()), CancellationToken.None);
+        Assert.Equal(1, automatic.UncommittedRecordCount);
+    }
+
+    private static GlobalTelemetryPayload Event(Guid id) => new()
+    {
+        EventId = id,
+        ProjectId = "p",
+        TenantId = "t",
+        SessionId = "s",
+        EventType = "e"
+    };
+
+    public void Dispose() => Directory.Delete(_directory, true);
+}
