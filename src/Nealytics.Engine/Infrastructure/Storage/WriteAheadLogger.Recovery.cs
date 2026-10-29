@@ -10,28 +10,20 @@ using Nealytics.Engine.Infrastructure.Storage.Wal;
 
 public sealed partial class WriteAheadLogger
 {
-    private void SealExistingLogForRecovery()
+    public bool HasSealedSegment
     {
-        if (!File.Exists(_logFilePath) || new FileInfo(_logFilePath).Length == 0)
+        get
         {
-            return;
-        }
-
-        if (File.Exists(_sealedFilePath))
-        {
+            foreach (string path in _recoveryPaths)
             {
-                using FileStream source = new FileStream(_logFilePath, FileMode.Open, FileAccess.Read, FileShare.None);
-                using FileStream destination = new FileStream(_sealedFilePath, FileMode.Append, FileAccess.Write, FileShare.None);
-                source.CopyTo(destination);
+                if (File.Exists(path) && new FileInfo(path).Length > 0)
+                {
+                    return true;
+                }
             }
-            File.Delete(_logFilePath);
-            return;
+            return false;
         }
-
-        File.Move(_logFilePath, _sealedFilePath);
     }
-
-    public bool HasSealedSegment => File.Exists(_sealedFilePath) && new FileInfo(_sealedFilePath).Length > 0;
 
     public async Task<IReadOnlyList<GlobalTelemetryPayload>> ReplayUncommittedAsync()
     {
@@ -48,26 +40,25 @@ public sealed partial class WriteAheadLogger
     internal async IAsyncEnumerable<WalReplayRecord> ReplayRecordsAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (!File.Exists(_sealedFilePath))
-        {
-            yield break;
-        }
-        await using FileStream source = new FileStream(
-            _sealedFilePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65_536,
-            WalReplayReader.OpenOptions);
         WalReplayReader reader = new WalReplayReader(_limits.RecordBytes);
-        await foreach (WalReplayRecord record in reader.ReadAsync(source, cancellationToken))
+        foreach (string path in _recoveryPaths)
         {
-            yield return record;
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+            await using FileStream source = new FileStream(
+                path, FileMode.Open, FileAccess.Read, FileShare.Read, 65_536, WalReplayReader.OpenOptions);
+            await foreach (WalReplayRecord record in reader.ReadAsync(source, cancellationToken))
+            {
+                yield return record;
+            }
         }
     }
 
     public Task DeleteSealedSegmentAsync()
     {
-        if (File.Exists(_sealedFilePath))
-        {
-            File.Delete(_sealedFilePath);
-        }
+        _directory.DeleteRecovery(_recoveryPaths);
         return Task.CompletedTask;
     }
 

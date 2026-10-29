@@ -5,7 +5,7 @@
       "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj",
       "../../tests/Nealytics.Engine.Tests.Native/Nealytics.Engine.Tests.Native.csproj"
     ],
-    "test-case-filter": "FullyQualifiedName~NativeWal|FullyQualifiedName~NativeFileIntegrationTests|FullyQualifiedName~NativeStartupIntegrationTests|FullyQualifiedName~WalFileSelectionTests|FullyQualifiedName~WalFileBoundaryTests|FullyQualifiedName~BoundedWalTests|FullyQualifiedName~WalBudgetTests|FullyQualifiedName~WalEncodingAndSynchronizationTests|FullyQualifiedName~WalFlushStatisticsTests|FullyQualifiedName~WalOperationGateTests|FullyQualifiedName~WalRecordBufferTests|FullyQualifiedName~WriteAheadLoggerTests|FullyQualifiedName~WalBatchAppendTests|FullyQualifiedName~WalEncodingReservationTests",
+    "test-case-filter": "FullyQualifiedName~NativeWal|FullyQualifiedName~NativeFileIntegrationTests|FullyQualifiedName~NativeStartupIntegrationTests|FullyQualifiedName~WalFileSelectionTests|FullyQualifiedName~WalFileBoundaryTests|FullyQualifiedName~BoundedWalTests|FullyQualifiedName~WalBudgetTests|FullyQualifiedName~WalEncodingAndSynchronizationTests|FullyQualifiedName~WalFlushStatisticsTests|FullyQualifiedName~WalOperationGateTests|FullyQualifiedName~WalRecordBufferTests|FullyQualifiedName~WriteAheadLoggerTests|FullyQualifiedName~WalBatchAppendTests|FullyQualifiedName~WalEncodingReservationTests|FullyQualifiedName~WalDirectoryTests|FullyQualifiedName~WalSegmentRecoveryTests",
     "mutate": [
       "Infrastructure/Storage/WriteAheadLogger.cs",
       "Infrastructure/Storage/Wal/WalFileFactory.cs",

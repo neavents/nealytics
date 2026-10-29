@@ -4,7 +4,7 @@
     "test-projects": [
       "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
     ],
-    "test-case-filter": "FullyQualifiedName~WalReplayReaderTests|FullyQualifiedName~StreamingRecoveryTests|FullyQualifiedName~WriteAheadLoggerTests|FullyQualifiedName~TelemetryBatchProcessorTests",
+    "test-case-filter": "FullyQualifiedName~WalReplayReaderTests|FullyQualifiedName~StreamingRecoveryTests|FullyQualifiedName~WriteAheadLoggerTests|FullyQualifiedName~TelemetryBatchProcessorTests|FullyQualifiedName~WalDirectoryTests|FullyQualifiedName~WalSegmentRecoveryTests",
     "mutate": [
       "Infrastructure/Storage/Wal/WalReplayReader.cs",
       "Infrastructure/Storage/Wal/WalReplayRecord.cs",

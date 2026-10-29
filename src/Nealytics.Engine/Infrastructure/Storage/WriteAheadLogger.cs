@@ -14,7 +14,8 @@ using Nealytics.Engine.Infrastructure.Storage.Wal;
 public sealed partial class WriteAheadLogger : IAsyncDisposable
 {
     private readonly string _logFilePath;
-    private readonly string _sealedFilePath;
+    private readonly WalDirectory _directory;
+    private readonly string[] _recoveryPaths;
     private readonly IWalFile _file;
     private readonly WalLimits _limits;
     private readonly WalAdmission _admission;
@@ -67,18 +68,21 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
         _recordBuffer = new WalRecordBuffer(_limits.RecordBytes, serializationPool, reserveForEncoding: true);
         _batchBuffer = new WalRecordBuffer(_limits.FlushBytes, serializationPool);
         _recordPool = recordPool ?? ArrayPool<byte>.Shared;
-        _logFilePath = Path.Combine(directory, "telemetry_wal.log");
-        _sealedFilePath = Path.Combine(directory, "telemetry_wal.replay");
         IWalFile? ownedFile = file;
+        WalDirectory? ownedDirectory = null;
         try
         {
-            Directory.CreateDirectory(directory);
-            SealExistingLogForRecovery();
+            ownedDirectory = new WalDirectory(directory);
+            _directory = ownedDirectory;
+            _directory.SealActive();
+            _recoveryPaths = _directory.RecoveryPaths();
+            _logFilePath = _directory.ActivePath;
             Selection = file is null
                 ? factory.Create(_logFilePath, _limits)
                 : new WalFileSelection(file, "injected", string.Empty, false);
             ownedFile = Selection.File;
             _file = ownedFile;
+            _directory.Synchronize();
             _pending = Channel.CreateBounded<PendingAppend>(_limits.CreateChannelOptions());
             _flushLoop = Task.Run(RunFlushLoopAsync);
         }
@@ -97,7 +101,10 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
             }
             finally
             {
-                _synchronization.Dispose();
+                using (ownedDirectory)
+                {
+                    _synchronization.Dispose();
+                }
             }
             throw;
         }
@@ -211,9 +218,12 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
         }
         finally
         {
-            _recordBuffer.Dispose();
-            _batchBuffer.Dispose();
-            _synchronization.Dispose();
+            using (_directory)
+            using (_synchronization)
+            using (_batchBuffer)
+            {
+                _recordBuffer.Dispose();
+            }
         }
     }
 }
