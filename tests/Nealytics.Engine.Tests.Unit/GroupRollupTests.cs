@@ -21,11 +21,15 @@ public class GroupRollupTests
         Rollups = [.. rollups],
     };
 
-    private static RollupRegistry Registry(params RollupOptions[] rollups)
+    private static RollupRegistry VerifiedRegistry(params RollupOptions[] rollups)
     {
         TelemetryEngineOptions options = Options(rollups);
         DimensionRegistry dimensions = new(options);
         RollupRegistry registry = new(options, dimensions, new MeasureRegistry(options, dimensions), new TenantAttributeRegistry(options));
+        foreach (Rollup rollup in registry.Declared)
+        {
+            registry.MarkRoutable(rollup);
+        }
         return registry;
     }
 
@@ -61,7 +65,7 @@ public class GroupRollupTests
     [Fact]
     public void AGroupRollup_KeysOnTheAttributesInsteadOfTheTenant()
     {
-        Rollup rollup = Registry(ByOrg()).Declared.Single();
+        Rollup rollup = VerifiedRegistry(ByOrg()).Declared.Single();
 
         rollup.IsGroupRollup.Should().BeTrue();
         string table = RollupRegistry.BuildTableDdl(rollup);
@@ -73,7 +77,7 @@ public class GroupRollupTests
     [Fact]
     public void AGroupRollupView_JoinsEachEventToItsTenantsAttributesAtInsert()
     {
-        string view = RollupRegistry.BuildViewDdl(Registry(ByOrg()).Declared.Single());
+        string view = RollupRegistry.BuildViewDdl(VerifiedRegistry(ByOrg()).Declared.Single());
 
         view.Should().Contain("LEFT ANY JOIN (SELECT project_id, tenant_id, anyIf(value, attribute = 'parent') AS tenant_attr_parent");
         view.Should().Contain("FROM nealytics_core.tenant_attributes FINAL WHERE attribute IN ('parent', 'region')");
@@ -83,7 +87,7 @@ public class GroupRollupTests
     [Fact]
     public void APerTenantRollup_IsByteForByteUnchanged()
     {
-        Rollup rollup = Registry(PerTenant()).Declared.Single();
+        Rollup rollup = VerifiedRegistry(PerTenant()).Declared.Single();
 
         RollupRegistry.BuildTableDdl(rollup).Should().Be(
             "CREATE TABLE IF NOT EXISTS nealytics_core.rollup_daily (project_id LowCardinality(String), tenant_id String, "
@@ -100,7 +104,7 @@ public class GroupRollupTests
         RollupOptions rollup = ByOrg();
         rollup.TenantAttributes = "brand";
 
-        Action build = () => Registry(rollup);
+        Action build = () => VerifiedRegistry(rollup);
         build.Should().Throw<InvalidOperationException>().WithMessage("*not declared under TelemetryEngine:TenantAttributes*");
     }
 
@@ -111,14 +115,14 @@ public class GroupRollupTests
         rollup.Grain = "session";
         rollup.Measures = "";
 
-        Action build = () => Registry(rollup);
+        Action build = () => VerifiedRegistry(rollup);
         build.Should().Throw<InvalidOperationException>().WithMessage("*session rollup*");
     }
 
     [Fact]
     public void ASetQuery_PrefersTheGroupRollup()
     {
-        RollupPlan? plan = RollupPlanner.Select(Request("currency", string.Empty, Org), Registry(PerTenant(), ByOrg()));
+        RollupPlan? plan = RollupPlanner.Select(Request("currency", string.Empty, Org), VerifiedRegistry(PerTenant(), ByOrg()));
 
         plan.Should().NotBeNull();
         plan!.Value.Rollup.Name.Should().Be("daily_org");
@@ -127,13 +131,13 @@ public class GroupRollupTests
     [Fact]
     public void ASingleTenantQuery_NeverReadsAGroupRollup()
     {
-        RollupPlanner.Select(Request("currency", "t", null), Registry(ByOrg())).Should().BeNull();
+        RollupPlanner.Select(Request("currency", "t", null), VerifiedRegistry(ByOrg())).Should().BeNull();
     }
 
     [Fact]
     public void ANarrowedSetQuery_NeverReadsAGroupRollup()
     {
-        RollupPlanner.Select(Request("currency", "v7", Org), Registry(ByOrg())).Should().BeNull();
+        RollupPlanner.Select(Request("currency", "v7", Org), VerifiedRegistry(ByOrg())).Should().BeNull();
     }
 
     [Fact]
@@ -143,22 +147,22 @@ public class GroupRollupTests
         RollupOptions byParentOnly = ByOrg();
         byParentOnly.TenantAttributes = "parent";
 
-        RollupPlanner.Select(Request("currency", string.Empty, otherSet), Registry(PerTenant(), byParentOnly))!
+        RollupPlanner.Select(Request("currency", string.Empty, otherSet), VerifiedRegistry(PerTenant(), byParentOnly))!
             .Value.Rollup.Name.Should().Be("daily");
     }
 
     [Fact]
     public void GroupingByTenant_RoutesOnlyForASet_SoExistingResponsesKeepTheirSource()
     {
-        RollupPlanner.Select(Request("tenant_id", "t", null), Registry(PerTenant())).Should().BeNull();
-        RollupPlanner.Select(Request("tenant_id", string.Empty, Org), Registry(PerTenant())).Should().NotBeNull();
+        RollupPlanner.Select(Request("tenant_id", "t", null), VerifiedRegistry(PerTenant())).Should().BeNull();
+        RollupPlanner.Select(Request("tenant_id", string.Empty, Org), VerifiedRegistry(PerTenant())).Should().NotBeNull();
     }
 
     [Fact]
     public void AGroupRollupQuery_FiltersOnTheStoredAttributeAndGroupsByTheOther()
     {
         BreakdownRequest request = Request("tenant.region", string.Empty, Org);
-        RollupRegistry registry = Registry(ByOrg());
+        RollupRegistry registry = VerifiedRegistry(ByOrg());
         RollupPlan? plan = RollupPlanner.Select(request, registry);
 
         string sql = GetBreakdownQuery.BuildQuery(request, plan).Sql;
@@ -171,7 +175,7 @@ public class GroupRollupTests
     public void APercentile_IsAnsweredFromTheQuantilesState()
     {
         BreakdownRequest request = Request("currency", string.Empty, Org, "p95");
-        RollupPlan? plan = RollupPlanner.Select(request, Registry(ByOrg()));
+        RollupPlan? plan = RollupPlanner.Select(request, VerifiedRegistry(ByOrg()));
 
         plan!.Value.ValueExpression.Should().Be("arrayElement(quantilesMerge(0.5, 0.75, 0.9, 0.95, 0.99)(amount_quantiles), 4)");
     }
@@ -184,6 +188,7 @@ public class GroupRollupTests
         MeasureRegistry measures = new(options, dimensions);
         TenantAttributeRegistry attributes = new(options);
         RollupRegistry registry = new(options, dimensions, measures, attributes);
+        registry.MarkRoutable(registry.Declared[0]);
 
         PivotRequestResult parsed = PivotRequestFactory.Create(
             "p", null, "currency", ["p95(amount)", "sum(amount)"], [], Midnight.ToString("O"), NextMidnight.ToString("O"),
@@ -201,7 +206,7 @@ public class GroupRollupTests
     public void OnCluster_IsAddedToEveryStatementTheEngineIssues()
     {
         string clause = ClusterDdl.Clause("analytics");
-        Rollup rollup = Registry(ByOrg()).Declared.Single();
+        Rollup rollup = VerifiedRegistry(ByOrg()).Declared.Single();
 
         clause.Should().Be(" ON CLUSTER 'analytics'");
         ClickHouseSchemaMigrator.CoreStatementsFor(clause).Should().OnlyContain(s => s.Contains("global_events ON CLUSTER 'analytics' ADD"));

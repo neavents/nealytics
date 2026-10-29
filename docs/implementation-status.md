@@ -11,12 +11,13 @@ checks, platform requirements, and applicable coverage/mutation gates have passe
 | A1 reproducible latency, offered load, resource and visibility baseline | Implemented; qualification open | 61 benchmark unit cases and four real-Kestrel/ClickHouse cases passed; sustained final-revision runs and harness-wide changed-line coverage remain |
 | A2 HTTP compatibility and durability/failure fixtures | In progress | Nine additional real-Kestrel contract cases passed; deterministic write/flush-fault cases follow the B1 seam |
 | A3 bounded pending WAL and flush groups | Shared-core checks passed; aggregate qualification open | 1,433 unit and 148 real-ClickHouse cases passed; changed WAL scope has 100% line/branch coverage and a 100% mutation score |
-| Streaming recovery | Pending | Current replay materializes the sealed WAL |
+| Streaming recovery | Component/backend gates passed; aggregate durability work open | 343/343 maintained lines, 124/124 branch outcomes, 100% mutation; full integration now passes after the separate A5 routing fix |
+| A5 persisted rollup readiness | Scoped gates passed | 1,680 portable units, 168 ClickHouse integrations, 172/172 maintained scoped lines, 40/40 branch outcomes and 99/99 executable mutants; delivery and rebuild semantics remain A6 |
 | Replay-safe rollups and explicit delivery bounds | Pending | Persisted insert identity and pinned-server failure tests required |
 | Reserved read/write/probe capacity and bounded admission | Pending | Current connection factory is shared |
 | B1 shared WAL I/O contract with managed baseline | Implemented; aggregate qualification open | Managed file class: 100% line/branch coverage, six executable mutants killed; 42 focused WAL/HTTP cases passed |
-| B2 native io_uring backend and packaging | Implemented; platform/artifact qualification open | Real ARM64 bridge/backend, native fault/sanitizer checks and 100% scoped coverage/mutation passed; actual x64 and standalone artifact checks remain |
-| B3 native integration and operator fallback | Implemented; qualification open | ARM64 selection, denied kernel, real native HTTP and standalone/container checks passed; mutation, x64 and crash qualification remain |
+| B2 native io_uring backend and packaging | Implemented; platform/artifact gates passed | Actual x64 and ARM64 native faults/sanitizers, scoped coverage/mutation, standalone and container artifacts passed; aggregate crash/performance work remains |
+| B3 native integration and operator fallback | Implemented; platform/artifact gates passed | Both actual architectures passed run 40830818024 after the terminal-channel regression; shared recovery/HTTP contracts passed; aggregate crash qualification remains |
 | B4 bounded beacon microbatches | Pending | Preserve accepted-prefix, rejection and cancellation semantics |
 | B5 custom ingestion dispatcher | Pending | Existing HTTP requests and policy behavior must remain compatible |
 | B6 combined qualification/default selection | Pending | Matched-load four-combination latency/CPU/memory/visibility evidence required |

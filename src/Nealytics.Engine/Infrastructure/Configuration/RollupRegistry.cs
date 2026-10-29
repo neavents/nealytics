@@ -340,6 +340,10 @@ public sealed class RollupRegistry
         }
 
         Declared = declared;
+        foreach (Rollup rollup in declared)
+        {
+            MarkUnroutable(rollup, "completion has not been verified");
+        }
     }
 
     public IReadOnlyList<Rollup> Declared { get; }
@@ -372,6 +376,9 @@ public sealed class RollupRegistry
 
     public bool IsRoutable(Rollup rollup) =>
         rollup is not null && !_unroutable.ContainsKey(rollup.Name);
+
+    internal string? UnroutableReason(Rollup rollup) =>
+        _unroutable.GetValueOrDefault(rollup.Name);
 
     private static string[] Split(string? value) =>
         (value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
