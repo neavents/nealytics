@@ -449,27 +449,40 @@ public sealed class RollupReadinessIntegrationTests : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
+        bool metadataExists = false;
         await using (Octonica.ClickHouseClient.ClickHouseConnection connection = new(ClickHouseTestSupport.ConnectionString))
         {
             await connection.OpenAsync();
             await using Octonica.ClickHouseClient.ClickHouseCommand command = connection.CreateCommand(
-                "SELECT uuid FROM system.tables WHERE database = 'nealytics_core' AND name = {table:String}");
+                "SELECT name, uuid FROM system.tables WHERE database = 'nealytics_core' "
+                + "AND name IN ({table:String}, 'rollup_readiness')");
             command.Parameters.Add(new Octonica.ClickHouseClient.ClickHouseParameter
             {
                 ParameterName = "table",
                 Value = "rollup_" + _name
             });
-            if (await command.ExecuteScalarAsync() is Guid table)
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
             {
-                _ownedTables.Add(table);
+                if (reader.GetString(0) == "rollup_readiness")
+                {
+                    metadataExists = true;
+                }
+                else
+                {
+                    _ownedTables.Add(reader.GetGuid(1));
+                }
             }
         }
         await ClickHouseTestSupport.ExecuteAsync($"DROP VIEW IF EXISTS nealytics_core.rollup_{_name}_mv");
         await ClickHouseTestSupport.ExecuteAsync($"DROP TABLE IF EXISTS nealytics_core.rollup_{_name} SYNC");
-        foreach (Guid table in _ownedTables)
+        if (metadataExists)
         {
-            await ClickHouseTestSupport.ExecuteAsync(
-                $"ALTER TABLE {ClickHouseRollupReadiness.TableName} DELETE WHERE table_id = toUUID('{table}') SETTINGS mutations_sync = 2");
+            foreach (Guid table in _ownedTables)
+            {
+                await ClickHouseTestSupport.ExecuteAsync(
+                    $"ALTER TABLE {ClickHouseRollupReadiness.TableName} DELETE WHERE table_id = toUUID('{table}') SETTINGS mutations_sync = 2");
+            }
         }
         await _project.DisposeAsync();
         foreach (ClickHouseConnectionFactory factory in _factories)
