@@ -67,5 +67,9 @@ python3 native/test_artifact.py --engine-image "nealytics-qualified-engine:$rid"
 
 docker "${common[@]}" "$image" dotnet tool restore
 
-docker "${common[@]}" "${permitted[@]}" "$image" bash /workspace/native/mutate.sh \
-    /workspace "$bridge" "$output/mutation" stryker-config.selection.json
+if docker "${common[@]}" "${permitted[@]}" "$image" bash /workspace/native/mutate.sh \
+    /workspace "$bridge" "$output/mutation" stryker-config.selection.json; then
+    exit 0
+fi
+python3 native/report_mutants.py "artifacts/platform/$rid/mutation/reports/mutation-report.json"
+exit 1
