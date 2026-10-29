@@ -232,7 +232,14 @@ public sealed class IngestionDurabilityContractTests
         await stream.WriteAsync(Encoding.ASCII.GetBytes(request));
         socket.Client.Shutdown(SocketShutdown.Send);
         using StreamReader reader = new(stream, Encoding.ASCII);
-        await reader.ReadToEndAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        try
+        {
+            await reader.ReadToEndAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        catch (IOException error) when (error.InnerException is SocketException { SocketErrorCode: SocketError.ConnectionReset })
+        {
+            // Kestrel may reset an incomplete request instead of returning a response.
+        }
 
         using HttpResponseMessage health = await client.GetAsync("/health");
         Assert.Equal(HttpStatusCode.OK, health.StatusCode);
