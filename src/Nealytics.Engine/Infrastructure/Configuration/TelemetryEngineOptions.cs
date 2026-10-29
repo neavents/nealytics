@@ -128,6 +128,9 @@ public sealed class TelemetryEngineOptions
     public string ClickHouseConnectionString { get; set; } = "Host=127.0.0.1;Port=9000;Database=nealytics_core;";
     public string WriteAheadLogDirectory { get; set; } = "/var/log/nealytics_engine/";
     public int MemoryChannelCapacity { get; set; } = 100_000;
+    public int DeliveryJournalMaxRecords { get; set; } = 100_000;
+    public long DeliveryJournalMaxBytes { get; set; } = 268_435_456;
+    public int DeliveryRetryMaxAgeSeconds { get; set; } = 900;
     public int DatabaseBatchCommitSize { get; set; } = 10_000;
     public int ForceFlushIntervalSeconds { get; set; } = 3;
     public string AllowedProjectKeys { get; set; } = string.Empty;
@@ -166,7 +169,7 @@ public sealed class TelemetryEngineOptions
     public int WalMaxFlushRecords { get; set; } = 256;
     public int WalMaxFlushBytes { get; set; } = 16_777_216;
     public bool EnableWireCompression { get; set; } = true;
-    public bool EnableAsyncInsert { get; set; } = true;
+    public bool EnableAsyncInsert { get; set; } = false;
     public int MaxConcurrentConnections { get; set; } = 20_000;
     public bool EnableRequestDecompression { get; set; } = true;
     public bool EnablePrometheusScrape { get; set; } = false;

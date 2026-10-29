@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Globalization;
+using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Linq;
@@ -32,6 +33,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
 
     internal static IReadOnlyList<string> CoreStatementsFor(string onCluster) =>
     [
+        $"ALTER TABLE {Database}.{Table}{onCluster} MODIFY SETTING non_replicated_deduplication_window = 100000",
         $"ALTER TABLE {Database}.{Table}{onCluster} ADD COLUMN IF NOT EXISTS user_id Nullable(String)",
         $"ALTER TABLE {Database}.{Table}{onCluster} ADD COLUMN IF NOT EXISTS object_id Nullable(String)",
         $"ALTER TABLE {Database}.{Table}{onCluster} ADD COLUMN IF NOT EXISTS device_class LowCardinality(String) DEFAULT ''",
@@ -70,6 +72,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
     private readonly ILogger<ClickHouseSchemaMigrator> _logger;
     private readonly TenantAttributeRegistry? _tenantAttributes;
     private readonly string _onCluster;
+    private readonly string _deliveryDirectory;
 
     public ClickHouseSchemaMigrator(
         ClickHouseConnectionFactory connectionFactory,
@@ -80,6 +83,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         ILogger<ClickHouseSchemaMigrator> logger,
         TenantAttributeRegistry? tenantAttributes = null)
     {
+        _deliveryDirectory = Path.Combine(options.Value.WriteAheadLogDirectory, "delivery");
         _tenantAttributes = tenantAttributes;
         _onCluster = ClusterDdl.Clause(options.Value.ClusterName);
         _connectionFactory = connectionFactory;
@@ -383,6 +387,16 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         {
             return;
         }
+        if (Directory.Exists(_deliveryDirectory)
+            && Directory.EnumerateFiles(_deliveryDirectory, "*.json").Any(path =>
+                !File.Exists(Path.ChangeExtension(path, ".committed"))))
+        {
+            foreach (Rollup rollup in _rollups.Declared)
+            {
+                _rollups.MarkUnroutable(rollup, "pending delivery must finish before rollup reconciliation");
+            }
+            return;
+        }
         ClickHouseRollupReadiness readiness = new ClickHouseRollupReadiness(pooled);
         await readiness.EnsureCreatedAsync(_onCluster, cancellationToken);
         foreach (Rollup rollup in _rollups.Declared)
@@ -431,6 +445,9 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         }
         else
         {
+            await ExecuteAsync(pooled,
+                $"ALTER TABLE {Database}.{rollup.TableName}{_onCluster} MODIFY SETTING non_replicated_deduplication_window = 100000",
+                cancellationToken);
             await VerifyRollupCompletionAsync(readiness, rollup, cancellationToken);
         }
     }

@@ -3,6 +3,9 @@ namespace Nealytics.Engine.Features.BatchProcessor;
 using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Security.Cryptography;
+using System.Globalization;
+using Nealytics.Engine.Infrastructure.Storage.Delivery;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -13,12 +16,13 @@ using Nealytics.Engine.Infrastructure.Serialization;
 using Nealytics.Engine.Infrastructure.Storage;
 using Octonica.ClickHouseClient;
 
-public sealed partial class ClickHouseBatchWriter : ITelemetryBatchWriter
+public sealed partial class ClickHouseBatchWriter : ITelemetryBatchWriter, IDeliveryBatchWriter
 {
     private readonly ClickHouseConnectionFactory _connectionFactory;
     private readonly TelemetryColumnLayout _layout;
     private readonly ILogger<ClickHouseBatchWriter> _logger;
     private readonly string _insertCommand;
+    private readonly string _schemaFingerprint;
 
     public ClickHouseBatchWriter(
         ClickHouseConnectionFactory connectionFactory,
@@ -31,6 +35,8 @@ public sealed partial class ClickHouseBatchWriter : ITelemetryBatchWriter
         _logger = logger;
         _layout = new TelemetryColumnLayout(registry, measures);
         _insertCommand = BuildInsertCommand(_layout, options.Value.EnableAsyncInsert);
+        _schemaFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+            BuildInsertColumns(_layout) + "|" + string.Join("|", _layout.Dimensions) + "|" + string.Join("|", _layout.Measures))));
     }
 
     [LoggerMessage(EventId = 9101, Level = LogLevel.Warning,
@@ -77,12 +83,42 @@ public sealed partial class ClickHouseBatchWriter : ITelemetryBatchWriter
         return columns + " VALUES";
     }
 
-    public async Task WriteAsync(
-        IReadOnlyList<GlobalTelemetryPayload> batch, int count, CancellationToken cancellationToken)
+    public string SchemaFingerprint => _schemaFingerprint;
+
+    public async Task<Guid> GetSourceIdAsync(CancellationToken cancellationToken)
+    {
+        await using PooledClickHouseConnection lease =
+            await _connectionFactory.AcquireAsync(ClickHouseWorkload.Write, cancellationToken);
+        await using ClickHouseCommand command = lease.Connection.CreateCommand(
+            "SELECT uuid FROM system.tables WHERE database = 'nealytics_core' AND name = 'global_events' "
+            + "AND engine = 'ReplacingMergeTree' AND toUInt64OrZero(extract(create_table_query, "
+            + "'non_replicated_deduplication_window = ([0-9]+)')) >= 100000");
+        object? value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is Guid identity && identity != Guid.Empty
+            ? identity
+            : throw new InvalidOperationException("Replay-safe delivery requires an Atomic ReplacingMergeTree source and a deduplication window of at least 100000 blocks.");
+    }
+
+    async Task IDeliveryBatchWriter.WriteDeliveryAsync(TelemetryDeliveryUnit unit, CancellationToken cancellationToken)
+    {
+        string command = BuildInsertColumns(_layout)
+            + " SETTINGS async_insert=0, insert_deduplicate=1, deduplicate_blocks_in_dependent_materialized_views=1, "
+            + "max_insert_block_size=1000000, min_insert_block_size_rows=0, min_insert_block_size_bytes=0, "
+            + "insert_deduplication_token='" + unit.Id.ToString("N", CultureInfo.InvariantCulture) + "' VALUES";
+        await WriteColumnsAsync(unit.Items, unit.Items.Length, command, unit.IngestedAt, cancellationToken);
+    }
+
+    public Task WriteAsync(
+        IReadOnlyList<GlobalTelemetryPayload> batch, int count, CancellationToken cancellationToken) =>
+        WriteColumnsAsync(batch, count, _insertCommand, null, cancellationToken);
+
+    private async Task WriteColumnsAsync(
+        IReadOnlyList<GlobalTelemetryPayload> batch, int count, string command,
+        DateTimeOffset? ingestedAt, CancellationToken cancellationToken)
     {
         using TelemetryColumnBuffers buffers = new(count, _layout);
 
-        buffers.Fill(batch);
+        buffers.Fill(batch, ingestedAt);
         ReportRejectedDimensionValues(buffers, count);
         ReportRejectedMeasureValues(buffers, count);
         Dictionary<string, object?> columns = buffers.BuildColumns();
@@ -93,7 +129,7 @@ public sealed partial class ClickHouseBatchWriter : ITelemetryBatchWriter
         try
         {
             await using ClickHouseColumnWriter writer =
-                await lease.Connection.CreateColumnWriterAsync(_insertCommand, cancellationToken);
+                await lease.Connection.CreateColumnWriterAsync(command, cancellationToken);
 
             await writer.WriteTableAsync(columns, count, cancellationToken);
             await writer.EndWriteAsync(cancellationToken);

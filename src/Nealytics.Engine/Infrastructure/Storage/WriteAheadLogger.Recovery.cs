@@ -1,6 +1,10 @@
 namespace Nealytics.Engine.Infrastructure.Storage;
 
+using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -49,8 +53,15 @@ public sealed partial class WriteAheadLogger
             }
             await using FileStream source = new FileStream(
                 path, FileMode.Open, FileAccess.Read, FileShare.Read, 65_536, WalReplayReader.OpenOptions);
+            long ordinal = 0;
             await foreach (WalReplayRecord record in reader.ReadAsync(source, cancellationToken))
             {
+                if (record.Payload.WalRecordId == Guid.Empty)
+                {
+                    string identity = Path.GetFileName(path) + ":" + ordinal.ToString(CultureInfo.InvariantCulture);
+                    record.Payload.WalRecordId = new Guid(SHA256.HashData(Encoding.UTF8.GetBytes(identity)).AsSpan(0, 16));
+                }
+                ordinal++;
                 yield return record;
             }
         }

@@ -230,6 +230,10 @@ public sealed partial class TelemetryBatchProcessor : BackgroundService
                 if (!replay)
                 {
                     await _wal.AcknowledgeCommitAsync(batchCount);
+                    if (_writer is IDeliveryCheckpoint journaled)
+                    {
+                        await journaled.CheckpointAsync();
+                    }
                 }
 
                 TelemetryDiagnostics.StorageBatchesCommitted.Add(1);

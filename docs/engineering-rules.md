@@ -113,6 +113,7 @@ named feat/correctness-and-safety cannot also contain child refs beneath that sa
 | A3b | feat/correctness-and-safety-a3b-encoding-reservations |
 | A4 | feat/correctness-and-safety-a4-streaming-recovery |
 | A5 | feat/correctness-and-safety-a5-rollup-readiness |
+| A6 | feat/correctness-and-safety-a6-replay-delivery |
 | A7 | feat/correctness-and-safety-a7-resource-capacity |
 | A7b | feat/correctness-and-safety-a7b-request-admission |
 | A8 | feat/correctness-and-safety-a8-wal-segments |

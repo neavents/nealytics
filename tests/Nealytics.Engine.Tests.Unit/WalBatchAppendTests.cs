@@ -107,10 +107,11 @@ public sealed class WalBatchAppendTests
         TrackingPool scratch = new();
         await using Harness harness = new(file, pending: pending, scratch: scratch);
         GlobalTelemetryPayload[] events = [Event(), Event(), Event(), Event()];
-        byte[] expected = events.SelectMany(Frame).ToArray();
         Task<WalBatchAppendResult> append = harness.Wal.AppendBatchAsync(events, CancellationToken.None);
         await file.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.False(append.IsCompleted);
+        byte[] expected = events.SelectMany(Frame).ToArray();
+        Assert.All(events, item => Assert.NotEqual(Guid.Empty, item.WalRecordId));
         Assert.Equal(4, harness.Wal.PendingRecordCount);
         Assert.Equal(expected.Length, harness.Wal.PendingByteCount);
         Assert.Equal(0, harness.Wal.UncommittedRecordCount);

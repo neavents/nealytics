@@ -389,7 +389,8 @@ public sealed class RollupRegistry
     {
         ArgumentNullException.ThrowIfNull(rollup);
 
-        return IsSessionGrain(rollup) ? BuildSessionTableDdl(rollup, onCluster) : BuildBucketTableDdl(rollup, onCluster);
+        string table = IsSessionGrain(rollup) ? BuildSessionTableDdl(rollup, onCluster) : BuildBucketTableDdl(rollup, onCluster);
+        return table + " SETTINGS non_replicated_deduplication_window = 100000";
     }
 
     private static IEnumerable<RollupMeasure> StoredMeasures(Rollup rollup)

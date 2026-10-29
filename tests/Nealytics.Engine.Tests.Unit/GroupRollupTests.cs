@@ -85,7 +85,7 @@ public class GroupRollupTests
     }
 
     [Fact]
-    public void APerTenantRollup_IsByteForByteUnchanged()
+    public void APerTenantRollupPreservesItsShapeAndBoundsItsDeduplicationLog()
     {
         Rollup rollup = VerifiedRegistry(PerTenant()).Declared.Single();
 
@@ -95,7 +95,7 @@ public class GroupRollupTests
             + "widget_id String, currency LowCardinality(String), events AggregateFunction(count), "
             + "sessions AggregateFunction(uniqExact, String), users AggregateFunction(uniqExact, Nullable(String)), "
             + "amount_sum AggregateFunction(sum, Nullable(Decimal(18, 4)))) ENGINE = AggregatingMergeTree "
-            + "PARTITION BY toYYYYMM(bucket) ORDER BY (project_id, tenant_id, bucket, event_type, traffic_class, widget_id, currency)");
+            + "PARTITION BY toYYYYMM(bucket) ORDER BY (project_id, tenant_id, bucket, event_type, traffic_class, widget_id, currency) SETTINGS non_replicated_deduplication_window = 100000");
     }
 
     [Fact]
@@ -209,7 +209,10 @@ public class GroupRollupTests
         Rollup rollup = VerifiedRegistry(ByOrg()).Declared.Single();
 
         clause.Should().Be(" ON CLUSTER 'analytics'");
-        ClickHouseSchemaMigrator.CoreStatementsFor(clause).Should().OnlyContain(s => s.Contains("global_events ON CLUSTER 'analytics' ADD"));
+        ClickHouseSchemaMigrator.CoreStatementsFor(clause)[0].Should().Be(
+            "ALTER TABLE nealytics_core.global_events ON CLUSTER 'analytics' MODIFY SETTING non_replicated_deduplication_window = 100000");
+        ClickHouseSchemaMigrator.CoreStatementsFor(clause).Skip(1).Should().OnlyContain(
+            s => s.Contains("global_events ON CLUSTER 'analytics' ADD"));
         RollupRegistry.BuildTableDdl(rollup, clause).Should().StartWith("CREATE TABLE IF NOT EXISTS nealytics_core.rollup_daily_org ON CLUSTER 'analytics' (");
         RollupRegistry.BuildViewDdl(rollup, clause).Should().StartWith("CREATE MATERIALIZED VIEW nealytics_core.rollup_daily_org_mv ON CLUSTER 'analytics' TO");
         TenantAttributeRegistry.BuildTableDdl(clause).Should().StartWith("CREATE TABLE IF NOT EXISTS nealytics_core.tenant_attributes ON CLUSTER 'analytics' (");

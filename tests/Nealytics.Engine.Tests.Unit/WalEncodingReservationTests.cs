@@ -55,7 +55,9 @@ public sealed class WalEncodingReservationTests
             {
                 await wal.AppendAsync(payload, CancellationToken.None);
                 Assert.Equal(1, wal.UncommittedRecordCount);
-                Assert.Equal(expected, await File.ReadAllBytesAsync(Path.Combine(directory, "telemetry_wal.log")));
+                Assert.Equal(expected.Length, Frame(payload).Length);
+                Assert.NotEqual(Guid.Empty, payload.WalRecordId);
+                Assert.Equal(Frame(payload), await File.ReadAllBytesAsync(Path.Combine(directory, "telemetry_wal.log")));
             }
             await using WriteAheadLogger restarted = new(Options.Create(settings));
             Assert.Equal(payload.EventId, Assert.Single(await restarted.ReplayUncommittedAsync()).EventId);

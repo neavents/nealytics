@@ -63,6 +63,7 @@ public sealed partial class WriteAheadLogger
             {
                 GlobalTelemetryPayload payload = payloads[startIndex + count];
                 ArgumentNullException.ThrowIfNull(payload);
+                payload.WalRecordId = Guid.NewGuid();
                 _recordBuffer.Reset();
                 WalRecordEncoding.Serialize(payload, _recordBuffer);
                 ReadOnlyMemory<byte> record = _recordBuffer.WrittenMemory;

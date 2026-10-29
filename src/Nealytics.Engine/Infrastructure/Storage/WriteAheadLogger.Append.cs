@@ -40,6 +40,7 @@ public sealed partial class WriteAheadLogger
     private async Task<PendingAppend> EnqueueSerializedAsync(
         GlobalTelemetryPayload payload, CancellationToken cancellationToken)
     {
+        payload.WalRecordId = Guid.NewGuid();
         _recordBuffer.Reset();
         WalRecordEncoding.Serialize(payload, _recordBuffer);
         return await EnqueueEncodedAsync(_recordBuffer.WrittenMemory, 1, cancellationToken);

@@ -162,6 +162,35 @@ public sealed partial class WriteAheadLogger : IAsyncDisposable
         }
     }
 
+    internal async Task CheckpointDeliveryAsync(Action clearDelivery)
+    {
+        _operations.Enter();
+        try
+        {
+            await _synchronization.File.WaitAsync();
+            try
+            {
+                _operations.ThrowIfFailed();
+                if (UncommittedRecordCount == 0 && !HasSealedSegment)
+                {
+                    clearDelivery();
+                }
+            }
+            catch (Exception error)
+            {
+                throw SignalFailure(error);
+            }
+            finally
+            {
+                _synchronization.File.Release();
+            }
+        }
+        finally
+        {
+            _operations.Exit();
+        }
+    }
+
     public async Task TruncateAsync()
     {
         _operations.Enter();

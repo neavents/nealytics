@@ -5,6 +5,8 @@ using System.Security.Claims;
 using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Nealytics.Engine.Infrastructure.Configuration;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.IdentityModel.Tokens;
 
@@ -12,6 +14,8 @@ namespace Nealytics.Engine.Tests.Unit;
 
 public class NoDatabaseWebFactory : WebApplicationFactory<Program>
 {
+    private readonly string _walDirectory = Path.Combine(Path.GetTempPath(), "nealytics_boot_" + Guid.NewGuid().ToString("N"));
+
     public const string JwtKey = "unit-test-jwt-signing-key-at-least-32-bytes!!";
 
     public NoDatabaseWebFactory()
@@ -28,11 +32,13 @@ public class NoDatabaseWebFactory : WebApplicationFactory<Program>
         Environment.SetEnvironmentVariable("TelemetryEngine__ClickHouseConnectionString",
             "Host=127.0.0.1;Port=9;Database=nealytics_core;User=default;Password=;");
         Environment.SetEnvironmentVariable("TelemetryEngine__WriteAheadLogDirectory",
-            Path.Combine(Path.GetTempPath(), $"nealytics_boot_{Guid.NewGuid():N}"));
+            _walDirectory);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        builder.ConfigureServices(services => services.PostConfigure<TelemetryEngineOptions>(options =>
+            options.WriteAheadLogDirectory = _walDirectory));
         builder.UseEnvironment("Testing");
     }
 }
