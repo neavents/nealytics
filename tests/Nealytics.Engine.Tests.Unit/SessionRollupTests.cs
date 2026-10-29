@@ -266,7 +266,7 @@ public class SessionRollupTests
 /// </summary>
 public class SessionRollupRoutingTests
 {
-    private static RollupRegistry Registry(string grain = "session", string eventTypes = "")
+    private static RollupRegistry VerifiedRegistry(string grain = "session", string eventTypes = "")
     {
         TelemetryEngineOptions options = new()
         {
@@ -281,7 +281,12 @@ public class SessionRollupRoutingTests
         };
 
         DimensionRegistry dimensions = new(options);
-        return new RollupRegistry(options, dimensions, new MeasureRegistry(options, dimensions));
+        RollupRegistry registry = new(options, dimensions, new MeasureRegistry(options, dimensions));
+        foreach (Rollup rollup in registry.Declared)
+        {
+            registry.MarkRoutable(rollup);
+        }
+        return registry;
     }
 
     private static RollupRegistry Empty()
@@ -300,7 +305,7 @@ public class SessionRollupRoutingTests
     [Fact]
     public void ADayAlignedRangeRoutesToTheRollup()
     {
-        GetSessionAnalyticsQuery.SelectRollup(Request(Midnight, NextWeek), Registry())
+        GetSessionAnalyticsQuery.SelectRollup(Request(Midnight, NextWeek), VerifiedRegistry())
             .Should().NotBeNull();
     }
 
@@ -313,14 +318,14 @@ public class SessionRollupRoutingTests
         // A rollup row covers a whole day. Answering 12:00-18:00 from it would return whole days —
         // a number that is wrong and looks completely healthy, which is the worst kind.
         GetSessionAnalyticsQuery.SelectRollup(
-            Request(Midnight.AddHours(hour).AddMinutes(minute).AddSeconds(second), NextWeek), Registry())
+            Request(Midnight.AddHours(hour).AddMinutes(minute).AddSeconds(second), NextWeek), VerifiedRegistry())
             .Should().BeNull();
     }
 
     [Fact]
     public void ARangeThatDoesNotEndOnMidnightStaysOnRaw()
     {
-        GetSessionAnalyticsQuery.SelectRollup(Request(Midnight, NextWeek.AddHours(9)), Registry())
+        GetSessionAnalyticsQuery.SelectRollup(Request(Midnight, NextWeek.AddHours(9)), VerifiedRegistry())
             .Should().BeNull();
     }
 
@@ -330,14 +335,14 @@ public class SessionRollupRoutingTests
         // It holds only those rows, so its per-session event count is not the session's event
         // count. A perfectly good rollup that answers a different question.
         GetSessionAnalyticsQuery.SelectRollup(
-            Request(Midnight, NextWeek), Registry(eventTypes: "app_open,article_view"))
+            Request(Midnight, NextWeek), VerifiedRegistry(eventTypes: "app_open,article_view"))
             .Should().BeNull();
     }
 
     [Fact]
     public void ATimeBucketedRollupIsNotUsed()
     {
-        GetSessionAnalyticsQuery.SelectRollup(Request(Midnight, NextWeek), Registry(grain: "day"))
+        GetSessionAnalyticsQuery.SelectRollup(Request(Midnight, NextWeek), VerifiedRegistry(grain: "day"))
             .Should().BeNull();
     }
 
@@ -350,13 +355,13 @@ public class SessionRollupRoutingTests
     [Fact]
     public void AnInvertedRangeStaysOnRaw()
     {
-        GetSessionAnalyticsQuery.SelectRollup(Request(NextWeek, Midnight), Registry()).Should().BeNull();
+        GetSessionAnalyticsQuery.SelectRollup(Request(NextWeek, Midnight), VerifiedRegistry()).Should().BeNull();
     }
 
     [Fact]
     public void TheRollupStatementRegroupsBySessionSoMidnightCrossersRecombine()
     {
-        (string sql, _) = GetSessionAnalyticsQuery.BuildQuery(Request(Midnight, NextWeek), Registry().Declared[0]);
+        (string sql, _) = GetSessionAnalyticsQuery.BuildQuery(Request(Midnight, NextWeek), VerifiedRegistry().Declared[0]);
 
         // GROUP BY session_id WITHOUT event_date is the whole trick: the session is stored as one
         // row per day, and minMerge/maxMerge put the halves back together. Grouping by both would
@@ -371,7 +376,7 @@ public class SessionRollupRoutingTests
     [Fact]
     public void TheRollupStatementReportsRangeScopedTotalsLikeTheRawOne()
     {
-        (string sql, _) = GetSessionAnalyticsQuery.BuildQuery(Request(Midnight, NextWeek), Registry().Declared[0]);
+        (string sql, _) = GetSessionAnalyticsQuery.BuildQuery(Request(Midnight, NextWeek), VerifiedRegistry().Declared[0]);
 
         // The defect that made the dashboard carry a ROW_CAP workaround: totals computed over the
         // page rather than the range. The rollup path must not reintroduce it.
@@ -382,7 +387,7 @@ public class SessionRollupRoutingTests
     [Fact]
     public void TheRangeIsHalfOpenOnTheRollupPath()
     {
-        (string sql, _) = GetSessionAnalyticsQuery.BuildQuery(Request(Midnight, NextWeek), Registry().Declared[0]);
+        (string sql, _) = GetSessionAnalyticsQuery.BuildQuery(Request(Midnight, NextWeek), VerifiedRegistry().Declared[0]);
 
         // Matching /breakdown's rollup path exactly. Alignment has already guaranteed both ends sit
         // on a day boundary, so every day this touches is fully inside the request.
@@ -395,7 +400,7 @@ public class SessionRollupRoutingTests
     {
         (string raw, _) = GetSessionAnalyticsQuery.BuildQuery(Request(Midnight, NextWeek), null);
         (string routed, _) = GetSessionAnalyticsQuery.BuildQuery(
-            Request(Midnight, NextWeek), Registry().Declared[0]);
+            Request(Midnight, NextWeek), VerifiedRegistry().Declared[0]);
 
         raw.Should().Contain("FROM nealytics_core.global_events");
         routed.Should().Contain("FROM nealytics_core.rollup_sessions");

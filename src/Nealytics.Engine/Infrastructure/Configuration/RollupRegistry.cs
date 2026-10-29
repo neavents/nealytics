@@ -340,6 +340,10 @@ public sealed class RollupRegistry
         }
 
         Declared = declared;
+        foreach (Rollup rollup in declared)
+        {
+            MarkUnroutable(rollup, "completion has not been verified");
+        }
     }
 
     public IReadOnlyList<Rollup> Declared { get; }
