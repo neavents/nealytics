@@ -13,6 +13,23 @@ namespace Nealytics.Engine.Tests.Integration;
 
 public sealed class ClickHouseWorkloadCapacityTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EveryWorkloadUsesTheConfiguredWireCompression(bool compress)
+    {
+        var options = Options();
+        options.Value.EnableWireCompression = compress;
+        await using ClickHouseConnectionFactory factory = new(options);
+        foreach (ClickHouseWorkload workload in Enum.GetValues<ClickHouseWorkload>())
+        {
+            await using PooledClickHouseConnection lease = await factory.AcquireAsync(workload, CancellationToken.None);
+            Assert.Equal(compress, new ClickHouseConnectionStringBuilder(lease.Connection.ConnectionString).Compress);
+            await using ClickHouseCommand command = lease.Connection.CreateCommand("SELECT sum(number) FROM numbers(10000)");
+            Assert.Equal((ulong)49_995_000, await command.ExecuteScalarAsync());
+        }
+    }
+
     [Fact]
     public async Task AcquisitionDeadlineAlsoBoundsAConnectionWhoseServerNeverFinishesTheHandshake()
     {
@@ -23,7 +40,9 @@ public sealed class ClickHouseWorkloadCapacityTests
         await using ClickHouseConnectionFactory factory = new(options);
         Task<PooledClickHouseConnection> acquisition = factory.AcquireAsync(CancellationToken.None);
         using TcpClient accepted = await listener.AcceptTcpClientAsync().WaitAsync(TimeSpan.FromSeconds(5));
-        await Assert.ThrowsAsync<TimeoutException>(() => acquisition.WaitAsync(TimeSpan.FromSeconds(5)));
+        TimeoutException error = await Assert.ThrowsAsync<TimeoutException>(() => acquisition.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.IsAssignableFrom<OperationCanceledException>(error.InnerException);
+        Assert.Equal("Timed out acquiring a ClickHouse workload connection.", error.Message);
     }
 
     [Fact]
@@ -72,8 +91,10 @@ public sealed class ClickHouseWorkloadCapacityTests
     {
         await using ClickHouseConnectionFactory factory = new(Options(timeout: 1));
         PooledClickHouseConnection occupied = await factory.AcquireAsync(CancellationToken.None);
-        await Assert.ThrowsAsync<TimeoutException>(() => factory.AcquireAsync(CancellationToken.None)
+        TimeoutException error = await Assert.ThrowsAsync<TimeoutException>(() => factory.AcquireAsync(CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.IsAssignableFrom<OperationCanceledException>(error.InnerException);
+        Assert.Equal("Timed out acquiring a ClickHouse workload connection.", error.Message);
         await occupied.DisposeAsync();
         await using PooledClickHouseConnection next = await factory.AcquireAsync(CancellationToken.None);
         Assert.Same(occupied.Connection, next.Connection);

@@ -22,7 +22,7 @@ deduplication settings plus the persisted token. One unresolved unit blocks late
 bounded retry protocol, not an unlimited exactly-once claim: supported operation requires one
 engine to own writes to these tables, unchanged block settings, and no external direct inserts,
 backfills, schema replacement or deduplication-window changes during recovery. A pending unit
-older than DeliveryRetryMaxAgeSeconds (default 900) requires offline reconciliation instead of an
+at least DeliveryRetryMaxAgeSeconds old (default 900 seconds) requires offline reconciliation instead of an
 automatic insert. The age guard supplements the exclusive-writer rule; elapsed time alone does
 not prove that a ClickHouse deduplication token remains retained.
 
@@ -42,7 +42,16 @@ and artifact checks follow the implementation milestone; this brief does not cla
 
 The conversion fingerprint uses versioned canonical JSON rather than record display formatting.
 It covers ordered columns, storage types, conversion kinds and invariant nullable measure bounds.
-Process locale and query-only metadata do not change it. Fixed digest regressions guard its
+Process locale and query-only metadata do not change it. The default published artifact already
+uses invariant globalization; the culture regressions also protect supported source builds and
+customized packaging. Fixed digest regressions guard its
 persisted representation. Resolve pending manifests with their original feature build before
 upgrading from an earlier intermediate fingerprint format; a mismatch fails closed rather than
 rewriting the fingerprint or automatically reinserting an uncertain unit.
+
+
+Delivery uses one TimeProvider reading for its expiry/future checks and freezes that provider's
+UTC time in new manifests. Tests cover the exact expiry instant, the last permitted tick and a
+future timestamp. Schema and membership are required serialized manifest properties. Missing
+properties fail before a unit can reach the database. This tightens storage metadata validation
+without changing producer request fields or responses.

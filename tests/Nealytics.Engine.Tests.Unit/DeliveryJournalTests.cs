@@ -1,10 +1,14 @@
 using System.Text;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Features.BatchProcessor;
+using Nealytics.Engine.Features.IngestTelemetry;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Serialization;
 using Nealytics.Engine.Infrastructure.Storage;
 using Nealytics.Engine.Infrastructure.Storage.Delivery;
+using NSubstitute;
 
 namespace Nealytics.Engine.Tests.Unit;
 
@@ -60,6 +64,8 @@ public sealed class DeliveryJournalTests : IAsyncDisposable
         var stored = journal.Prepare(Unit());
         journal.Complete(stored);
         Assert.True(journal.IsDelivered(stored.Items[0]));
+        Assert.Empty(journal.Load());
+        Assert.True(journal.IsDelivered(stored.Items[0]));
         var restart = new TelemetryDeliveryJournal(Options.Create(Settings()));
         Assert.Empty(restart.Load());
         Assert.True(restart.IsDelivered(stored.Items[0]));
@@ -82,7 +88,7 @@ public sealed class DeliveryJournalTests : IAsyncDisposable
         byte[] bytes = File.ReadAllBytes(path);
         bytes[offset] ^= 1;
         File.WriteAllBytes(path, bytes);
-        Assert.Throws<InvalidDataException>(() => journal.Load().ToArray());
+        Assert.Contains("checksum does not match", Assert.Throws<InvalidDataException>(() => journal.Load().ToArray()).Message);
     }
 
     [Fact]
@@ -92,7 +98,7 @@ public sealed class DeliveryJournalTests : IAsyncDisposable
         journal.Prepare(Unit());
         string path = Assert.Single(Directory.GetFiles(Path.Combine(_directory, "delivery"), "*.json"));
         File.Move(path, Path.Combine(Path.GetDirectoryName(path)!, Guid.NewGuid().ToString("N") + ".json"));
-        Assert.Throws<InvalidDataException>(() => journal.Load().ToArray());
+        Assert.Contains("identity does not match its file", Assert.Throws<InvalidDataException>(() => journal.Load().ToArray()).Message);
     }
 
     [Fact]
@@ -132,7 +138,8 @@ public sealed class DeliveryJournalTests : IAsyncDisposable
                 _ => [Payload()]
             }
         };
-        Assert.Throws<InvalidDataException>(() => journal.Prepare(unit));
+        Assert.Contains(problem >= 6 ? "missing or duplicate record identities" : "header is invalid",
+            Assert.Throws<InvalidDataException>(() => journal.Prepare(unit)).Message);
         Assert.Empty(Directory.GetFiles(Path.Combine(_directory, "delivery")));
     }
 
@@ -141,11 +148,12 @@ public sealed class DeliveryJournalTests : IAsyncDisposable
     {
         var journal = new TelemetryDeliveryJournal(Options.Create(Settings()));
         var item = Payload();
-        Assert.Throws<InvalidDataException>(() => journal.Prepare(Unit([item, item])));
+        Assert.Contains("missing or duplicate record identities",
+            Assert.Throws<InvalidDataException>(() => journal.Prepare(Unit([item, item]))).Message);
         var first = journal.Prepare(Unit([item]));
         journal.Complete(first);
         var second = journal.Prepare(Unit([item]));
-        Assert.Throws<InvalidDataException>(() => journal.Complete(second));
+        Assert.Contains("multiple committed delivery units", Assert.Throws<InvalidDataException>(() => journal.Complete(second)).Message);
         Assert.Throws<InvalidDataException>(() => journal.Load().ToArray());
     }
 
@@ -163,11 +171,11 @@ public sealed class DeliveryJournalTests : IAsyncDisposable
         if (records)
         {
             Assert.Single(limited.Load());
-            Assert.Throws<InvalidDataException>(() => limited.Prepare(Unit()));
+            Assert.Contains("DeliveryJournalMaxRecords", Assert.Throws<InvalidDataException>(() => limited.Prepare(Unit())).Message);
         }
         else
         {
-            Assert.Throws<InvalidDataException>(() => limited.Load().ToArray());
+            Assert.Contains("recovery byte limit", Assert.Throws<InvalidDataException>(() => limited.Load().ToArray()).Message);
         }
         Assert.Single(Directory.GetFiles(Path.Combine(_directory, "delivery"), "*.json"));
     }
@@ -189,8 +197,10 @@ public sealed class DeliveryJournalTests : IAsyncDisposable
             await Assert.ThrowsAsync<IOException>(() => writer.WriteAsync(items, items.Length, CancellationToken.None));
             Assert.Equal(target.Units[0].Id, target.Units[1].Id);
             Assert.Equal(target.Units[0].IngestedAt, target.Units[1].IngestedAt);
-            await Assert.ThrowsAsync<InvalidDataException>(() => writer.WriteAsync([items[1]], 1, CancellationToken.None));
-            await Assert.ThrowsAsync<InvalidDataException>(() => writer.WriteAsync(items.Reverse().ToArray(), 3, CancellationToken.None));
+            Assert.Contains("must finish before another unit", (await Assert.ThrowsAsync<InvalidDataException>(() =>
+                writer.WriteAsync([items[1]], 1, CancellationToken.None))).Message);
+            Assert.Contains("cannot be regrouped", (await Assert.ThrowsAsync<InvalidDataException>(() =>
+                writer.WriteAsync(items.Reverse().ToArray(), 3, CancellationToken.None))).Message);
         }
         target.Fail = false;
         await using (var wal = new WriteAheadLogger(options))
@@ -234,9 +244,102 @@ public sealed class DeliveryJournalTests : IAsyncDisposable
         journal.Prepare(unit);
         var target = new RecordingWriter(_source, _directory);
         var writer = new JournaledTelemetryBatchWriter(target, journal, wal, options);
-        await Assert.ThrowsAsync<InvalidDataException>(() => writer.WriteAsync(unit.Items, 1, CancellationToken.None));
+        InvalidDataException error = await Assert.ThrowsAsync<InvalidDataException>(() => writer.WriteAsync(unit.Items, 1, CancellationToken.None));
+        Assert.Contains(problem is "schema" or "storage" ? "storage or schema changed" : "retry safety window expired", error.Message);
         Assert.Empty(target.Units);
         Assert.Single(journal.Load());
+    }
+
+    [Theory]
+    [InlineData(-1, false)]
+    [InlineData(0, true)]
+    [InlineData(8_999_999_999L, true)]
+    [InlineData(9_000_000_000L, false)]
+    [InlineData(9_000_000_001L, false)]
+    public async Task ReplayExpiryAndFutureTimestampsUseOneExplicitClockBoundary(long ageTicks, bool accepted)
+    {
+        var options = Options.Create(Settings());
+        await using var wal = new WriteAheadLogger(options);
+        var now = new DateTimeOffset(2026, 10, 30, 0, 0, 0, TimeSpan.Zero);
+        var unit = new TelemetryDeliveryUnit
+        {
+            SourceId = _source,
+            Schema = new string('A', 64),
+            IngestedAt = now.AddTicks(-ageTicks),
+            Items = [Payload()]
+        };
+        var journal = new TelemetryDeliveryJournal(options);
+        journal.Prepare(unit);
+        var target = new RecordingWriter(_source, _directory);
+        var writer = new JournaledTelemetryBatchWriter(target, journal, wal, options, clock: new FixedClock(now));
+        if (accepted)
+        {
+            await writer.WriteAsync(unit.Items, 1, CancellationToken.None);
+            Assert.Equal(unit.Id, Assert.Single(target.Units).Id);
+        }
+        else
+        {
+            InvalidDataException error = await Assert.ThrowsAsync<InvalidDataException>(() => writer.WriteAsync(unit.Items, 1, CancellationToken.None));
+            Assert.Contains("retry safety window expired", error.Message);
+            Assert.Empty(target.Units);
+        }
+    }
+
+    [Fact]
+    public async Task ANewDeliveryFreezesTheConfiguredClockTimeBeforeItsInsert()
+    {
+        var options = Options.Create(Settings());
+        await using var wal = new WriteAheadLogger(options);
+        var target = new RecordingWriter(_source, _directory);
+        var now = new DateTimeOffset(2026, 10, 30, 0, 0, 0, TimeSpan.Zero);
+        var writer = new JournaledTelemetryBatchWriter(target, new TelemetryDeliveryJournal(options), wal, options,
+            clock: new FixedClock(now));
+        await writer.WriteAsync([Payload()], 1, CancellationToken.None);
+        Assert.Equal(now, Assert.Single(target.Units).IngestedAt);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TheProcessorCheckpointsDeliveryManifestsAfterItsSourceWalBecomesDurablyEmpty(bool replay)
+    {
+        var settings = Settings();
+        settings.DatabaseBatchCommitSize = 2;
+        var options = Options.Create(settings);
+        var items = new[] { Payload(), Payload() };
+        if (replay)
+        {
+            await using var seed = new WriteAheadLogger(options);
+            foreach (var item in items)
+            {
+                await seed.AppendAsync(item, CancellationToken.None);
+            }
+        }
+        await using var wal = new WriteAheadLogger(options);
+        var broker = new TelemetryChannelBroker(options);
+        var target = new RecordingWriter(_source, _directory);
+        var journaled = new JournaledTelemetryBatchWriter(target, new TelemetryDeliveryJournal(options), wal, options);
+        using var processor = new TelemetryBatchProcessor(broker, wal, journaled, Substitute.For<IHostApplicationLifetime>(),
+            options, NullLogger<TelemetryBatchProcessor>.Instance);
+        if (!replay)
+        {
+            foreach (var item in items)
+            {
+                await wal.AppendAsync(item, CancellationToken.None);
+                await broker.PublishAsync(item, CancellationToken.None);
+            }
+        }
+        await processor.StartAsync(CancellationToken.None);
+        await target.FirstDelivery.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (replay ? wal.HasSealedSegment : wal.UncommittedRecordCount != 0)
+        {
+            await Task.Delay(10, deadline.Token);
+        }
+        await processor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Empty(Directory.GetFiles(Path.Combine(_directory, "delivery")));
+        Assert.Equal(items.Select(item => item.EventId), Assert.Single(target.Units).Items.Select(item => item.EventId));
+        Assert.Equal(0, wal.RetainedWalBytes);
     }
 
     [Fact]
@@ -259,12 +362,18 @@ public sealed class DeliveryJournalTests : IAsyncDisposable
     public void DurableManifestAndCompletionBarriersPrecedeTheirDirectoryPublication()
     {
         var settings = Options.Create(Settings());
+        var pending = Unit();
         List<string> trace = [];
         var journal = new TelemetryDeliveryJournal(settings,
-            (path, mode) => new ProbeFileStream(path, mode, trace),
+            (path, mode) =>
+            {
+                Assert.Equal(pending.Id.ToString("N") + (mode == FileMode.CreateNew ? ".tmp" : ".committed"), Path.GetFileName(path));
+                return new ProbeFileStream(path, mode, trace);
+            },
             path => trace.Add("sync:" + Path.GetFileName(path)));
+        Assert.Equal(new[] { "sync:" + Path.GetFileName(_directory) }, trace);
         trace.Clear();
-        var unit = journal.Prepare(Unit());
+        var unit = journal.Prepare(pending);
         Assert.Equal(new[] { "flush:True", "closed", "sync:delivery" }, trace);
         Assert.True(File.Exists(Path.Combine(_directory, "delivery", unit.Id.ToString("N") + ".json")));
         trace.Clear();
@@ -314,7 +423,7 @@ public sealed class DeliveryJournalTests : IAsyncDisposable
         settings.DeliveryJournalMaxBytes = Directory.GetFiles(Path.Combine(_directory, "delivery"), "*.json")
             .Sum(path => new FileInfo(path).Length) - 1;
         var limited = new TelemetryDeliveryJournal(Options.Create(settings));
-        Assert.Throws<InvalidDataException>(() => limited.Load().ToArray());
+        Assert.Contains("DeliveryJournalMaxBytes", Assert.Throws<InvalidDataException>(() => limited.Load().ToArray()).Message);
     }
 
     [Theory]
@@ -330,8 +439,8 @@ public sealed class DeliveryJournalTests : IAsyncDisposable
         var journal = new TelemetryDeliveryJournal(options);
         if (asyncInsert)
         {
-            Assert.Throws<InvalidOperationException>(() => new JournaledTelemetryBatchWriter(
-                new RecordingWriter(_source, _directory), journal, wal, options));
+            Assert.Contains("EnableAsyncInsert=false", Assert.Throws<InvalidOperationException>(() => new JournaledTelemetryBatchWriter(
+                new RecordingWriter(_source, _directory), journal, wal, options)).Message);
         }
         else
         {
@@ -430,7 +539,7 @@ public sealed class DeliveryJournalTests : IAsyncDisposable
         journal.Prepare(Unit());
         string path = Assert.Single(Directory.GetFiles(Path.Combine(_directory, "delivery"), "*.json"));
         File.WriteAllBytes(path, new byte[bytes]);
-        Assert.Throws<InvalidDataException>(() => journal.Load().ToArray());
+        Assert.Contains("checksum does not match", Assert.Throws<InvalidDataException>(() => journal.Load().ToArray()).Message);
     }
 
     [Fact]
@@ -442,7 +551,138 @@ public sealed class DeliveryJournalTests : IAsyncDisposable
         byte[] content = Encoding.UTF8.GetBytes("null");
         string header = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)) + "\n";
         File.WriteAllBytes(path, Encoding.ASCII.GetBytes(header).Concat(content).ToArray());
-        Assert.Throws<InvalidDataException>(() => journal.Load().ToArray());
+        Assert.Contains("manifest is empty", Assert.Throws<InvalidDataException>(() => journal.Load().ToArray()).Message);
+    }
+
+    [Theory]
+    [InlineData(true, 0)]
+    [InlineData(true, -1)]
+    [InlineData(false, 0)]
+    [InlineData(false, -1)]
+    public void InvalidJournalCapacitiesFailBeforeCreatingTheMetadataDirectory(bool records, int value)
+    {
+        var settings = Settings();
+        if (records)
+        {
+            settings.DeliveryJournalMaxRecords = value;
+        }
+        else
+        {
+            settings.DeliveryJournalMaxBytes = value;
+        }
+        ArgumentOutOfRangeException error = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new TelemetryDeliveryJournal(Options.Create(settings)));
+        Assert.Equal(records ? "_maxRecords" : "_maxBytes", error.ParamName);
+        Assert.False(Directory.Exists(Path.Combine(_directory, "delivery")));
+    }
+
+    [Theory]
+    [InlineData("schema")]
+    [InlineData("items")]
+    public void PersistedManifestsRequireTheirSchemaAndMembershipProperties(string property)
+    {
+        var journal = new TelemetryDeliveryJournal(Options.Create(Settings()));
+        var unit = journal.Prepare(Unit());
+        string path = Path.Combine(_directory, "delivery", unit.Id.ToString("N") + ".json");
+        var document = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(path).AsSpan(65))!.AsObject();
+        Assert.True(document.Remove(property));
+        WriteSignedManifest(path, document.ToJsonString());
+        System.Text.Json.JsonException error = Assert.Throws<System.Text.Json.JsonException>(() => journal.Load().ToArray());
+        Assert.Contains(property, error.Message);
+        Assert.True(File.Exists(path));
+    }
+
+    [Fact]
+    public void AChecksummedManifestIsStillValidatedBeforeRecoveryCanPublishIt()
+    {
+        var journal = new TelemetryDeliveryJournal(Options.Create(Settings()));
+        var unit = journal.Prepare(Unit());
+        string path = Path.Combine(_directory, "delivery", unit.Id.ToString("N") + ".json");
+        var document = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(path).AsSpan(65))!.AsObject();
+        document["schema"] = "invalid";
+        WriteSignedManifest(path, document.ToJsonString());
+        Assert.Contains("header is invalid", Assert.Throws<InvalidDataException>(() => journal.Load().ToArray()).Message);
+        Assert.True(File.Exists(path));
+    }
+
+    [Fact]
+    public void AOneByteChecksummedBodyReachesStructuralValidationInsteadOfBeingCalledTruncated()
+    {
+        var journal = new TelemetryDeliveryJournal(Options.Create(Settings()));
+        var unit = journal.Prepare(Unit());
+        string path = Path.Combine(_directory, "delivery", unit.Id.ToString("N") + ".json");
+        WriteSignedManifest(path, "0");
+        Assert.Equal(66, new FileInfo(path).Length);
+        Assert.Throws<System.Text.Json.JsonException>(() => journal.Load().ToArray());
+    }
+
+    [Fact]
+    public void JournalBytesIncludeEveryChecksumHeaderAndAllowAnExactFullCapacity()
+    {
+        var settings = Settings();
+        var unit = Unit();
+        var second = new TelemetryDeliveryUnit
+        {
+            SourceId = unit.SourceId,
+            Schema = unit.Schema,
+            IngestedAt = unit.IngestedAt,
+            Items = [Payload()]
+        };
+        second.Items[0].Timestamp = unit.Items[0].Timestamp;
+        int length = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(unit,
+            TelemetryAotContext.Default.TelemetryDeliveryUnit).Length + 65;
+        settings.DeliveryJournalMaxBytes = length * 2;
+        var journal = new TelemetryDeliveryJournal(Options.Create(settings));
+        journal.Prepare(unit);
+        journal.Prepare(second);
+        Assert.Equal(length * 2L, Directory.GetFiles(Path.Combine(_directory, "delivery")).Sum(path => new FileInfo(path).Length));
+        Assert.Contains("no capacity for another durable manifest", Assert.Throws<InvalidDataException>(() => journal.Prepare(Unit())).Message);
+        Assert.Equal(2, Directory.GetFiles(Path.Combine(_directory, "delivery"), "*.json").Length);
+    }
+
+    [Fact]
+    public void AManifestMayUseItsEncodedByteBudgetWithoutNeedingTheJsonWritersEntireScratchReservation()
+    {
+        var settings = Settings();
+        var unit = Unit();
+        unit.Items[0].MetadataJson = new string('x', 3000);
+        int length = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(unit,
+            TelemetryAotContext.Default.TelemetryDeliveryUnit).Length + 65;
+        settings.DeliveryJournalMaxBytes = length;
+        var journal = new TelemetryDeliveryJournal(Options.Create(settings));
+        Assert.Equal(unit.Id, journal.Prepare(unit).Id);
+        Assert.Equal(length, new FileInfo(Assert.Single(Directory.GetFiles(Path.Combine(_directory, "delivery")))).Length);
+    }
+
+    [Fact]
+    public void RecoveryChecksThePerUnitLimitBeforeReadingOrAllocatingTheManifest()
+    {
+        var settings = Settings();
+        settings.DatabaseBatchByteCapacity = 256;
+        settings.DeliveryJournalMaxBytes = 16_384;
+        var original = new TelemetryDeliveryJournal(Options.Create(settings));
+        var unit = original.Prepare(Unit());
+        string path = Path.Combine(_directory, "delivery", unit.Id.ToString("N") + ".json");
+        using (var file = new FileStream(path, FileMode.Open))
+        {
+            file.SetLength(256 * 4 + 4096 + 1);
+        }
+        bool read = false;
+        var limited = new TelemetryDeliveryJournal(Options.Create(settings),
+            (file, mode) => new FileStream(file, mode, FileAccess.Write, FileShare.None), _ => { }, file =>
+            {
+                read = true;
+                return File.ReadAllBytes(file);
+            });
+        Assert.Contains("recovery byte limit", Assert.Throws<InvalidDataException>(() => limited.Load().ToArray()).Message);
+        Assert.False(read);
+    }
+
+    private static void WriteSignedManifest(string path, string json)
+    {
+        byte[] body = Encoding.UTF8.GetBytes(json);
+        byte[] header = Encoding.ASCII.GetBytes(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(body)) + "\n");
+        File.WriteAllBytes(path, header.Concat(body).ToArray());
     }
 
     [Fact]
@@ -454,7 +694,7 @@ public sealed class DeliveryJournalTests : IAsyncDisposable
             Directory.GetFiles(Path.Combine(_directory, "delivery"), "*.json"))).Length;
         var journal = new TelemetryDeliveryJournal(Options.Create(settings));
         Assert.Single(journal.Load());
-        Assert.Throws<InvalidDataException>(() => journal.Prepare(Unit()));
+        Assert.Contains("no capacity for another durable manifest", Assert.Throws<InvalidDataException>(() => journal.Prepare(Unit())).Message);
         Assert.Single(Directory.GetFiles(Path.Combine(_directory, "delivery"), "*.json"));
     }
 
@@ -500,6 +740,7 @@ public sealed class DeliveryJournalTests : IAsyncDisposable
     private sealed class RecordingWriter(Guid source, string directory) : IDeliveryBatchWriter
     {
         public bool Fail;
+        public TaskCompletionSource FirstDelivery { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public List<TelemetryDeliveryUnit> Units { get; } = [];
         public string SchemaFingerprint => new('A', 64);
         public Task<Guid> GetSourceIdAsync(CancellationToken cancellationToken) => Task.FromResult(source);
@@ -508,9 +749,15 @@ public sealed class DeliveryJournalTests : IAsyncDisposable
         {
             Assert.True(File.Exists(Path.Combine(directory, "delivery", unit.Id.ToString("N") + ".json")));
             Units.Add(unit);
+            FirstDelivery.TrySetResult();
             return Fail ? Task.FromException(new IOException("ambiguous insert")) : Task.CompletedTask;
         }
 
+    }
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     public ValueTask DisposeAsync()

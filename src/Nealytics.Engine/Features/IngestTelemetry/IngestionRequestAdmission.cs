@@ -16,14 +16,14 @@ internal static class IngestionRequestAdmission
         ArgumentOutOfRangeException.ThrowIfLessThan(options.IngestionRequestByteBudget, options.MaxRequestBodyBytes);
         int limit = (int)Math.Min(options.MaxConcurrentIngestionRequests,
             options.IngestionRequestByteBudget / options.MaxRequestBodyBytes);
-        return PartitionedRateLimiter.Create<HttpContext, string>(context =>
+        return PartitionedRateLimiter.Create<HttpContext, ClickHouseWorkload>(context =>
             context.GetEndpoint()?.Metadata.GetMetadata<ClickHouseWorkloadMetadata>()?.Workload == ClickHouseWorkload.Write
-                ? RateLimitPartition.GetConcurrencyLimiter("ingestion", _ => new ConcurrencyLimiterOptions
+                ? RateLimitPartition.GetConcurrencyLimiter(ClickHouseWorkload.Write, _ => new ConcurrencyLimiterOptions
                 {
                     PermitLimit = limit,
                     QueueLimit = 0,
                     QueueProcessingOrder = QueueProcessingOrder.OldestFirst
                 })
-                : RateLimitPartition.GetNoLimiter("other"));
+                : RateLimitPartition.GetNoLimiter(ClickHouseWorkload.Read));
     }
 }

@@ -35,14 +35,14 @@ public sealed class IngestionCapacityTests : IAsyncDisposable
         var budget = new WalBacklogBudget(100, 40);
         budget.Reserve(60);
         Assert.Equal(100, budget.Bytes);
-        Assert.Throws<IOException>(() => budget.Reserve(1));
+        Assert.Contains("retry after storage drains", Assert.Throws<IOException>(() => budget.Reserve(1)).Message);
         budget.Release(40);
         Assert.Equal(60, budget.Bytes);
         budget.Reserve(40);
         budget.Release(100);
         budget.Release(0);
         Assert.Equal(0, budget.Bytes);
-        Assert.Throws<InvalidOperationException>(() => budget.Release(1));
+        Assert.Contains("release exceeds its retained bytes", Assert.Throws<InvalidOperationException>(() => budget.Release(1)).Message);
         Assert.Throws<InvalidOperationException>(() => budget.Release(-1));
         Assert.Throws<ArgumentOutOfRangeException>(() => budget.Reserve(0));
         Assert.Throws<ArgumentOutOfRangeException>(() => new WalBacklogBudget(0, 0));
@@ -311,7 +311,7 @@ public sealed class IngestionCapacityTests : IAsyncDisposable
         var target = new RecordingWriter();
         using var processor = new TelemetryBatchProcessor(broker, wal, target, Substitute.For<IHostApplicationLifetime>(),
             options, NullLogger<TelemetryBatchProcessor>.Instance);
-        var items = Enumerable.Range(0, 4).Select(_ => Payload()).ToArray();
+        var items = Enumerable.Range(0, 5).Select(_ => Payload()).ToArray();
         foreach (var item in items)
         {
             await wal.AppendAsync(item, CancellationToken.None);
@@ -329,7 +329,7 @@ public sealed class IngestionCapacityTests : IAsyncDisposable
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
         await ((Task)method.Invoke(processor, new object[] { new List<GlobalTelemetryPayload> { items[0] } })!)
             .WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(new[] { 2, 2 }, target.Batches.Select(batch => batch.Length));
+        Assert.Equal(new[] { 2, 2, 1 }, target.Batches.Select(batch => batch.Length));
         Assert.Equal(items.Select(item => item.EventId), target.Batches.SelectMany(batch => batch).Select(item => item.EventId));
         Assert.Equal(0, wal.UncommittedRecordCount);
     }
@@ -349,9 +349,102 @@ public sealed class IngestionCapacityTests : IAsyncDisposable
         using var processor = new TelemetryBatchProcessor(new TelemetryChannelBroker(options), wal, target,
             Substitute.For<IHostApplicationLifetime>(), options, NullLogger<TelemetryBatchProcessor>.Instance);
         await processor.StartAsync(CancellationToken.None);
-        await Assert.ThrowsAsync<IOException>(() => processor.ExecuteTask!);
+        IOException error = await Assert.ThrowsAsync<IOException>(() => processor.ExecuteTask!);
+        Assert.Contains("DatabaseBatchByteCapacity", error.Message);
         Assert.True(wal.HasSealedSegment);
         Assert.Empty(target.Batches);
+    }
+
+    [Fact]
+    public async Task ChannelAndBatchBudgetsAreValidatedBeforeAnyPublicationOrBackgroundWork()
+    {
+        var settings = Settings();
+        var options = Options.Create(settings);
+        await using var wal = new WriteAheadLogger(options);
+        var broker = new TelemetryChannelBroker(options);
+        settings.DatabaseBatchByteCapacity = 0;
+        Assert.Equal("_maxItemBytes", Assert.Throws<ArgumentOutOfRangeException>(() => new TelemetryChannelBroker(options)).ParamName);
+        Assert.Equal("_options.DatabaseBatchByteCapacity", Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new TelemetryBatchProcessor(broker, wal, new RecordingWriter(), Substitute.For<IHostApplicationLifetime>(),
+                options, NullLogger<TelemetryBatchProcessor>.Instance)).ParamName);
+    }
+
+    [Fact]
+    public async Task ADatabaseBatchCanFillItsByteBudgetExactly()
+    {
+        var settings = Settings();
+        settings.DatabaseBatchCommitSize = 1;
+        settings.DatabaseBatchByteCapacity = TelemetryPayloadMemory.Estimate(Payload());
+        var options = Options.Create(settings);
+        await using var wal = new WriteAheadLogger(options);
+        var broker = new TelemetryChannelBroker(options);
+        var target = new RecordingWriter();
+        using var processor = new TelemetryBatchProcessor(broker, wal, target, Substitute.For<IHostApplicationLifetime>(),
+            options, NullLogger<TelemetryBatchProcessor>.Instance);
+        var items = Enumerable.Range(0, 7).Select(_ => Payload()).ToArray();
+        foreach (var item in items)
+        {
+            await wal.AppendAsync(item, CancellationToken.None);
+            await broker.PublishAsync(item, CancellationToken.None);
+        }
+        await processor.StartAsync(CancellationToken.None);
+        await target.AllReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await processor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(items.Select(item => item.EventId), target.Batches.SelectMany(batch => batch).Select(item => item.EventId));
+        Assert.All(target.Batches, batch => Assert.Equal(settings.DatabaseBatchByteCapacity, batch.Sum(TelemetryPayloadMemory.Estimate)));
+        Assert.Equal(0, wal.UncommittedRecordCount);
+    }
+
+    [Fact]
+    public void ShutdownBufferAccountingCannotWrapAnOversizedRetainedTotal()
+    {
+        var item = Payload();
+        item.MetadataJson = new string('x', 1_048_576);
+        var buffer = Enumerable.Repeat(item, 1024).ToList();
+        var method = typeof(TelemetryBatchProcessor).GetMethod("BufferBytes",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var error = Assert.Throws<System.Reflection.TargetInvocationException>(() => method.Invoke(null, new object[] { buffer }));
+        Assert.IsType<OverflowException>(error.InnerException);
+    }
+
+    [Fact]
+    public async Task OnlyASuccessfulChannelPublicationIncrementsTheIngestionCounter()
+    {
+        var settings = Settings();
+        settings.MemoryChannelByteCapacity = TelemetryPayloadMemory.Estimate(Payload()) * 2;
+        var broker = new TelemetryChannelBroker(Options.Create(settings));
+        AsyncLocal<bool> observing = new();
+        List<long> measurements = [];
+        using System.Diagnostics.Metrics.MeterListener listener = new();
+        listener.InstrumentPublished = (instrument, meter) =>
+        {
+            if (instrument.Name == "nealytics_events_ingested_total")
+            {
+                meter.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((_, value, _, _) =>
+        {
+            if (observing.Value)
+            {
+                measurements.Add(value);
+            }
+        });
+        listener.Start();
+        observing.Value = true;
+        try
+        {
+            await broker.PublishAsync(Payload(), CancellationToken.None);
+            var oversized = Payload();
+            oversized.MetadataJson = new string('x', 2048);
+            IOException error = await Assert.ThrowsAsync<IOException>(() => broker.PublishAsync(oversized, CancellationToken.None).AsTask());
+            Assert.Contains("channel or database batch byte capacity", error.Message);
+        }
+        finally
+        {
+            observing.Value = false;
+        }
+        Assert.Equal(new long[] { 1 }, measurements);
     }
 
     private sealed class RecordingWriter : ITelemetryBatchWriter

@@ -29,13 +29,7 @@ public sealed class TelemetryChannelBroker
         _admission = new WalAdmission(settings.MemoryChannelCapacity, settings.MemoryChannelByteCapacity);
         _maxItemBytes = Math.Min(settings.MemoryChannelByteCapacity, settings.DatabaseBatchByteCapacity);
         ArgumentOutOfRangeException.ThrowIfLessThan(_maxItemBytes, 1);
-        _channel = channel ?? Channel.CreateBounded<QueuedPayload>(
-            new BoundedChannelOptions(settings.MemoryChannelCapacity)
-            {
-                SingleReader = true,
-                SingleWriter = false,
-                FullMode = BoundedChannelFullMode.Wait
-            });
+        _channel = channel ?? Channel.CreateBounded<QueuedPayload>(settings.MemoryChannelCapacity);
         Reader = new BudgetedReader(_channel.Reader, _admission);
     }
 

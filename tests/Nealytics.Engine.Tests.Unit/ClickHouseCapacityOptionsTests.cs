@@ -20,7 +20,8 @@ public sealed class ClickHouseCapacityOptionsTests
     {
         TelemetryEngineOptions options = new();
         typeof(TelemetryEngineOptions).GetProperty(property)!.SetValue(options, value);
-        Assert.Throws<ArgumentOutOfRangeException>(() => new ClickHouseConnectionFactory(Options.Create(options)));
+        ArgumentOutOfRangeException error = Assert.Throws<ArgumentOutOfRangeException>(() => new ClickHouseConnectionFactory(Options.Create(options)));
+        Assert.Equal("configuration." + property, error.ParamName);
     }
 
     [Theory]

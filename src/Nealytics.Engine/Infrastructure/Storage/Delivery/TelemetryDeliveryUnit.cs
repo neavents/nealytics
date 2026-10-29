@@ -8,7 +8,7 @@ public sealed class TelemetryDeliveryUnit
     public int Version { get; init; } = 1;
     public Guid Id { get; init; } = Guid.NewGuid();
     public Guid SourceId { get; init; }
-    public string Schema { get; init; } = string.Empty;
+    public required string Schema { get; init; }
     public DateTimeOffset IngestedAt { get; init; } = DateTimeOffset.UtcNow;
-    public GlobalTelemetryPayload[] Items { get; init; } = [];
+    public required GlobalTelemetryPayload[] Items { get; init; }
 }

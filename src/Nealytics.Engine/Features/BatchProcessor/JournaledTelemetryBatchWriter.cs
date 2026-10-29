@@ -19,6 +19,7 @@ internal sealed class JournaledTelemetryBatchWriter : ITelemetryBatchWriter, IDe
     private readonly WriteAheadLogger _wal;
     private readonly TimeSpan _retryAge;
     private readonly RollupRegistry? _rollups;
+    private readonly TimeProvider _clock;
     private bool _loaded;
     private TelemetryDeliveryUnit? _pending;
     private ExceptionDispatchInfo? _preparationFailure;
@@ -28,7 +29,8 @@ internal sealed class JournaledTelemetryBatchWriter : ITelemetryBatchWriter, IDe
         TelemetryDeliveryJournal journal,
         WriteAheadLogger wal,
         IOptions<TelemetryEngineOptions> options,
-        RollupRegistry? rollups = null)
+        RollupRegistry? rollups = null,
+        TimeProvider? clock = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(options.Value.DeliveryRetryMaxAgeSeconds, 1);
         if (options.Value.EnableAsyncInsert)
@@ -36,6 +38,7 @@ internal sealed class JournaledTelemetryBatchWriter : ITelemetryBatchWriter, IDe
             throw new InvalidOperationException("Replay-safe delivery requires EnableAsyncInsert=false on ClickHouse 25.3.");
         }
         _rollups = rollups;
+        _clock = clock ?? TimeProvider.System;
         _writer = writer;
         _journal = journal;
         _wal = wal;
@@ -72,7 +75,8 @@ internal sealed class JournaledTelemetryBatchWriter : ITelemetryBatchWriter, IDe
             {
                 SourceId = await _writer.GetSourceIdAsync(cancellationToken),
                 Schema = _writer.SchemaFingerprint,
-                Items = remaining.ToArray()
+                Items = remaining.ToArray(),
+                IngestedAt = _clock.GetUtcNow()
             };
             try
             {
@@ -113,7 +117,8 @@ internal sealed class JournaledTelemetryBatchWriter : ITelemetryBatchWriter, IDe
         {
             throw new InvalidDataException("Pending delivery storage or schema changed; restore its original declaration before replay.");
         }
-        if (DateTimeOffset.UtcNow - unit.IngestedAt > _retryAge || unit.IngestedAt > DateTimeOffset.UtcNow)
+        DateTimeOffset now = _clock.GetUtcNow();
+        if (now - unit.IngestedAt >= _retryAge || unit.IngestedAt > now)
         {
             throw new InvalidDataException("The delivery retry safety window expired; an offline reconciliation is required.");
         }
