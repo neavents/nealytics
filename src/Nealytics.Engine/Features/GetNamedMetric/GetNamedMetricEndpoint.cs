@@ -19,6 +19,7 @@ public static class GetNamedMetricEndpoint
             string name,
             HttpContext context,
             NamedMetricRegistry metrics,
+            EventSegmentRegistry segments,
             QueryColumns columns,
             MeasureRegistry measures,
             TenantAttributeRegistry tenantAttributes,
@@ -31,7 +32,8 @@ public static class GetNamedMetricEndpoint
                 context.Request.Query["from"].ToString(), context.Request.Query["to"].ToString(),
                 context.Request.Query["traffic"].ToString(),
                 context.Request.Query["filter"].Select(value => value!).ToArray(),
-                metrics, columns, measures, options.Value.DefaultSessionQueryRangeHours, DateTime.UtcNow);
+                metrics, columns, measures, options.Value.DefaultSessionQueryRangeHours, DateTime.UtcNow,
+                segments, context.Request.Query["segment"].ToString());
             if (parsed.Request is null)
             {
                 return parsed.StatusCode == 403 ? Results.Forbid() : Results.Json(parsed.Error, statusCode: parsed.StatusCode);

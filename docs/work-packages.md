@@ -91,6 +91,15 @@ C1 is functionally qualified on `feat/analytics-customization-c1-named-metrics`;
 A/B prerequisites through a normal feature merge. The owner authorized continuing beyond A/B;
 C remains the current implementation track, with D/E following bounded customer workflows.
 
+C2 is functionally qualified on `feat/analytics-customization-c2-event-segments`; see the
+[reusable event-segment brief](packages/c2-event-segments.md) and
+[verification evidence](packages/c2-verification.md). It adds one bounded AND selection
+to named metrics without changing ingestion or introducing user/session cohort semantics.
+
+C remains partially implemented: named metrics and event segments are complete bounded slices.
+Reports, formulas, transforms, project overrides and hybrid planning remain separate work.
+New D/E packages have not started, and hosted-platform work remains outside current scope.
+
 The [C1 timestamp review](packages/c1-time-boundary-review.md) records an inherited DateTime
 parameter-inference limitation in legacy reads. The new metric slice binds timestamps explicitly;
 broader legacy corrections remain a separate compatibility review.

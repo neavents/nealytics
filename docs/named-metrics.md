@@ -1,5 +1,7 @@
 # Named metrics
 
+Named metric queries also accept an optional [reusable event segment](event-segments.md).
+
 Named metrics are operator declarations in the existing `TelemetryEngine` configuration.
 They activate at restart and run through the existing self-hosted executable and ClickHouse.
 Ingestion requests stay unchanged.

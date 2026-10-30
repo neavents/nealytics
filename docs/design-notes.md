@@ -388,3 +388,20 @@ before aggregation, and empty sums explicitly coalesce to zero after nullable wi
 Timestamp parameters explicitly use the driver's DateTime2 representation to retain fractional
 seconds and the full supported calendar range. See [the operator guide](named-metrics.md),
 [C1 scope](packages/c1-named-metrics.md) and [the boundary review](packages/c1-time-boundary-review.md).
+
+## C2 event selection declarations
+
+Event segments compile existing typed filters once at startup, with a bounded immutable catalog.
+They select rows for C1 metrics through one optional query parameter; they neither change
+ingestion nor persist a materialization. AND composition retains every authorization and metric
+scope, and unit safety runs after composition. Tenant-attribute membership declarations are
+excluded because they depend on mutable tenant state rather than event fields. Existing numeric
+filter comparisons remain Float64; exact integer/decimal predicates require a separate contract.
+Schema discovery exposes the original declarations, and the generated response records the
+selected segment name. Live editing, OR trees and cross-event cohorts are separate capabilities.
+
+Mutation qualification separates pure managed logic from storage execution. Schema-changing
+fixtures run with one worker and early abort disabled: parallel add/drop and cleanup operations
+on the shared test table can invalidate fixture cleanup. The two scopes retain the complete
+original executable-mutant set and 100% thresholds; ordinary suites and artifact smoke remain
+independent checks. Failed/partial reports retain their original source identity.

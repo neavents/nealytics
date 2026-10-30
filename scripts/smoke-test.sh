@@ -83,6 +83,10 @@ TelemetryEngine__NamedMetrics__1__Name=smoke_total \
 TelemetryEngine__NamedMetrics__1__Aggregation=sum \
 TelemetryEngine__NamedMetrics__1__Measure=m_uint32 \
 TelemetryEngine__NamedMetrics__1__EventType=smoke \
+TelemetryEngine__EventSegments__0__Name=positive \
+TelemetryEngine__EventSegments__0__Filters__0='m_uint32>0' \
+TelemetryEngine__EventSegments__1__Name=empty_selection \
+TelemetryEngine__EventSegments__1__Filters__0='event_type:missing' \
 OTEL_SDK_DISABLED=true \
 "$OUT/Nealytics.Engine" > "$LOG" 2>&1 &
 ENGINE_PID=$!
@@ -222,6 +226,7 @@ import json
 from pathlib import Path
 schema = json.loads(Path('/tmp/smoke-read.out').read_text())
 assert {metric['name'] for metric in schema['namedMetrics']} == {'smoke_count', 'smoke_total'}
+assert {segment['name'] for segment in schema['eventSegments']} == {'positive', 'empty_selection'}
 PY
 check "named/count" "/api/v1/analytics/metrics/smoke_count?from=$FROM&to=$TO"
 python3 - <<'PY'
@@ -237,6 +242,20 @@ import json
 from pathlib import Path
 metric = json.loads(Path('/tmp/smoke-read.out').read_text())
 assert metric['name'] == 'smoke_total' and metric['value'] == '11200'
+PY
+check "named/segment" "/api/v1/analytics/metrics/smoke_total?from=$FROM&to=$TO&segment=positive"
+python3 - <<'PY'
+import json
+from pathlib import Path
+metric = json.loads(Path('/tmp/smoke-read.out').read_text())
+assert metric['value'] == '11200' and metric['segment'] == 'positive'
+PY
+check "named/empty-segment" "/api/v1/analytics/metrics/smoke_count?from=$FROM&to=$TO&segment=empty_selection"
+python3 - <<'PY'
+import json
+from pathlib import Path
+metric = json.loads(Path('/tmp/smoke-read.out').read_text())
+assert metric['value'] == '0' and metric['segment'] == 'empty_selection'
 PY
 check "funnel"               "/api/v1/analytics/funnel?from=$FROM&to=$TO&step=smoke&step=smoke"
 check "funnel/segmented"     "/api/v1/analytics/funnel?from=$FROM&to=$TO&step=smoke&step=smoke&breakdownBy=d_lowcard"

@@ -74,7 +74,8 @@ public sealed class GetNamedMetricQuery
             From = request.Scope.From,
             To = request.Scope.To,
             Value = NormalizeValue(value),
-            Unit = request.Definition.Unit
+            Unit = request.Definition.Unit,
+            Segment = request.Segment
         };
     }
 

@@ -74,6 +74,12 @@ builder.Services.AddSingleton(namedMetricRegistry);
 TenantAttributeRegistry tenantAttributeRegistry = new(engineOpts);
 builder.Services.AddSingleton(tenantAttributeRegistry);
 
+QueryColumns queryColumns = new(dimensionRegistry, tenantAttributeRegistry);
+builder.Services.AddSingleton(queryColumns);
+
+EventSegmentRegistry eventSegmentRegistry = new(engineOpts, queryColumns, measureRegistry);
+builder.Services.AddSingleton(eventSegmentRegistry);
+
 RollupRegistry rollupRegistry = new(engineOpts, dimensionRegistry, measureRegistry, tenantAttributeRegistry);
 builder.Services.AddSingleton(rollupRegistry);
 
@@ -230,7 +236,6 @@ builder.Services.AddScoped<GetDistributionQuery>();
 builder.Services.AddScoped<GetRetentionQuery>();
 builder.Services.AddSingleton<GetEventTypesQuery>();
 builder.Services.AddSingleton<GetColumnPopulationQuery>();
-builder.Services.AddSingleton(new QueryColumns(dimensionRegistry, tenantAttributeRegistry));
 
 static void ConfigureOtlp(OtlpExporterOptions options)
 {

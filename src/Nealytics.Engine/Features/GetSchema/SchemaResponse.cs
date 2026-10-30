@@ -85,6 +85,9 @@ public sealed class SchemaResponse
     public IReadOnlyList<Nealytics.Engine.Infrastructure.Configuration.NamedMetric> NamedMetrics { get; init; }
         = Array.Empty<Nealytics.Engine.Infrastructure.Configuration.NamedMetric>();
 
+    public IReadOnlyList<Nealytics.Engine.Infrastructure.Configuration.EventSegment> EventSegments { get; init; }
+        = Array.Empty<Nealytics.Engine.Infrastructure.Configuration.EventSegment>();
+
     public IReadOnlyList<string> Grains { get; init; } = Array.Empty<string>();
 
     public IReadOnlyList<SchemaRollup> Rollups { get; init; } = Array.Empty<SchemaRollup>();
