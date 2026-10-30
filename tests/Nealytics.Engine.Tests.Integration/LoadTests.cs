@@ -14,6 +14,13 @@ namespace Nealytics.Engine.Tests.Integration;
 // burst commits quickly. Used only by the load / zero-loss-under-concurrency guard below.
 public sealed class LoadTestWebApplicationFactory : WebApplicationFactory<Program>
 {
+    public LoadTestWebApplicationFactory()
+    {
+        Environment.SetEnvironmentVariable("TelemetryEngine__JwtSymmetricKey",
+            "this-is-a-test-jwt-key-at-least-32-bytes-long!!");
+        Environment.SetEnvironmentVariable("TelemetryEngine__AllowedProjectKeys", "test-key-1,test-key-2");
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.ConfigureAppConfiguration(config =>
@@ -24,6 +31,8 @@ public sealed class LoadTestWebApplicationFactory : WebApplicationFactory<Progra
                 ["TelemetryEngine:AllowedProjectKeys"] = "test-key-1,test-key-2",
                 ["TelemetryEngine:ClickHouseConnectionString"] = ClickHouseTestSupport.ConnectionString,
                 ["TelemetryEngine:WriteAheadLogDirectory"] = Path.Combine(Path.GetTempPath(), $"nealytics_wal_load_{Guid.NewGuid():N}"),
+                ["TelemetryEngine:MaxConcurrentIngestionRequests"] = "64",
+                ["TelemetryEngine:IngestionRequestByteBudget"] = "67108864",
                 ["TelemetryEngine:RateLimitPermitCount"] = "100000000",
                 ["TelemetryEngine:RateLimitWindowSeconds"] = "1",
                 ["TelemetryEngine:RateLimitQueueSize"] = "1000000",

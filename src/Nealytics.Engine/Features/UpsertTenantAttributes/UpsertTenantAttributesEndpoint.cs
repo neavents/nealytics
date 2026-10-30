@@ -11,6 +11,7 @@ using Nealytics.Engine.Features.IngestTelemetry;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Security;
 using Nealytics.Engine.Infrastructure.Serialization;
+using Nealytics.Engine.Infrastructure.Storage;
 
 public static class UpsertTenantAttributesEndpoint
 {
@@ -68,6 +69,7 @@ public static class UpsertTenantAttributesEndpoint
             return Results.Ok(new TenantAttributesResponse { Tenants = parsed.TenantCount, Values = parsed.Rows.Count });
         })
         .WithName("UpsertTenantAttributes")
+        .WithMetadata(new ClickHouseWorkloadMetadata(ClickHouseWorkload.Maintenance))
         .Produces<TenantAttributesResponse>(StatusCodes.Status200OK)
         .RequireRateLimiting("ingestion");
     }

@@ -1,6 +1,7 @@
 namespace Nealytics.Engine.Infrastructure.Serialization;
 
 using System;
+using Nealytics.Engine.Infrastructure.Storage.Delivery;
 using System.Text.Json.Serialization;
 using System.Collections.Generic;
 using Nealytics.Engine.Features.GetProjectTimeline;
@@ -20,6 +21,10 @@ using Nealytics.Engine.Features.ValidateTelemetry;
 public sealed class GlobalTelemetryPayload
 {
     public Guid EventId { get; set; } = Guid.NewGuid();
+
+    [JsonInclude]
+    [JsonPropertyName("_walRecordId")]
+    internal Guid WalRecordId { get; set; }
     public string ProjectId { get; init; } = string.Empty;
     public string TenantId { get; init; } = string.Empty;
     public string SessionId { get; init; } = string.Empty;
@@ -54,6 +59,7 @@ public sealed class GlobalTelemetryPayload
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(GlobalTelemetryPayload))]
+[JsonSerializable(typeof(TelemetryDeliveryUnit))]
 [JsonSerializable(typeof(List<GlobalTelemetryPayload>))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 [JsonSerializable(typeof(ProjectTimelineResponse))]

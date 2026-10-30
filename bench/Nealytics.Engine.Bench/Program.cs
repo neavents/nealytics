@@ -4,6 +4,9 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using System.Threading.Channels;
+using Nealytics.Engine.Bench.Measurements;
 using Octonica.ClickHouseClient;
 
 // Nealytics single-pod load-test harness.
@@ -46,7 +49,7 @@ await PreflightSourceAsync(client, options);
 if (options.Warmup > 0)
 {
     Console.WriteLine($"Warmup: {options.Warmup} requests...");
-    await RunLevelAsync(client, options, Math.Min(32, options.Concurrency.Max()), options.Warmup, 0, $"warmup-{Now()}", false);
+    await RunLevelAsync(client, options, Math.Min(32, options.Concurrency.Max()), options.Warmup, 0, $"warmup-{Now()}", false, false);
 }
 
 List<LevelResult> results = new List<LevelResult>();
@@ -68,7 +71,32 @@ Console.WriteLine("\n" + report);
 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(options.OutFile))!);
 await File.AppendAllTextAsync(options.OutFile, report + "\n");
 Console.WriteLine($"Appended results to {options.OutFile}");
-return results.Any(r => r.Errors > 0 || (options.IsWriteMode && options.VerifyLoss && r.Stored >= 0 && r.Stored < r.EventsSent)) ? 1 : 0;
+
+if (options.ManifestFile is not null)
+{
+    BenchmarkManifest manifest = new()
+    {
+        Revision = Environment.GetEnvironmentVariable("GIT_SHA") ?? "uncommitted",
+        Target = BenchmarkManifest.SafeTarget(options.BaseUrl),
+        Mode = options.Mode,
+        WarmupRequests = options.Warmup,
+        RequestsPerLevel = options.Requests,
+        DurationSeconds = options.Duration,
+        OfferedRequestsPerSecond = options.OfferedRate,
+        EventsPerRequest = options.Mode == "beacon" ? options.BeaconBatch : 1,
+        VerifyStoredCount = options.IsWriteMode && options.VerifyLoss,
+        ClickHouseVersion = await GetClickHouseVersionAsync(options.ClickHouseConnectionString),
+        DeclaredEngineSettings = BenchmarkManifest.CaptureSettings(Environment.GetEnvironmentVariable),
+        Levels = results
+    };
+
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(options.ManifestFile))!);
+    await File.WriteAllTextAsync(options.ManifestFile, JsonSerializer.Serialize(manifest, BenchmarkJsonContext.Default.BenchmarkManifest));
+    Console.WriteLine($"Wrote manifest to {options.ManifestFile}");
+}
+
+return results.All(result => BenchmarkVerification.Passed(
+    result, options.IsWriteMode && options.VerifyLoss)) ? 0 : 1;
 
 async Task WaitForLivenessAsync(HttpClient c)
 {
@@ -90,13 +118,29 @@ async Task WaitForLivenessAsync(HttpClient c)
     throw new InvalidOperationException($"Target {options.BaseUrl} never became live (GET /health).");
 }
 
-async Task<LevelResult> RunLevelAsync(HttpClient c, BenchOptions opt, int concurrency, int requests, double durationSeconds, string tenant, bool countLoss)
+async Task<LevelResult> RunLevelAsync(
+    HttpClient c, BenchOptions opt, int concurrency, int requests, double durationSeconds,
+    string tenant, bool countLoss, bool measure = true)
 {
-    List<double>[] workerLatencies = new List<double>[concurrency];
-    int ok = 0;
-    int errors = 0;
+    LatencyHistogram acknowledgments = new();
+    LatencyHistogram scheduledLatencies = new();
+    LatencyHistogram visibility = new();
+    ArrivalSchedule schedule = new(measure ? opt.OfferedRate : 0);
+    long ok = 0;
+    long errors = 0;
     long peakQueue = 0;
     long seq = -1;
+    long visibilityDropped = 0;
+    long visibilityTimeouts = 0;
+    Channel<(Guid EventId, long Started)> probes = Channel.CreateBounded<(Guid, long)>(64);
+    bool probeVisibility = measure && opt.IsWriteMode && opt.VisibilityEvery > 0;
+    Task visibilityTask = probeVisibility
+        ? ObserveVisibilityAsync(opt.ClickHouseConnectionString, tenant, probes.Reader, visibility,
+            () => Interlocked.Increment(ref visibilityTimeouts))
+        : Task.CompletedTask;
+    using Process process = Process.GetCurrentProcess();
+    TimeSpan cpuBefore = process.TotalProcessorTime;
+    long allocatedBefore = GC.GetTotalAllocatedBytes();
 
     using CancellationTokenSource metricsCts = new CancellationTokenSource();
     Task metricsTask = opt.MetricsUrl is null
@@ -112,10 +156,9 @@ async Task<LevelResult> RunLevelAsync(HttpClient c, BenchOptions opt, int concur
         int workerIndex = w;
         workers[workerIndex] = Task.Run(async () =>
         {
-            List<double> local = new List<double>(4096);
             while (true)
             {
-                if (durationSeconds > 0)
+                if (!schedule.IsOpenLoop && durationSeconds > 0)
                 {
                     if (sw.Elapsed.TotalSeconds >= durationSeconds)
                     {
@@ -127,24 +170,52 @@ async Task<LevelResult> RunLevelAsync(HttpClient c, BenchOptions opt, int concur
                 {
                     break;
                 }
+                TimeSpan due = schedule.Offset(i);
+
+                if (schedule.IsOpenLoop && durationSeconds > 0 && due.TotalSeconds >= durationSeconds)
+                {
+                    break;
+                }
+
+                TimeSpan delay = due - sw.Elapsed;
+
+                while (schedule.IsOpenLoop && delay > TimeSpan.Zero)
+                {
+                    await Task.Delay(delay < TimeSpan.FromMilliseconds(1) ? TimeSpan.FromMilliseconds(1) : delay);
+                    delay = due - sw.Elapsed;
+                }
+
+                bool probe = probeVisibility && i % opt.VisibilityEvery == 0;
+                Guid eventId = probe ? Guid.NewGuid() : Guid.Empty;
                 long startTicks = Stopwatch.GetTimestamp();
-                bool success = await SendOneAsync(c, opt, tenant, i, jwt);
+                bool success = await SendOneAsync(c, opt, tenant, i, jwt, eventId);
                 double ms = Stopwatch.GetElapsedTime(startTicks).TotalMilliseconds;
+                scheduledLatencies.Record(schedule.IsOpenLoop ? sw.Elapsed.TotalMilliseconds - due.TotalMilliseconds : ms);
                 if (success)
                 {
-                    local.Add(ms);
+                    acknowledgments.Record(ms);
                     Interlocked.Increment(ref ok);
+
+                    if (probe && !probes.Writer.TryWrite((eventId, startTicks)))
+                    {
+                        Interlocked.Increment(ref visibilityDropped);
+                    }
                 }
                 else
                 {
                     Interlocked.Increment(ref errors);
                 }
             }
-            workerLatencies[workerIndex] = local;
         });
     }
     await Task.WhenAll(workers);
     sw.Stop();
+    TimeSpan clientCpu = process.TotalProcessorTime - cpuBefore;
+    long clientAllocated = GC.GetTotalAllocatedBytes() - allocatedBefore;
+    process.Refresh();
+    long clientWorkingSet = process.WorkingSet64;
+    probes.Writer.Complete();
+    await visibilityTask;
 
     metricsCts.Cancel();
     try { await metricsTask; } catch { }
@@ -153,17 +224,12 @@ async Task<LevelResult> RunLevelAsync(HttpClient c, BenchOptions opt, int concur
     int eventsPerRequest = opt.Mode == "beacon" ? opt.BeaconBatch : 1;
     double throughput = ok / Math.Max(elapsedSeconds, 1e-9);
 
-    double[] okLatencies = workerLatencies
-        .Where(l => l is not null)
-        .SelectMany(l => l!)
-        .OrderBy(v => v)
-        .ToArray();
-
     long eventsSent = (long)ok * eventsPerRequest;
     long stored = countLoss ? await PollStoredCountAsync(opt.ClickHouseConnectionString, tenant, eventsSent) : -1;
 
     return new LevelResult
     {
+        TenantId = tenant,
         Concurrency = concurrency,
         Ok = ok,
         Errors = errors,
@@ -172,16 +238,26 @@ async Task<LevelResult> RunLevelAsync(HttpClient c, BenchOptions opt, int concur
         EventThroughput = throughput * eventsPerRequest,
         EventsPerRequest = eventsPerRequest,
         EventsSent = eventsSent,
-        P50 = Percentile(okLatencies, 50),
-        P95 = Percentile(okLatencies, 95),
-        P99 = Percentile(okLatencies, 99),
-        Max = okLatencies.Length > 0 ? okLatencies[^1] : 0,
+        P50 = acknowledgments.Percentile(50),
+        P95 = acknowledgments.Percentile(95),
+        P99 = acknowledgments.Percentile(99),
+        Max = acknowledgments.MaximumMilliseconds,
+        ScheduledP95 = scheduledLatencies.Percentile(95),
+        ScheduledP99 = scheduledLatencies.Percentile(99),
+        VisibilitySamples = visibility.Count,
+        VisibilityP95 = visibility.Count == 0 ? null : visibility.Percentile(95),
+        VisibilityP99 = visibility.Count == 0 ? null : visibility.Percentile(99),
+        VisibilityDropped = visibilityDropped,
+        VisibilityTimeouts = visibilityTimeouts,
+        ClientCpuMilliseconds = clientCpu.TotalMilliseconds,
+        ClientAllocatedBytes = clientAllocated,
+        ClientWorkingSetBytes = clientWorkingSet,
         PeakQueue = peakQueue,
         Stored = stored
     };
 }
 
-async Task<bool> SendOneAsync(HttpClient c, BenchOptions opt, string tenant, long i, string? jwt)
+async Task<bool> SendOneAsync(HttpClient c, BenchOptions opt, string tenant, long i, string? jwt, Guid eventId)
 {
     try
     {
@@ -195,7 +271,7 @@ async Task<bool> SendOneAsync(HttpClient c, BenchOptions opt, string tenant, lon
         {
             using HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/telemetry/track?k={opt.ProjectKey}")
             {
-                Content = new StringContent(TrackPayload("bench", tenant, $"s{i}"), Encoding.UTF8, "application/json")
+                Content = new StringContent(TrackPayload("bench", tenant, $"s{i}", eventId), Encoding.UTF8, "application/json")
             };
             using HttpResponseMessage res = await c.SendAsync(req);
             return res.StatusCode == HttpStatusCode.Accepted;
@@ -205,7 +281,7 @@ async Task<bool> SendOneAsync(HttpClient c, BenchOptions opt, string tenant, lon
         {
             using HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/telemetry/beacon?k={opt.ProjectKey}")
             {
-                Content = new StringContent(BeaconPayload("bench", tenant, i, opt.BeaconBatch, opt.Declared), Encoding.UTF8, "application/json")
+                Content = new StringContent(BeaconPayload("bench", tenant, i, opt.BeaconBatch, opt.Declared, eventId), Encoding.UTF8, "application/json")
             };
             using HttpResponseMessage res = await c.SendAsync(req);
             return res.StatusCode is HttpStatusCode.NoContent or HttpStatusCode.Accepted;
@@ -304,17 +380,18 @@ static async Task PreflightSourceAsync(HttpClient c, BenchOptions opt)
     Console.WriteLine($"Preflight: mode={opt.Mode} source={source} rows={rows}");
 }
 
-static string TrackPayload(string projectId, string tenantId, string sessionId)
+static string TrackPayload(string projectId, string tenantId, string sessionId, Guid eventId)
 {
     string timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
-    return $"{{\"projectId\":\"{projectId}\",\"tenantId\":\"{tenantId}\",\"sessionId\":\"{sessionId}\",\"eventType\":\"bench\",\"metadataJson\":\"{{}}\",\"timestamp\":\"{timestamp}\"}}";
+    string identity = eventId == Guid.Empty ? string.Empty : $"\"eventId\":\"{eventId}\",";
+    return $"{{{identity}\"projectId\":\"{projectId}\",\"tenantId\":\"{tenantId}\",\"sessionId\":\"{sessionId}\",\"eventType\":\"bench\",\"metadataJson\":\"{{}}\",\"timestamp\":\"{timestamp}\"}}";
 }
 
 // Only carries dimensions and measures when the bench schema is mounted. Sending them to an engine
 // that declares none is not harmless: the sanitizer drops each unknown key, counts it and logs it,
 // so the write benchmark would be measuring rejection bookkeeping and the run would fill the log
 // with drops that look like a defect.
-static string BeaconPayload(string projectId, string tenantId, long i, int batch, bool declared)
+static string BeaconPayload(string projectId, string tenantId, long i, int batch, bool declared, Guid eventId)
 {
     string timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
     StringBuilder sb = new StringBuilder("[");
@@ -324,7 +401,8 @@ static string BeaconPayload(string projectId, string tenantId, long i, int batch
         {
             sb.Append(',');
         }
-        sb.Append($"{{\"projectId\":\"{projectId}\",\"tenantId\":\"{tenantId}\",\"sessionId\":\"s{i}_{j}\",\"eventType\":\"bench\",\"metadataJson\":\"{{}}\",\"timestamp\":\"{timestamp}\"");
+        string identity = j == 0 && eventId != Guid.Empty ? $"\"eventId\":\"{eventId}\"," : string.Empty;
+        sb.Append($"{{{identity}\"projectId\":\"{projectId}\",\"tenantId\":\"{tenantId}\",\"sessionId\":\"s{i}_{j}\",\"eventType\":\"bench\",\"metadataJson\":\"{{}}\",\"timestamp\":\"{timestamp}\"");
         if (declared)
         {
             long n = i * batch + j;
@@ -370,6 +448,64 @@ static async Task<long> CountAsync(string connectionString, string tenant)
     }
 }
 
+static async Task<string?> GetClickHouseVersionAsync(string connectionString)
+{
+    try
+    {
+        await using ClickHouseConnection connection = new(connectionString);
+        await connection.OpenAsync();
+        await using ClickHouseCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT version()";
+        return Convert.ToString(await command.ExecuteScalarAsync(), CultureInfo.InvariantCulture);
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine($"ClickHouse version measurement unavailable: {exception.GetType().Name}");
+        return null;
+    }
+}
+
+static async Task ObserveVisibilityAsync(
+    string connectionString,
+    string tenant,
+    ChannelReader<(Guid EventId, long Started)> samples,
+    LatencyHistogram observed,
+    Action timedOut)
+{
+    await using ClickHouseConnection connection = new(connectionString);
+    await connection.OpenAsync();
+
+    await foreach ((Guid eventId, long started) in samples.ReadAllAsync())
+    {
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(30));
+
+        try
+        {
+            while (true)
+            {
+                await using ClickHouseCommand command = connection.CreateCommand();
+                command.CommandText = "SELECT count() FROM nealytics_core.global_events"
+                    + " WHERE project_id = 'bench' AND tenant_id = {tenant:String} AND event_id = {event:UUID}";
+                command.Parameters.Add(new ClickHouseParameter { ParameterName = "tenant", Value = tenant });
+                command.Parameters.Add(new ClickHouseParameter { ParameterName = "event", Value = eventId });
+                object? result = await command.ExecuteScalarAsync(timeout.Token);
+
+                if (Convert.ToInt64(result, CultureInfo.InvariantCulture) > 0)
+                {
+                    observed.Record(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                    break;
+                }
+
+                await Task.Delay(10, timeout.Token);
+            }
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            timedOut();
+        }
+    }
+}
+
 static async Task SampleQueueDepthAsync(HttpClient c, string metricsUrl, Action<long> observe, CancellationToken ct)
 {
     while (!ct.IsCancellationRequested)
@@ -396,23 +532,6 @@ static async Task SampleQueueDepthAsync(HttpClient c, string metricsUrl, Action<
     }
 }
 
-static double Percentile(double[] sorted, double p)
-{
-    if (sorted.Length == 0)
-    {
-        return 0;
-    }
-    double rank = p / 100.0 * (sorted.Length - 1);
-    int lo = (int)Math.Floor(rank);
-    int hi = (int)Math.Ceiling(rank);
-    if (lo == hi)
-    {
-        return sorted[lo];
-    }
-    double frac = rank - lo;
-    return sorted[lo] * (1 - frac) + sorted[hi] * frac;
-}
-
 static string MakeJwt(string key, string projectId, string tenantId, string? tenantSet = null)
 {
     long exp = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds();
@@ -434,27 +553,47 @@ static string BuildReport(BenchOptions opt, List<LevelResult> results)
 {
     string sha = Environment.GetEnvironmentVariable("GIT_SHA") ?? "uncommitted";
     string stamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture);
-    string budget = opt.Duration > 0 ? $"{opt.Duration}s/level" : $"{opt.Requests} reqs/level";
+    string budget = opt.Duration > 0
+        ? opt.Duration.ToString(CultureInfo.InvariantCulture) + "s/level"
+        : $"{opt.Requests} reqs/level";
     StringBuilder sb = new StringBuilder();
-    sb.AppendLine($"## Run {stamp} — mode=`{opt.Mode}`, target=`{opt.BaseUrl}`, git=`{sha}`");
+    sb.AppendLine($"## Run {stamp} — mode=`{opt.Mode}`, target=`{BenchmarkManifest.SafeTarget(opt.BaseUrl)}`, git=`{sha}`");
     sb.AppendLine();
     sb.AppendLine($"- budget: {budget}, events/request: {(opt.Mode == "beacon" ? opt.BeaconBatch : 1)}, verify-loss: {opt.IsWriteMode && opt.VerifyLoss}");
+    sb.AppendLine($"- offered-rate: {opt.OfferedRate} req/s (0 means closed loop); visibility sample interval: {opt.VisibilityEvery} requests (0 means disabled)");
+    sb.AppendLine("- latency histograms are bounded; percentiles and maximum are upper-bucket estimates with microsecond rounding and 1/256 power-of-two sub-buckets");
     sb.AppendLine();
     sb.AppendLine("| Concurrency | OK | Errors | req/s | events/s | p50 ms | p95 ms | p99 ms | max ms | Stored/Sent | Peak queue |");
     sb.AppendLine("|---|---|---|---|---|---|---|---|---|---|---|");
     foreach (LevelResult r in results)
     {
-        string lossCell = r.Stored < 0 ? "n/a" : $"{r.Stored}/{r.EventsSent}" + (r.Stored >= r.EventsSent ? " ✅" : " ❌");
+        string lossCell = r.Stored < 0 ? "n/a" : $"{r.Stored}/{r.EventsSent}" + (r.Stored == r.EventsSent ? " ✅" : " ❌");
         sb.AppendLine($"| {r.Concurrency} | {r.Ok} | {r.Errors} | {r.Throughput:N0} | {r.EventThroughput:N0} | {r.P50:N2} | {r.P95:N2} | {r.P99:N2} | {r.Max:N1} | {lossCell} | {r.PeakQueue} |");
     }
+    sb.AppendLine();
+    sb.AppendLine("| Concurrency | Scheduled p95 ms | Scheduled p99 ms | Visibility samples | Visibility p95 ms | Visibility p99 ms | Probe drops/timeouts | Client CPU ms | Client allocations | Client working set |");
+    sb.AppendLine("|---|---|---|---|---|---|---|---|---|---|");
+
+    foreach (LevelResult result in results)
+    {
+        string visibilityP95 = result.VisibilityP95?.ToString("N2", CultureInfo.InvariantCulture) ?? "n/a";
+        string visibilityP99 = result.VisibilityP99?.ToString("N2", CultureInfo.InvariantCulture) ?? "n/a";
+        sb.AppendLine(
+            $"| {result.Concurrency} | {result.ScheduledP95:N2} | {result.ScheduledP99:N2}"
+            + $" | {result.VisibilitySamples} | {visibilityP95} | {visibilityP99}"
+            + $" | {result.VisibilityDropped}/{result.VisibilityTimeouts} | {result.ClientCpuMilliseconds:N1}"
+            + $" | {result.ClientAllocatedBytes} | {result.ClientWorkingSetBytes} |");
+    }
+
     return sb.ToString();
 }
 
-sealed class LevelResult
+public sealed class LevelResult
 {
+    public string TenantId { get; init; } = string.Empty;
     public int Concurrency { get; init; }
-    public int Ok { get; init; }
-    public int Errors { get; init; }
+    public long Ok { get; init; }
+    public long Errors { get; init; }
     public double ElapsedSeconds { get; init; }
     public double Throughput { get; init; }
     public double EventThroughput { get; init; }
@@ -464,6 +603,16 @@ sealed class LevelResult
     public double P95 { get; init; }
     public double P99 { get; init; }
     public double Max { get; init; }
+    public double ScheduledP95 { get; init; }
+    public double ScheduledP99 { get; init; }
+    public long VisibilitySamples { get; init; }
+    public double? VisibilityP95 { get; init; }
+    public double? VisibilityP99 { get; init; }
+    public long VisibilityDropped { get; init; }
+    public long VisibilityTimeouts { get; init; }
+    public double ClientCpuMilliseconds { get; init; }
+    public long ClientAllocatedBytes { get; init; }
+    public long ClientWorkingSetBytes { get; init; }
     public long PeakQueue { get; init; }
     public long Stored { get; init; }
 
@@ -474,7 +623,7 @@ sealed class LevelResult
     }
 }
 
-sealed class BenchOptions
+public sealed class BenchOptions
 {
     public string BaseUrl { get; init; } = "http://localhost:5199";
     public string Mode { get; init; } = "track";
@@ -491,6 +640,9 @@ sealed class BenchOptions
     public string? MetricsUrl { get; init; }
     public string? ReadTenant { get; init; }
     public string? ReadSet { get; init; }
+    public string? ManifestFile { get; init; }
+    public double OfferedRate { get; init; }
+    public int VisibilityEvery { get; init; }
 
     public bool Declared { get; init; }
     public string? SeedTenant { get; init; }
@@ -499,12 +651,17 @@ sealed class BenchOptions
     public bool NeedsJwt => !IsWriteMode && Mode != "noop";
 
     public string Describe() =>
-        $"Nealytics bench: mode={Mode} target={BaseUrl} concurrency=[{string.Join(",", Concurrency)}] " +
-        (Duration > 0 ? $"duration={Duration}s/level" : $"requests={Requests}/level") +
+        $"Nealytics bench: mode={Mode} target={BenchmarkManifest.SafeTarget(BaseUrl)} concurrency=[{string.Join(",", Concurrency)}] " +
+        (Duration > 0 ? $"duration={Duration.ToString(CultureInfo.InvariantCulture)}s/level" : $"requests={Requests}/level") +
         $" warmup={Warmup}" + (Mode == "beacon" ? $" beaconBatch={BeaconBatch}" : "");
 
     public static BenchOptions Parse(string[] args)
     {
+        if (args.Length % 2 != 0)
+        {
+            throw new ArgumentException("Benchmark arguments must be option/value pairs.", nameof(args));
+        }
+
         Dictionary<string, string> map = new Dictionary<string, string>(StringComparer.Ordinal);
         for (int i = 0; i + 1 < args.Length; i += 2)
         {
@@ -513,7 +670,7 @@ sealed class BenchOptions
 
         string Env(string key, string fallback) => Environment.GetEnvironmentVariable(key) ?? fallback;
 
-        return new BenchOptions
+        BenchOptions options = new()
         {
             BaseUrl = map.GetValueOrDefault("url", Env("BENCH_URL", "http://localhost:5199")),
             Mode = map.GetValueOrDefault("mode", "track"),
@@ -531,8 +688,22 @@ sealed class BenchOptions
             OutFile = map.GetValueOrDefault("out", "bench/RESULTS.md"),
             MetricsUrl = map.GetValueOrDefault("metrics-url", Environment.GetEnvironmentVariable("BENCH_METRICS_URL") ?? "") is { Length: > 0 } m ? m : null,
             ReadTenant = map.GetValueOrDefault("read-tenant", "") is { Length: > 0 } t ? t : null,
-            ReadSet = map.GetValueOrDefault("read-set", "") is { Length: > 0 } rs ? rs : null
+            ReadSet = map.GetValueOrDefault("read-set", "") is { Length: > 0 } rs ? rs : null,
+            ManifestFile = map.GetValueOrDefault("manifest", "") is { Length: > 0 } manifest ? manifest : null,
+            OfferedRate = double.Parse(map.GetValueOrDefault("rate", "0"), CultureInfo.InvariantCulture),
+            VisibilityEvery = int.Parse(map.GetValueOrDefault("visibility-every", "0"), CultureInfo.InvariantCulture)
         };
+
+        _ = new ArrivalSchedule(options.OfferedRate);
+
+        if (options.Concurrency.Length == 0 || options.Concurrency.Any(value => value <= 0)
+            || options.Requests <= 0 || !double.IsFinite(options.Duration) || options.Duration < 0
+            || options.Warmup < 0 || options.BeaconBatch <= 0 || options.VisibilityEvery < 0)
+        {
+            throw new ArgumentException("Invalid benchmark workload limits.", nameof(args));
+        }
+
+        return options;
     }
 
     static int[] ParseInts(string csv) =>
