@@ -1,0 +1,28 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj",
+      "../../tests/Nealytics.Engine.Tests.Integration/Nealytics.Engine.Tests.Integration.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~NamedMetric|FullyQualifiedName~EventSegment",
+    "mutate": [
+      "Features/GetNamedMetric/GetNamedMetricQuery.cs",
+      "Features/GetSchema/GetSchemaEndpoint.cs{5280..5317}",
+      "Features/GetSchema/GetSchemaEndpoint.cs{5318..5373}"
+    ],
+    "mutation-level": "Complete",
+    "concurrency": 1,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    }
+  }
+}
