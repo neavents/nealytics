@@ -14,6 +14,8 @@ internal sealed class ClickHouseConnectionPool : IAsyncDisposable
     private readonly int _idleCapacity;
     private readonly TimeSpan _timeout;
     private readonly TimeSpan _maxIdle;
+    private readonly Func<ClickHouseConnection, CancellationToken, Task> _openAsync;
+    private readonly Func<ClickHouseConnection, ValueTask> _disposeConnectionAsync;
     private readonly SemaphoreSlim _gate;
     private readonly CancellationTokenSource _shutdown = new CancellationTokenSource();
     private readonly Queue<IdleConnection> _idle = new Queue<IdleConnection>();
@@ -26,12 +28,21 @@ internal sealed class ClickHouseConnectionPool : IAsyncDisposable
 
     private readonly record struct IdleConnection(ClickHouseConnection Connection, long Since);
 
-    public ClickHouseConnectionPool(string connectionString, int capacity, int idleCapacity, TimeSpan timeout, TimeSpan maxIdle)
+    public ClickHouseConnectionPool(
+        string connectionString,
+        int capacity,
+        int idleCapacity,
+        TimeSpan timeout,
+        TimeSpan maxIdle,
+        Func<ClickHouseConnection, CancellationToken, Task>? openAsync = null,
+        Func<ClickHouseConnection, ValueTask>? disposeConnectionAsync = null)
     {
         _connectionString = connectionString;
         _idleCapacity = idleCapacity;
         _timeout = timeout;
         _maxIdle = maxIdle;
+        _openAsync = openAsync ?? (static (connection, cancellationToken) => connection.OpenAsync(cancellationToken));
+        _disposeConnectionAsync = disposeConnectionAsync ?? (static connection => connection.DisposeAsync());
         _gate = new SemaphoreSlim(capacity, capacity);
     }
 
@@ -89,13 +100,13 @@ internal sealed class ClickHouseConnectionPool : IAsyncDisposable
                 {
                     break;
                 }
-                await connection.DisposeAsync();
+                await _disposeConnectionAsync(connection);
                 connection = null;
             }
             if (connection is null)
             {
                 connection = new ClickHouseConnection(_connectionString);
-                await connection.OpenAsync(deadline.Token);
+                await _openAsync(connection, deadline.Token);
             }
             deadline.Token.ThrowIfCancellationRequested();
             PooledClickHouseConnection result = new PooledClickHouseConnection(connection, this);
@@ -118,7 +129,7 @@ internal sealed class ClickHouseConnectionPool : IAsyncDisposable
                 {
                     if (connection is not null)
                     {
-                        await connection.DisposeAsync();
+                        await _disposeConnectionAsync(connection);
                     }
                 }
                 finally
@@ -181,8 +192,30 @@ internal sealed class ClickHouseConnectionPool : IAsyncDisposable
     {
         lock (_disposeSync)
         {
-            _disposeTask ??= DisposeCoreAsync();
+            if (_disposeTask is null)
+            {
+                TaskCompletionSource completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _disposeTask = completion.Task;
+                _ = CompleteDisposalAsync(completion);
+            }
             return new ValueTask(_disposeTask);
+        }
+    }
+
+    private async Task CompleteDisposalAsync(TaskCompletionSource completion)
+    {
+        try
+        {
+            await DisposeCoreAsync();
+            completion.SetResult();
+        }
+        catch (OperationCanceledException error)
+        {
+            completion.SetCanceled(error.CancellationToken);
+        }
+        catch (Exception error)
+        {
+            completion.SetException(error);
         }
     }
 
@@ -193,17 +226,25 @@ internal sealed class ClickHouseConnectionPool : IAsyncDisposable
         {
             _disposed = true;
             idleAcquisitions = _acquisitions == 0 ? Task.CompletedTask
-                : (_acquisitionsIdle ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+                : (_acquisitionsIdle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
         }
-        _shutdown.Cancel();
         try
         {
+            Task cancellation = CancelAcquisitions();
             await idleAcquisitions;
             List<ClickHouseConnection> idle = TakeIdle();
-            Task[] shutdowns = new Task[idle.Count];
+            Task[] shutdowns = new Task[idle.Count + 1];
+            shutdowns[0] = cancellation;
             for (int index = 0; index < idle.Count; index++)
             {
-                shutdowns[index] = idle[index].DisposeAsync().AsTask();
+                try
+                {
+                    shutdowns[index + 1] = _disposeConnectionAsync(idle[index]).AsTask();
+                }
+                catch (Exception error)
+                {
+                    shutdowns[index + 1] = Task.FromException(error);
+                }
             }
             await Task.WhenAll(shutdowns);
         }
@@ -211,6 +252,19 @@ internal sealed class ClickHouseConnectionPool : IAsyncDisposable
         {
             _gate.Dispose();
             _shutdown.Dispose();
+        }
+    }
+
+    private Task CancelAcquisitions()
+    {
+        try
+        {
+            _shutdown.Cancel();
+            return Task.CompletedTask;
+        }
+        catch (Exception error)
+        {
+            return Task.FromException(error);
         }
     }
 

@@ -48,6 +48,13 @@ No latency gain may come from weakening persistence or changing producer behavio
 
 ## 4. Tests and evidence
 
+Owner update, 2026-10-30: stop all benchmarks and performance measurement. Continue building
+and developing with the existing correctness, durability, coverage, mutation, integration,
+end-to-end and native-platform tests. Do not restart measurements without a new owner request.
+This overrides the measurement acceptance requirements below for the current development work;
+retain historical evidence without using it for speed or capacity claims. Keep existing backend
+defaults until an explicitly authorized selection decision.
+
 Every implementation package includes tests and a second review against its brief and acceptance
 criteria. The owner requires extensive verification, not a minimal happy-path test.
 

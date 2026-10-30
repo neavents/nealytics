@@ -3,6 +3,17 @@
 Updated 2026-10-30. This is an unfinished qualification checkpoint, not release evidence.
 The engine remains on feature branches; nothing was merged into main.
 
+The owner stopped all benchmarks and measurements on 2026-10-30. No measurement process or
+benchmark container remains active. Development and correctness qualification continue. This
+document preserves historical observations and does not authorize another measurement run.
+
+The owner reports that the earlier measurements ran with Battery Saver enabled. Their power
+state was not captured per point. The timing tables and earlier saturation numbers below are
+historical observations and must not supply a performance comparison or speedup claim. The
+replacement measurement used only custom ingestion with io_uring and recorded Low Power Mode
+throughout each point. That measurement work is also stopped. Correctness counts and test results remain
+separate evidence.
+
 ## Preliminary latency measurements
 
 Values are milliseconds, each the median of three per-run percentiles. They are request

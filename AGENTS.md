@@ -26,6 +26,9 @@ Use [docs/work-packages.md](docs/work-packages.md) to select a bounded package.
 
 ## Verification and branches
 
+- The owner stopped all benchmarking and performance measurement on 2026-10-30. Do not start
+  load sweeps, throughput/latency measurements or profiling unless the owner re-enables them.
+  Continue implementation, unit/integration/end-to-end tests, coverage, mutation and native checks.
 - Add meaningful unit, real-dependency integration, end-to-end, and failure-path coverage for
   changed behavior. Cover all new/changed maintained production lines and branches; report
   repository-wide coverage and investigate inherited gaps rather than conceal them.

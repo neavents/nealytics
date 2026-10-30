@@ -22,6 +22,14 @@ public sealed class ClickHouseConnectionFactory : IAsyncDisposable
     private readonly ClickHouseConnectionPool[] _pools;
 
     public ClickHouseConnectionFactory(IOptions<TelemetryEngineOptions> options)
+        : this(options, null, null)
+    {
+    }
+
+    internal ClickHouseConnectionFactory(
+        IOptions<TelemetryEngineOptions> options,
+        Func<ClickHouseConnection, CancellationToken, Task>? openAsync,
+        Func<ClickHouseConnection, ValueTask>? disposeConnectionAsync)
     {
         TelemetryEngineOptions configuration = options.Value;
         ArgumentOutOfRangeException.ThrowIfNegative(configuration.ConnectionPoolSize);
@@ -45,13 +53,14 @@ public sealed class ClickHouseConnectionFactory : IAsyncDisposable
             ? configuration.UnpooledConnectionLimit : configuration.ConnectionPoolSize;
         _pools =
         [
-            new ClickHouseConnectionPool(connectionString, reads, configuration.ConnectionPoolSize, timeout, maxIdle),
+            new ClickHouseConnectionPool(connectionString, reads, configuration.ConnectionPoolSize,
+                timeout, maxIdle, openAsync, disposeConnectionAsync),
             new ClickHouseConnectionPool(connectionString, configuration.WriteConnectionPoolSize,
-                configuration.WriteConnectionPoolSize, timeout, maxIdle),
+                configuration.WriteConnectionPoolSize, timeout, maxIdle, openAsync, disposeConnectionAsync),
             new ClickHouseConnectionPool(connectionString, configuration.ProbeConnectionPoolSize,
-                configuration.ProbeConnectionPoolSize, timeout, maxIdle),
+                configuration.ProbeConnectionPoolSize, timeout, maxIdle, openAsync, disposeConnectionAsync),
             new ClickHouseConnectionPool(connectionString, configuration.MaintenanceConnectionPoolSize,
-                configuration.MaintenanceConnectionPoolSize, timeout, maxIdle)
+                configuration.MaintenanceConnectionPoolSize, timeout, maxIdle, openAsync, disposeConnectionAsync)
         ];
         ProbeTimeout = TimeSpan.FromSeconds(configuration.ProbeTimeoutSeconds);
         MaximumConcurrentConnections = (long)reads + configuration.WriteConnectionPoolSize

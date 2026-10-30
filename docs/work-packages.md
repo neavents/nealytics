@@ -2,6 +2,11 @@
 
 Status: Implementation index 0.2
 
+Owner update, 2026-10-30: all benchmarking and performance measurement are stopped. Continue
+the A/B implementation and functional qualification using the engineering rules. Measurement
+requirements in the original package descriptions are deferred by this instruction. Do not
+resume them or switch defaults automatically.
+
 Date: 2026-10-29
 
 Purpose: A short execution index for the [detailed roadmap](product-strategy-and-roadmap.md).

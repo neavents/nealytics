@@ -35,3 +35,16 @@ Admission partitions use workload enum keys instead of arbitrary string names.
 The focused regressions pass. The next mutation reports, final pool lifecycle review and combined
 same-source coverage must establish which findings are closed. No survivor is silently accepted,
 no maintained source is excluded, and no threshold is reduced by this checkpoint.
+
+The follow-up unit-only run at source 62b78fe passed its unchanged 100% threshold: 402 assertion
+kills, ten timeout detections, zero survivors and zero uncovered mutants. Fifty selected mutants
+did not compile. Its immutable source and complete report are retained in
+artifacts/verification/ab-sweep-unit-qualified-20261030. The timeout cases involve missing
+registration/completion signals, drain/read progress, invalid retained-record limits and replay
+retry paths; they remain explicitly distinct from assertion kills. This does not qualify the
+separate pool scope or establish repository-wide coverage.
+
+The pool follow-up adds deterministic late-cancellation, reservation/shutdown ordering, cleanup
+failure, reentrancy and synchronization-resource ownership tests, plus gated real-server disposal
+tests. A separate Complete-level pool configuration covers the factory, pool and lease with the
+same 100% thresholds and no maintained-source exclusions. Its result is not assumed passed.

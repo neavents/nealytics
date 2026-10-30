@@ -1,5 +1,17 @@
 # B6 saturation and throughput ceilings
 
+Status, 2026-10-30: the owner stopped all benchmarks and measurement. No sweep or power-observed
+rerun should be resumed. This file preserves the earlier protocol as historical context;
+implementation and correctness tests continue under the current engineering rules.
+
+The last rerun was restricted to custom ingestion plus io_uring at the owner's request.
+Earlier timing was reported to have used Battery Saver and is excluded from its comparison.
+Record the macOS power source and Low Power Mode settings at each point's start, every five
+seconds during observation, and at completion. A point with an enabled Low Power Mode sample
+or a missing power observation is ineligible. The workstation can remain on battery with Low
+Power Mode off; record that condition explicitly rather than calling it an AC-powered run.
+The wider comparison below is the original protocol, not authorization to resume other modes.
+
 Compare the original f1cfe3e engine with the integrated candidate, including managed/custom
 request execution and managed/io_uring WAL. Every point owns a fresh database and WAL volume.
 Keep durable fsync, synchronous inserts, database schema, client payload, CPU and memory limits
