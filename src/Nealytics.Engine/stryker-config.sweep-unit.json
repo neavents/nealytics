@@ -18,7 +18,7 @@
       "Features/BatchProcessor/TelemetryDeliverySchema.cs",
       "Features/BatchProcessor/ClickHouseBatchWriter.cs{1437..1503}",
       "Infrastructure/Storage/Wal/WalDirectory.cs{476..590}",
-      "Infrastructure/Storage/Wal/WalDirectory.cs{4388..4976}"
+      "Infrastructure/Storage/Wal/WalDirectory.cs{4600..5188}"
     ],
     "mutation-level": "Complete",
     "concurrency": 2,

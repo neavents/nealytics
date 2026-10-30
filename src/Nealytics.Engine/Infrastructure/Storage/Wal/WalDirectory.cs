@@ -21,13 +21,7 @@ internal sealed class WalDirectory : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         _directory = Path.GetFullPath(directory);
         _synchronize = synchronize ?? WalDirectoryDurability.Synchronize;
-        List<string> missing = new List<string>();
-        string? current = _directory;
-        while (current is not null && !Directory.Exists(current))
-        {
-            missing.Add(current);
-            current = Path.GetDirectoryName(current);
-        }
+        List<string> missing = FindMissingDirectories(_directory, Directory.Exists);
         Directory.CreateDirectory(_directory);
         _lease = new FileStream(Path.Combine(_directory, ".nealytics-wal.lock"),
             FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
@@ -50,6 +44,18 @@ internal sealed class WalDirectory : IDisposable
             _lease.Dispose();
             throw;
         }
+    }
+
+    internal static List<string> FindMissingDirectories(string directory, Func<string, bool> exists)
+    {
+        List<string> missing = new List<string>();
+        string? current = directory;
+        while (current is not null && !exists(current))
+        {
+            missing.Add(current);
+            current = Path.GetDirectoryName(current);
+        }
+        return missing;
     }
 
     public string ActivePath => Path.Combine(_directory, "telemetry_wal.log");

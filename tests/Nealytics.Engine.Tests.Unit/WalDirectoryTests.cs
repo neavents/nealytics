@@ -122,7 +122,11 @@ public sealed class WalDirectoryTests
     [InlineData(false, false, Architecture.X64)]
     public void UnverifiedDirectorySynchronizationPlatformsFailClosed(bool linux, bool macOS, Architecture architecture)
     {
-        Assert.Throws<PlatformNotSupportedException>(() => WalDirectoryDurability.OpenFlags(linux, macOS, architecture));
+        var error = Assert.Throws<PlatformNotSupportedException>(
+            () => WalDirectoryDurability.OpenFlags(linux, macOS, architecture));
+        Assert.Equal(linux
+            ? "WAL directory durability requires a verified host architecture."
+            : "WAL directory durability requires a verified directory synchronization backend.", error.Message);
     }
 
     private sealed class Harness : IDisposable

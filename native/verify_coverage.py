@@ -12,6 +12,8 @@ def main():
     args = parser.parse_args()
     required = {
         "Storage/WriteAheadLogger.cs", "Wal/WalFileFactory.cs", "Wal/WalFileSelection.cs",
+        "Wal/WalDirectory.cs", "Wal/WalDirectoryDurability.cs", "Wal/IWalDirectoryOperations.cs",
+        "Wal/PosixWalDirectoryOperations.cs",
         *["Wal/Native/" + name + ".cs" for name in (
             "LiburingWalContext", "NativeWalApi", "NativeWalException", "NativeWalFile",
             "NativeWalHandle", "NativeWalPlatform", "NativeWalSignal",

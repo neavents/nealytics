@@ -27,3 +27,16 @@ every storage controller's power-loss behavior.
 This slice establishes startup sealing and metadata ownership. Enabling live size-based rotation
 and checkpoint deletion also requires A6's persisted delivery identities, so committed records
 are not silently regrouped into additive rollups after restart. Those gates remain explicit.
+
+Directory metadata calls now use a narrow internal POSIX I/O boundary. Each result captures its
+error code at the syscall boundary instead of rereading ambient thread-local error state later.
+Opening transfers its successful handle to synchronization; synchronization always closes it,
+whereas lease acquisition borrows the caller's handle. Only EINTR is retried. Other open, sync
+and lock errors fail immediately with their captured native error.
+
+Deterministic fault cases cover interrupted opening/synchronization/locking, stale error codes
+on successful calls, permanent errors, handle ownership and exceptions during synchronization.
+Missing-ancestor discovery is a pure startup helper with a filesystem probe, preserving the
+existing deepest-first ordering and the boundary where no ancestor can be observed. Native
+coverage now explicitly includes the directory owner and these metadata helpers; the prior
+native gate did not qualify their complete fault paths.

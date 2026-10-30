@@ -6,46 +6,55 @@ using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
-internal static partial class WalDirectoryDurability
+internal static class WalDirectoryDurability
 {
-    public static void Synchronize(string path)
+    private static readonly IWalDirectoryOperations Operations = new PosixWalDirectoryOperations();
+
+    public static void Synchronize(string path) => Synchronize(path, Operations);
+
+    internal static void Synchronize(string path, IWalDirectoryOperations operations)
     {
+        ArgumentNullException.ThrowIfNull(operations);
         int flags = OpenFlags(OperatingSystem.IsLinux(), OperatingSystem.IsMacOS(), RuntimeInformation.ProcessArchitecture);
-        int descriptor;
+        WalDirectoryOpen opened;
         do
         {
-            descriptor = Open(path, flags);
+            opened = operations.Open(path, flags);
         }
-        while (descriptor < 0 && Marshal.GetLastPInvokeError() == 4);
-        if (descriptor < 0)
+        while (opened.Handle is null && opened.Error == 4);
+        if (opened.Handle is null)
         {
-            throw Failure(path);
+            throw Failure(path, opened.Error);
         }
-        using SafeFileHandle handle = new SafeFileHandle((IntPtr)descriptor, ownsHandle: true);
-        int result;
+        using SafeFileHandle handle = opened.Handle;
+        WalDirectoryStatus result;
         do
         {
-            result = Synchronize(handle);
+            result = operations.Synchronize(handle);
         }
-        while (result < 0 && Marshal.GetLastPInvokeError() == 4);
-        if (result < 0)
+        while (result.Value < 0 && result.Error == 4);
+        if (result.Value < 0)
         {
-            throw Failure(path);
+            throw Failure(path, result.Error);
         }
     }
 
-    public static void AcquireLease(SafeFileHandle handle)
+    public static void AcquireLease(SafeFileHandle handle) => AcquireLease(handle, Operations);
+
+    internal static void AcquireLease(SafeFileHandle handle, IWalDirectoryOperations operations)
     {
+        ArgumentNullException.ThrowIfNull(handle);
+        ArgumentNullException.ThrowIfNull(operations);
         OpenFlags(OperatingSystem.IsLinux(), OperatingSystem.IsMacOS(), RuntimeInformation.ProcessArchitecture);
-        int result;
+        WalDirectoryStatus result;
         do
         {
-            result = Lock(handle, 6);
+            result = operations.Lock(handle, 6);
         }
-        while (result < 0 && Marshal.GetLastPInvokeError() == 4);
-        if (result < 0)
+        while (result.Value < 0 && result.Error == 4);
+        if (result.Value < 0)
         {
-            throw new IOException("Could not acquire exclusive WAL directory ownership.", new Win32Exception(Marshal.GetLastPInvokeError()));
+            throw new IOException("Could not acquire exclusive WAL directory ownership.", new Win32Exception(result.Error));
         }
     }
 
@@ -67,15 +76,6 @@ internal static partial class WalDirectoryDurability
         throw new PlatformNotSupportedException("WAL directory durability requires a verified directory synchronization backend.");
     }
 
-    private static IOException Failure(string path) =>
-        new IOException($"Could not synchronize WAL directory '{path}'.", new Win32Exception(Marshal.GetLastPInvokeError()));
-
-    [LibraryImport("libc", EntryPoint = "open", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
-    private static partial int Open(string path, int flags);
-
-    [LibraryImport("libc", EntryPoint = "fsync", SetLastError = true)]
-    private static partial int Synchronize(SafeFileHandle handle);
-
-    [LibraryImport("libc", EntryPoint = "flock", SetLastError = true)]
-    private static partial int Lock(SafeFileHandle handle, int operation);
+    private static IOException Failure(string path, int error) =>
+        new IOException($"Could not synchronize WAL directory '{path}'.", new Win32Exception(error));
 }
