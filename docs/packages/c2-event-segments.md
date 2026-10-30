@@ -3,6 +3,8 @@
 Branch: `feat/analytics-customization-c2-event-segments`.
 Prerequisite: qualified C1 category snapshot `1ca7153`.
 
+Status: functionally qualified; see [verification evidence](c2-verification.md).
+
 Declare named version-1 event segments in the existing TelemetryEngine schema configuration.
 Each segment contains one to 32 existing typed filter expressions, combined with AND. Permit
 core event columns, active event dimensions and active measures. Exclude tenant-attribute

@@ -1,8 +1,10 @@
 # Categories A and B implementation evidence
 
-Next-track status: C1 named metrics is functionally complete at `e373697`; see its
-[qualification](packages/c1-verification.md). The historical A/B counts below describe their
-own qualified snapshot. Current C1 suites pass 2,216 unit and 207 integration cases.
+Next-track status: C1 named metrics and C2 reusable event segments are functionally complete;
+see [C1 qualification](packages/c1-verification.md) and [C2 qualification](packages/c2-verification.md).
+Current production source is `f84e1c2`, with verification-only follow-ups through `df4bbd5`.
+The latest suites pass 2,283 unit and 219 integration cases; all 304 scoped managed/storage
+mutants are assertion-killed. The A/B counts below describe their historical qualified snapshot.
 
 Objective: complete correctness/resource safety and ingestion performance, including native Linux
 io_uring and custom ingestion, with existing callers unchanged. Main remains untouched.

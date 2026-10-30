@@ -10,8 +10,9 @@ Built this because I wanna use collected data to show my tenants their analytics
 
 This service is so fast and very easy to configure. Nealytics is one binary, one config file, one ClickHouse instance.
 
-Use [named metrics](docs/named-metrics.md) and [event segments](docs/event-segments.md) to declare reusable counts and measure aggregations,
-discover them through the schema API, and execute them within an authenticated tenant scope.
+Use [named metrics](docs/named-metrics.md) to declare reusable counts and measure aggregations.
+Apply [event segments](docs/event-segments.md) to reuse typed filters. Discover both through the
+schema API and query within an authenticated tenant scope.
 
 ---
 

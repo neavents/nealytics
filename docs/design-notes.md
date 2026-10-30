@@ -399,3 +399,9 @@ excluded because they depend on mutable tenant state rather than event fields. E
 filter comparisons remain Float64; exact integer/decimal predicates require a separate contract.
 Schema discovery exposes the original declarations, and the generated response records the
 selected segment name. Live editing, OR trees and cross-event cohorts are separate capabilities.
+
+Mutation qualification separates pure managed logic from storage execution. Schema-changing
+fixtures run with one worker and early abort disabled: parallel add/drop and cleanup operations
+on the shared test table can invalidate fixture cleanup. The two scopes retain the complete
+original executable-mutant set and 100% thresholds; ordinary suites and artifact smoke remain
+independent checks. Failed/partial reports retain their original source identity.

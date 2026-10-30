@@ -1,5 +1,10 @@
 # C1 named metrics qualification
 
+Current analytics-branch verification is superseded by the isolated combined C1/C2 scopes in
+[C2 qualification](c2-verification.md). C2 discovered a parallel shared-schema mutation-fixture
+race and added independent boundary/security assertions. Its final 266 managed and 38 storage
+cases all pass at 100%. The source-specific numbers below remain historical C1 evidence.
+
 Qualified production and test source: `e3736973421fef935298ad5a5d6ff3c1a0da8179`.
 Date: 2026-10-30. Scope: [C1 brief](c1-named-metrics.md).
 
