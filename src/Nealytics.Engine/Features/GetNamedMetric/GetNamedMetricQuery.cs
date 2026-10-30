@@ -1,5 +1,6 @@
 namespace Nealytics.Engine.Features.GetNamedMetric;
 
+using System;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Text;
@@ -52,7 +53,16 @@ public sealed class GetNamedMetricQuery
         command.CommandText = sql;
         foreach (KeyValuePair<string, object?> parameter in parameters)
         {
-            command.Parameters.Add(new ClickHouseParameter { ParameterName = parameter.Key, Value = parameter.Value });
+            ClickHouseParameter bound = new ClickHouseParameter
+            {
+                ParameterName = parameter.Key,
+                Value = parameter.Value
+            };
+            if (parameter.Value is DateTime)
+            {
+                bound.ClickHouseDbType = ClickHouseDbType.DateTime2;
+            }
+            command.Parameters.Add(bound);
         }
         await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         await reader.ReadAsync(cancellationToken);

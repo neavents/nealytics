@@ -90,6 +90,10 @@ C1 is active on `feat/analytics-customization-c1-named-metrics`; see the
 A/B prerequisites through a normal feature merge. The owner authorized continuing beyond A/B;
 C remains the current implementation track, with D/E following bounded customer workflows.
 
+The [C1 timestamp review](packages/c1-time-boundary-review.md) records an inherited DateTime
+parameter-inference limitation in legacy reads. The new metric slice binds timestamps explicitly;
+broader legacy corrections remain a separate compatibility review.
+
 Deliver an end-to-end slice per package, rather than a whole subsystem:
 
 - C: one named metric through declaration, validation, execution, and schema discovery. Add formula

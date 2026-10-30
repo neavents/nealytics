@@ -31,7 +31,7 @@ public sealed record NamedMetric(
 public sealed class NamedMetricRegistry
 {
     private static readonly Regex NamePattern = new(
-        "^[a-z][a-z0-9_]{0,62}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        "^[a-z][a-z0-9_]{0,62}$", RegexOptions.Compiled);
 
     private readonly FrozenDictionary<string, NamedMetric> _byName;
 

@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
 using Nealytics.Engine.Features.BatchProcessor;
+using Nealytics.Engine.Features.GetNamedMetric;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Storage;
@@ -177,6 +178,45 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         using var narrowed = await GetAsync("events&tenant=other", null);
         using var narrowJson = JsonDocument.Parse(await narrowed.Content.ReadAsStringAsync());
         Assert.Equal("0", narrowJson.RootElement.GetProperty("value").GetString());
+    }
+
+    [Theory]
+    [InlineData("1900-01-01T00:00:00Z", "1900-01-01T00:00:00.001Z")]
+    [InlineData("2299-12-31T23:59:59.998Z", "2299-12-31T23:59:59.999Z")]
+    public async Task CalendarEdgesExecuteWithRealDateTime64Parameters(string from, string to)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var query = scope.ServiceProvider.GetRequiredService<GetNamedMetricQuery>();
+        var scalar = await query.ExecuteAsync(new NamedMetricRequest(
+            _factory.Services.GetRequiredService<NamedMetricRegistry>().Find("events")!, new QueryScope
+            {
+                ProjectId = _project, TenantId = "t",
+                From = DateTime.Parse(from, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AdjustToUniversal),
+                To = DateTime.Parse(to, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AdjustToUniversal),
+                Filters = [], TrafficClass = "normal"
+            }), CancellationToken.None);
+        Assert.Equal("0", scalar.Value);
+        using var request = Authorized("/api/v1/analytics/metrics/events?from=" + from + "&to=" + to, "t", "metrics");
+        using var response = await _client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("0", document.RootElement.GetProperty("value").GetString());
+    }
+
+    [Fact]
+    public async Task MillisecondRangesDoNotCollapseToSecondPrecision()
+    {
+        await ClickHouseTestSupport.ExecuteAsync("INSERT INTO nealytics_core.global_events"
+            + " (event_id,project_id,tenant_id,session_id,event_type,timestamp) VALUES "
+            + $"(generateUUIDv4(),'{_project}','t','s','action','2090-01-01 00:00:01.995')");
+        using var request = Authorized("/api/v1/analytics/metrics/events"
+            + "?from=2090-01-01T00:00:01.995Z&to=2090-01-01T00:00:01.999Z", "t", "metrics");
+        using var response = await _client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("1", document.RootElement.GetProperty("value").GetString());
     }
 
     private async Task<HttpResponseMessage> GetAsync(string name, string? tenant = "t")
