@@ -101,7 +101,8 @@ public sealed class EventSegmentRegistryTests
         (o => o.EventSegments[0].Filters = Enumerable.Repeat("country:x", 33).ToList(), 0, "provide between 1 and 32 nonblank filters"),
         (o => o.EventSegments[0].Filters = [null!], 0, "provide between 1 and 32 nonblank filters"),
         (o => o.EventSegments[0].Filters = ["country:x", " "], 0, "provide between 1 and 32 nonblank filters"),
-        (o => o.EventSegments[0].Filters = ["tenant.cohort:g"], 0, "tenant attributes are not event fields")
+        (o => o.EventSegments[0].Filters = ["tenant.cohort:g"], 0, "tenant attributes are not event fields"),
+        (o => o.EventSegments[0].Filters = ["country:x", "tenant.cohort:g"], 0, "tenant attributes are not event fields")
     ];
 
     public static TheoryData<int, int, string> InvalidDeclarations

@@ -57,6 +57,7 @@ public sealed class NamedMetricHttpTests : IClassFixture<NamedMetricHttpTests.Fa
     [InlineData("metrics", null, "t", "activity", "", 403)]
     [InlineData("metrics", "p", null, "activity", "", 403)]
     [InlineData("metrics", "p", "t", "activity", "?from=invalid", 400)]
+    [InlineData("metrics", "p", "t", "activity", "?to=invalid", 400)]
     [InlineData("metrics", "p", "t", "activity", "?traffic=invalid", 400)]
     [InlineData("metrics", "p", "t", "activity", "?filter=missing:x", 400)]
     public async Task ScopeIdentityAndInputFailuresReturnTheirOwnStatusBeforeStorage(
@@ -113,5 +114,20 @@ public sealed class NamedMetricHttpTests : IClassFixture<NamedMetricHttpTests.Fa
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/analytics/metrics/" + path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", new JwtSecurityTokenHandler().WriteToken(token));
         return request;
+    }
+
+    [Fact]
+    public async Task EndpointRegistrationRequiresTheMetricsScopeOnANewHost()
+    {
+        await using var factory = new Factory();
+        using var client = factory.CreateClient();
+        using var allowedRequest = Request("missing",
+            [new("scope", "metrics"), new("project_id", "p"), new("tenant_id", "t")]);
+        using var allowed = await client.SendAsync(allowedRequest);
+        Assert.Equal(HttpStatusCode.NotFound, allowed.StatusCode);
+        using var deniedRequest = Request("missing",
+            [new("scope", "schema"), new("project_id", "p"), new("tenant_id", "t")]);
+        using var denied = await client.SendAsync(deniedRequest);
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
     }
 }

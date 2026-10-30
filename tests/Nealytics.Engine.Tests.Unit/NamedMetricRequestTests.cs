@@ -96,6 +96,18 @@ public sealed class NamedMetricRequestTests
             Create(now: new DateTime(year, 1, 1, 0, 0, 0, DateTimeKind.Utc)).Error);
     }
 
+    [Theory]
+    [InlineData(1900)]
+    [InlineData(2299)]
+    public void SupportedClockYearsIncludeBothEndpoints(int year)
+    {
+        var now = new DateTime(year, 1, 2, 0, 0, 0, DateTimeKind.Utc);
+        var result = Create(now: now);
+        Assert.Equal(200, result.StatusCode);
+        Assert.Equal(now, result.Request!.Scope.To);
+        Assert.Equal(now.AddDays(-1), result.Request.Scope.From);
+    }
+
     [Fact]
     public void LargestLookbackAndSmallestPositiveLookbackPassTheirOwnValidation()
     {
@@ -224,6 +236,7 @@ public sealed class NamedMetricRequestTests
     [Fact]
     public void GeneratedSerializationPreservesNumericEncodingAndExplicitNull()
     {
+        Assert.Equal("", new NamedMetricResponse().Name);
         var response = new NamedMetricResponse
         {
             Name = "activity", Version = 1, From = Now.AddHours(-1), To = Now, Value = null, Unit = "records"
