@@ -72,37 +72,50 @@ public sealed class NamedMetricRegistryTests
             Assert.Throws<InvalidOperationException>(() => Build(options)).Message);
     }
 
-    public static TheoryData<Action<TelemetryEngineOptions>, int, string> InvalidDeclarations => new()
+    private static readonly (Action<TelemetryEngineOptions> Change, int Index, string Reason)[] InvalidCases =
+    [
+        (o => o.NamedMetrics[0] = null!, 0, "declaration is null" ),
+        (o => o.NamedMetrics[0].Name = null!, 0, "name must match [a-z][a-z0-9_]{0,62}" ),
+        (o => o.NamedMetrics[0].Name = " ", 0, "name must match [a-z][a-z0-9_]{0,62}" ),
+        (o => o.NamedMetrics[0].Name = "A", 0, "name must match [a-z][a-z0-9_]{0,62}" ),
+        (o => o.NamedMetrics[0].Name = "1a", 0, "name must match [a-z][a-z0-9_]{0,62}" ),
+        (o => o.NamedMetrics[0].Name = "a-b", 0, "name must match [a-z][a-z0-9_]{0,62}" ),
+        (o => o.NamedMetrics[0].Name = "a; SELECT 1", 0, "name must match [a-z][a-z0-9_]{0,62}" ),
+        (o => o.NamedMetrics[0].Name = new string('a', 64), 0, "name must match [a-z][a-z0-9_]{0,62}" ),
+        (o => o.NamedMetrics.Add(new() { Name = " activity " }), 1, "name is duplicated" ),
+        (o => o.NamedMetrics[0].Version = 0, 0, "only version 1 is supported" ),
+        (o => o.NamedMetrics[0].Version = -1, 0, "only version 1 is supported" ),
+        (o => o.NamedMetrics[0].Version = 2, 0, "only version 1 is supported" ),
+        (o => o.NamedMetrics[0].Aggregation = null!, 0, "aggregation must be count, sum, avg, min or max" ),
+        (o => o.NamedMetrics[0].Aggregation = " ", 0, "aggregation must be count, sum, avg, min or max" ),
+        (o => o.NamedMetrics[0].Aggregation = "p95", 0, "aggregation must be count, sum, avg, min or max" ),
+        (o => o.NamedMetrics[0].Aggregation = "sum", 0, "aggregation requires a measure" ),
+        (o => o.NamedMetrics[0].Measure = "unknown", 0, "measure is not active" ),
+        (o => { o.NamedMetrics[0].Measure = "amount"; o.Measures[0].Retired = true; }, 0, "measure is not active" ),
+        (o => { o.NamedMetrics[0].Measure = "amount"; o.Measures[0].Aggregations = "sum"; }, 0, "aggregation is not permitted by the measure" ),
+        (o => o.NamedMetrics[0].EventType = new string('e', 257), 0, "event type and unit must not exceed 256 characters" ),
+        (o => o.NamedMetrics[0].Unit = new string('u', 257), 0, "event type and unit must not exceed 256 characters" )
+    ];
+
+    public static TheoryData<int, int, string> InvalidDeclarations
     {
-        { o => o.NamedMetrics[0] = null!, 0, "declaration is null" },
-        { o => o.NamedMetrics[0].Name = null!, 0, "name must match [a-z][a-z0-9_]{0,62}" },
-        { o => o.NamedMetrics[0].Name = " ", 0, "name must match [a-z][a-z0-9_]{0,62}" },
-        { o => o.NamedMetrics[0].Name = "A", 0, "name must match [a-z][a-z0-9_]{0,62}" },
-        { o => o.NamedMetrics[0].Name = "1a", 0, "name must match [a-z][a-z0-9_]{0,62}" },
-        { o => o.NamedMetrics[0].Name = "a-b", 0, "name must match [a-z][a-z0-9_]{0,62}" },
-        { o => o.NamedMetrics[0].Name = "a; SELECT 1", 0, "name must match [a-z][a-z0-9_]{0,62}" },
-        { o => o.NamedMetrics[0].Name = new string('a', 64), 0, "name must match [a-z][a-z0-9_]{0,62}" },
-        { o => o.NamedMetrics.Add(new() { Name = " activity " }), 1, "name is duplicated" },
-        { o => o.NamedMetrics[0].Version = 0, 0, "only version 1 is supported" },
-        { o => o.NamedMetrics[0].Version = -1, 0, "only version 1 is supported" },
-        { o => o.NamedMetrics[0].Version = 2, 0, "only version 1 is supported" },
-        { o => o.NamedMetrics[0].Aggregation = null!, 0, "aggregation must be count, sum, avg, min or max" },
-        { o => o.NamedMetrics[0].Aggregation = " ", 0, "aggregation must be count, sum, avg, min or max" },
-        { o => o.NamedMetrics[0].Aggregation = "p95", 0, "aggregation must be count, sum, avg, min or max" },
-        { o => o.NamedMetrics[0].Aggregation = "sum", 0, "aggregation requires a measure" },
-        { o => o.NamedMetrics[0].Measure = "unknown", 0, "measure is not active" },
-        { o => { o.NamedMetrics[0].Measure = "amount"; o.Measures[0].Retired = true; }, 0, "measure is not active" },
-        { o => { o.NamedMetrics[0].Measure = "amount"; o.Measures[0].Aggregations = "sum"; }, 0, "aggregation is not permitted by the measure" },
-        { o => o.NamedMetrics[0].EventType = new string('e', 257), 0, "event type and unit must not exceed 256 characters" },
-        { o => o.NamedMetrics[0].Unit = new string('u', 257), 0, "event type and unit must not exceed 256 characters" }
-    };
+        get
+        {
+            var cases = new TheoryData<int, int, string>();
+            for (int index = 0; index < InvalidCases.Length; index++)
+            {
+                cases.Add(index, InvalidCases[index].Index, InvalidCases[index].Reason);
+            }
+            return cases;
+        }
+    }
 
     [Theory]
     [MemberData(nameof(InvalidDeclarations))]
-    public void InvalidDefinitionsFailBeforeActivation(Action<TelemetryEngineOptions> change, int index, string reason)
+    public void InvalidDefinitionsFailBeforeActivation(int scenario, int index, string reason)
     {
         var options = Options();
-        change(options);
+        InvalidCases[scenario].Change(options);
         Assert.Equal($"TelemetryEngine:NamedMetrics[{index}]: {reason}.",
             Assert.Throws<InvalidOperationException>(() => Build(options)).Message);
     }
