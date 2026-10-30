@@ -55,8 +55,8 @@ public sealed class NamedMetricRegistry
         {
             NamedMetricOptions declaration = configured[index]
                 ?? throw Invalid(index, "declaration is null");
-            string name = declaration.Name?.Trim() ?? string.Empty;
-            if (!NamePattern.IsMatch(name))
+            string? name = declaration.Name?.Trim();
+            if (name is null || !NamePattern.IsMatch(name))
             {
                 throw Invalid(index, "name must match [a-z][a-z0-9_]{0,62}");
             }
@@ -68,7 +68,7 @@ public sealed class NamedMetricRegistry
             {
                 throw Invalid(index, "only version 1 is supported");
             }
-            string aggregation = declaration.Aggregation?.Trim().ToLowerInvariant() ?? string.Empty;
+            string? aggregation = declaration.Aggregation?.Trim().ToLowerInvariant();
             if (aggregation is not ("count" or "sum" or "avg" or "min" or "max"))
             {
                 throw Invalid(index, "aggregation must be count, sum, avg, min or max");
