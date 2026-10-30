@@ -40,3 +40,10 @@ Missing-ancestor discovery is a pure startup helper with a filesystem probe, pre
 existing deepest-first ordering and the boundary where no ancestor can be observed. Native
 coverage now explicitly includes the directory owner and these metadata helpers; the prior
 native gate did not qualify their complete fault paths.
+
+Final metadata scope at 218cd69 passes 48 focused cases and a 100% Complete-level mutation gate
+(96 assertion kills, three nontermination detections, zero survivors/uncovered mutants). The
+same production source at e3d2599 passes the consolidated functional suites. The directory owner,
+durability helper, POSIX operations and operation records have full maintained line/branch
+coverage locally. See the [current A/B qualification](../a-b-functional-qualification.md) for
+actual-platform status, published restart checks and the inherited coverage boundary.

@@ -77,8 +77,9 @@ commentary. Production code, SQL, and configuration remain comment-free.
 - Cover all new/changed maintained production lines and branches, report repository-wide coverage,
   and run Stryker.NET mutation checks for changed managed logic. Investigate every survivor,
   uncovered mutant, and timeout; do not weaken tests or hide coverage gaps.
-- Verify relevant end-to-end, published-artifact, failure/recovery, Linux-native, and performance
-  behavior. Never report a suite or target as passing when it was not run.
-- Current CI runs the build, unit, integration, and smoke checks on pushes to main and pull requests
-  targeting main. Feature-branch checks, coverage gates, and mutation automation need explicit
-  verification-foundation setup; creating a feature branch does not enable those jobs by itself.
+- Verify relevant end-to-end, published-artifact, failure/recovery and Linux-native behavior.
+  Performance measurements remain stopped under the owner's current instruction. Never report
+  a suite or target as passing when it was not run.
+- CI runs build, unit, integration, smoke and pure harness-helper correctness checks on the
+  configured A/B feature branches as well as main. Native qualification has separate actual Linux
+  x64/ARM64 jobs. Measurement-harness integration fixtures are excluded from normal test runs.

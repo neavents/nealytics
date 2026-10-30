@@ -3,31 +3,39 @@
 Objective: complete correctness/resource safety and ingestion performance, including native Linux
 io_uring and custom ingestion, with existing callers unchanged. Main remains untouched.
 
-This is an evidence ledger, not a completion claim. A package is complete only after its named
-checks, platform requirements, and applicable coverage/mutation gates have passed.
+Current functional source: e3d2599. The agreed A/B functional milestone is complete. The owner stopped all benchmarking and performance
+measurement on 2026-10-30; those acceptance requirements and automatic default enablement are
+deferred. Current tests and limits are recorded in the [functional qualification](a-b-functional-qualification.md).
 
-| Requirement | Status | Evidence / remaining work |
+| Requirement | Current status | Evidence / boundary |
 | --- | --- | --- |
-| A1 reproducible latency, offered load, resource and visibility baseline | Implemented; qualification open | 61 benchmark unit cases and four real-Kestrel/ClickHouse cases passed; sustained final-revision runs and harness-wide changed-line coverage remain |
-| A2 HTTP compatibility and durability/failure fixtures | In progress | Nine additional real-Kestrel contract cases passed; deterministic write/flush-fault cases follow the B1 seam |
-| A3 bounded pending WAL and flush groups | Shared-core checks passed; aggregate qualification open | 1,433 unit and 148 real-ClickHouse cases passed; changed WAL scope has 100% line/branch coverage and a 100% mutation score |
-| Streaming recovery | Component/backend gates passed; aggregate durability work open | 343/343 maintained lines, 124/124 branch outcomes, 100% mutation; full integration now passes after the separate A5 routing fix |
-| A5 persisted rollup readiness | Scoped gates passed | 1,680 portable units, 168 ClickHouse integrations, 172/172 maintained scoped lines, 40/40 branch outcomes and 99/99 executable mutants; delivery and rebuild semantics remain A6 |
-| Replay-safe rollups and explicit delivery bounds | Implemented; final qualification open | Persisted replay units and pinned-server failure cases pass; combined mutation and coverage gates remain |
-| Reserved read/write/probe capacity and bounded admission | Implemented; final qualification open | Workload pools, request admission, channel/batch byte bounds and retained WAL/journal limits implemented; combined mutation and coverage gates remain |
-| B1 shared WAL I/O contract with managed baseline | Implemented; aggregate qualification open | Managed file class: 100% line/branch coverage, six executable mutants killed; 42 focused WAL/HTTP cases passed |
-| B2 native io_uring backend and packaging | Implemented; platform/artifact gates passed | Actual x64 and ARM64 native faults/sanitizers, scoped coverage/mutation, standalone and container artifacts passed; aggregate crash/performance work remains |
-| B3 native integration and operator fallback | Implemented; platform/artifact gates passed | Both actual architectures passed run 40830818024 after the terminal-channel regression; shared recovery/HTTP contracts passed; aggregate crash qualification remains |
-| B4 bounded beacon microbatches | Implemented; consolidated qualification open | 1,760 unit, 148 ClickHouse, 24 native and eleven real-native HTTP cases passed; see the B4 checkpoint |
-| B5 custom ingestion dispatcher | Implemented; final qualification open | HTTP parity passes; 57 assertion kills and eight timeout detections, zero survivors/uncovered mutants; aggregate artifact qualification remains |
-| B6 combined functional qualification | In progress; measurements stopped by owner | Continue all-mode crash/artifact and ownership checks; do not restart benchmarks or change defaults automatically |
-| Full build, unit, integration and published-artifact end-to-end | Milestone suites passed; aggregate crash qualification open | CI and actual Linux x64/ARM64 artifact jobs passed at 12a6781; isolated 184-case ClickHouse suite passed at 1d63a4b; further changes require verification |
-| Changed maintained-code line/branch coverage | Pending | Baseline unit collector includes generated source; classify and combine with integration evidence |
-| Stryker mutation checks | Partial | Shared WAL: 174 killed, 54 timeout detections; measurement helpers: 120 killed, one timeout; native boundary: 87 killed, 14 timeout detections; all three scopes have zero survivors, surrounding harness remains |
-| Source style, architecture and domain neutrality guards | Latest CI passed | Included in the feature-branch unit jobs at 12a6781; Archy remains unavailable without configured layer rules |
+| A1 measurement baseline | Deferred by owner | Historical reports retained; no measurements are run or used for current performance claims |
+| A2 compatibility and durability | Functional checks passed | Existing routes, credentials, compression/body limits, durable ACK, partial beacon and disconnect cases; four-mode published restart recovery |
+| A3/A3b bounded WAL admission and encoding | Scoped checks passed | Pending bytes/records, flush groups and encoding ownership; full suites and existing 100% mutation gates |
+| A4 streaming recovery | Scoped checks passed | Bounded reader/batch ownership, malformed/torn records and restart checks |
+| A5 persisted rollup readiness | Scoped checks passed | Persisted readiness, storage identity fencing, raw fallback and real-server failure tests |
+| A6 replay delivery | Scoped checks passed | Immutable manifests, stable membership/schema/source/time, explicit deduplication and expiry bounds; unit and real-server mutation scopes pass |
+| A7/A7b/A7c capacity and ownership | Scoped checks passed | Separate workload pools, admission/channel/batch/backlog bounds; shutdown/failure cleanup; 100% pool and delivery/admission mutation gates |
+| A8 startup segments and metadata | Scoped and actual-platform checks passed | Exclusive directory ownership, immutable recovery generations, durable publication, EINTR/error and descriptor ownership checks; 100% directory mutation gate |
+| B1 managed WAL I/O boundary | Scoped checks passed | Shared framing/accounting and explicit durable barriers, failure propagation and physical-file tests |
+| B2/B3 native backend/integration | Scoped and actual-platform checks passed | Packaged io_uring bridge, explicit operator selection/fallback and existing producer contract; actual x64/ARM64 qualification passed |
+| B4 bounded beacon groups | Scoped checks passed | Valid-prefix/rejection parity, durable grouping and explicit record/byte bounds |
+| B5 custom ingestion | Scoped checks passed | Direct bounded body reading and durable dispatch under unchanged HTTP contracts; current source fragments match passing B5 mutation scope |
+| B6 combined functional qualification | Functional qualification passed; measurement/enablement deferred | Four-mode published crash/restart, full functional suites and same-source coverage; defaults remain managed |
+| Build / unit / integration / artifact | Passed | Warning-free build, 2,110 portable units, 185 applicable pinned-server integrations, four crash/restart combinations; general CI at e3d2599 passed |
+| Changed maintained-code coverage | Combined local and actual-platform gates passed | Directory and pool files now have complete line/branch coverage; three Linux-only files are covered by the passing actual native gate |
+| Mutation | Scoped checks passed | Delivery/admission, pool, database delivery, directory and custom-ingestion configurations retain 100% thresholds and zero survivors/uncovered mutants |
+| Architecture/style/domain guards | Passed; Archy unavailable | Executable guards pass; Archy lacks configured layer rules and an initialized workspace |
 
-Current measured results and remaining gates: [sweep checkpoint updated 2026-10-30](performance-sweep-checkpoint.md).
-The historical counts below identify the source state at each earlier milestone.
+The agreed A8 scope is startup sealing and metadata ownership. Live rotation, online rebuild
+orchestration and new product/integration/hosting capabilities remain separate future work.
+Repository-wide inherited coverage gaps are reported, not described as 100% coverage.
+
+## Historical checkpoints
+
+The source-specific records below are retained for traceability. Their open findings and test
+counts describe those older snapshots; the current qualification above supersedes their status.
+Historical timing is quarantined by the owner's measurement stop.
 
 Baseline snapshot: engine f1cfe3e0c4e69bbbafc6096c02659a68986d0836; planning commit 90babda.
 Environment: macOS ARM64, .NET SDK 10.0.103; Docker provides a Linux ARM64 environment.

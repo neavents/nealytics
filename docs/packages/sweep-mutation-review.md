@@ -53,3 +53,18 @@ That pool run at 000bff5 now passes: 112 assertion kills and seven investigated 
 with no survivors or uncovered mutants. Five selected mutants fail compilation. The remaining
 database-delivery range is qualified separately, including the operator diagnostic for unsupported
 source tables; a passing unit-only or pool gate does not substitute for it.
+
+The database-delivery follow-up at 6f0d9e6 passes its separate 100% gate: eleven assertion kills,
+zero survivors, uncovered mutants or timeouts, and ten selected compile errors. It includes real
+source-table identity and the explicit replay insertion settings.
+
+The directory audit found a missing coverage boundary that the earlier native gate did not cover.
+The expanded whole-file scope at 218cd69 passes with 96 assertion kills, three nontermination
+timeout detections, zero survivors/uncovered mutants and 22 selected compile errors. Tests verify
+EINTR retries, captured errors, descriptor zero and actual descriptor release, borrowed ownership,
+lease/active durable flush order, nested parent publication, overflow and post-disposal deletion.
+The three timeouts follow ancestor or opening retry predicates that can never terminate.
+
+The exact selected production fragments in these reports match e3d2599. Combined same-source
+coverage and final functional evidence are in the [current qualification](../a-b-functional-qualification.md).
+No benchmark is required or run for this checkpoint under the owner's current instruction.
