@@ -24,7 +24,7 @@
       "Features/GetSchema/SchemaResponse.cs{3258..3456}"
     ],
     "mutation-level": "Complete",
-    "concurrency": 2,
+    "concurrency": 1,
     "break-on-initial-test-failure": true,
     "reporters": [
       "dots",
