@@ -378,3 +378,13 @@ session wins without any bookkeeping.
 
 **Sessionless server events store `''`.** Session metrics count it as one session. Filtering it out
 would change the definition of every rollup view and so mark every existing rollup as drifted.
+## Named metric execution
+
+Named metric declarations compile at startup into a bounded immutable registry. The query slice
+resolves only those definitions, uses existing authenticated scope and typed filter contracts,
+and reads raw data. Its exclusive end boundary is explicit; legacy callers retain the previous
+inclusive boundary. Numeric strings preserve large integer/decimal results, integer sums widen
+before aggregation, and empty sums explicitly coalesce to zero after nullable widening.
+Timestamp parameters explicitly use the driver's DateTime2 representation to retain fractional
+seconds and the full supported calendar range. See [the operator guide](named-metrics.md),
+[C1 scope](packages/c1-named-metrics.md) and [the boundary review](packages/c1-time-boundary-review.md).

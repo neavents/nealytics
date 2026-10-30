@@ -1,5 +1,9 @@
 # Categories A and B implementation evidence
 
+Next-track status: C1 named metrics is functionally complete at `e373697`; see its
+[qualification](packages/c1-verification.md). The historical A/B counts below describe their
+own qualified snapshot. Current C1 suites pass 2,216 unit and 207 integration cases.
+
 Objective: complete correctness/resource safety and ingestion performance, including native Linux
 io_uring and custom ingestion, with existing callers unchanged. Main remains untouched.
 

@@ -131,6 +131,7 @@ named feat/correctness-and-safety cannot also contain child refs beneath that sa
 | B4 | feat/ingestion-performance-b4-beacon-microbatches |
 | B5 | feat/ingestion-performance-b5-custom-ingestion |
 | B6 | feat/ingestion-performance-b6-qualification |
+| C1 named metrics | feat/analytics-customization-c1-named-metrics |
 
 New C-F steps receive branches when their bounded package scope is defined. Do not invent an
 implementation sequence for those categories just to populate branch names.

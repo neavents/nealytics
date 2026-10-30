@@ -113,10 +113,11 @@ public static class ScopeClause
             .Append(" = {tenantSetValue:String}");
     }
 
-    public static void AppendRaw(StringBuilder sql, in QueryScope scope)
+    public static void AppendRaw(StringBuilder sql, in QueryScope scope, bool exclusiveEnd = false)
     {
         AppendProjectAndTenant(sql, scope.TenantId, scope.TenantSet);
-        sql.Append(" AND timestamp >= {fromTimestamp:DateTime64} AND timestamp <= {toTimestamp:DateTime64}");
+        sql.Append(" AND timestamp >= {fromTimestamp:DateTime64} AND timestamp ")
+            .Append(exclusiveEnd ? "<" : "<=").Append(" {toTimestamp:DateTime64}");
         sql.Append(TrafficFilter.Clause(scope.TrafficClass));
 
         if (!string.IsNullOrEmpty(scope.EventType))

@@ -10,7 +10,7 @@ resume them or switch defaults automatically.
 Date: 2026-10-29
 
 Purpose: A short execution index for the [detailed roadmap](product-strategy-and-roadmap.md).
-Implementation is active on the A/B feature branches; consult the
+The A/B functional milestone is complete and C is the current feature track; consult the
 [evidence ledger](implementation-status.md) for passed and remaining gates. Categories organize scope; they are not single
 implementation tasks, delivery estimates, or a commitment to implement every possible integration.
 
@@ -85,6 +85,16 @@ handoff in custom mode. Broad qualification is consolidated at implementation mi
 
 ## 3. How to split the later work
 
+C1 is functionally qualified on `feat/analytics-customization-c1-named-metrics`; see the
+[named metrics brief](packages/c1-named-metrics.md) and
+[verification evidence](packages/c1-verification.md). The category branch includes the qualified
+A/B prerequisites through a normal feature merge. The owner authorized continuing beyond A/B;
+C remains the current implementation track, with D/E following bounded customer workflows.
+
+The [C1 timestamp review](packages/c1-time-boundary-review.md) records an inherited DateTime
+parameter-inference limitation in legacy reads. The new metric slice binds timestamps explicitly;
+broader legacy corrections remain a separate compatibility review.
+
 Deliver an end-to-end slice per package, rather than a whole subsystem:
 
 - C: one named metric through declaration, validation, execution, and schema discovery. Add formula
@@ -113,6 +123,6 @@ enablement are different changes. If a package introduces an unrelated failure m
 An operator switch is useful rollout control, but it does not reverse DDL or guarantee rollback
 of changed persistent formats. Do not promise a fixed duration before the brief is understood.
 
-Work initially stays on the A/B track. C-E are organized backlog, not simultaneous projects.
+Work proceeds sequentially through bounded packages. C-E are not simultaneous projects.
 Review one package's evidence before building on its changed contract; retain the longer roadmap
 as design context rather than a checklist to execute in one turn.
