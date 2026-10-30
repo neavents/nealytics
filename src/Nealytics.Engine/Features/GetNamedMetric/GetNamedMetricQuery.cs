@@ -30,7 +30,16 @@ public sealed class GetNamedMetricQuery
             column = "toInt256(" + column + ")";
         }
         StringBuilder sql = new StringBuilder("SELECT toString(");
-        sql.Append(function).Append('(').Append(column).Append(")) FROM nealytics_core.global_events");
+        if (definition.Aggregation == "sum")
+        {
+            sql.Append("coalesce(");
+        }
+        sql.Append(function).Append('(').Append(column).Append(')');
+        if (definition.Aggregation == "sum")
+        {
+            sql.Append(", 0)");
+        }
+        sql.Append(") FROM nealytics_core.global_events");
         ScopeClause.AppendRaw(sql, request.Scope, exclusiveEnd: true);
         return (sql.ToString(), ScopeClause.Parameters(request.Scope));
     }

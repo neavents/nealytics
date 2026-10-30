@@ -183,7 +183,7 @@ public sealed class NamedMetricRequestTests
     [Theory]
     [InlineData("count", null, "count()")]
     [InlineData("count", "amount", "count(amount)")]
-    [InlineData("sum", "amount", "sum(toInt256(amount))")]
+    [InlineData("sum", "amount", "coalesce(sum(toInt256(amount)), 0)")]
     [InlineData("avg", "amount", "avgOrNull(amount)")]
     [InlineData("min", "amount", "minOrNull(amount)")]
     [InlineData("max", "amount", "maxOrNull(amount)")]

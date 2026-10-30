@@ -42,11 +42,11 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         string huge = "1.7976931348623157e308";
         string[] rows =
         [
-            Row(_project, "t", "action", "normal", "2090-01-01 00:00:00.000", maximum, "u", huge, "0.1000"),
-            Row(_project, "t", "action", "normal", "2090-01-01 00:00:01.999", maximum, "u", huge, "0.2000"),
+            Row(_project, "t", "action", "normal", "2090-01-01 00:00:00.000", maximum, "u", huge, "0.1001"),
+            Row(_project, "t", "action", "normal", "2090-01-01 00:00:01.999", maximum, "u", huge, "0.2002"),
             Row(_project, "t", "action", "normal", "2090-01-01 00:00:02.000", "5", "u", "0", "5"),
             Row(_project, "t", "action", "normal", "2089-12-31 23:59:59.999", "6", "u", "0", "6"),
-            Row(_project, "t", "action", "normal", "2090-01-01 00:00:01.000", "7", "v", "NULL", "0.7000"),
+            Row(_project, "t", "action", "normal", "2090-01-01 00:00:01.000", "7", "v", "NULL", "0.7003"),
             Row(_project, "t", "action", "normal", "2090-01-01 00:00:01.000", "NULL", "u", "NULL", "NULL"),
             Row(_project, "t", "action", "bot", "2090-01-01 00:00:01.000", "9", "u", "0", "9"),
             Row(_project, "t", "different", "normal", "2090-01-01 00:00:01.000", "10", "u", "0", "10"),
@@ -99,7 +99,7 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
     [InlineData("avg_amount", "v", "7")]
     [InlineData("min_amount", "u", "9223372036854775807")]
     [InlineData("max_amount", "u", "9223372036854775807")]
-    [InlineData("sum_decimal", "", "1.0000")]
+    [InlineData("sum_decimal", "", "1.0006")]
     [InlineData("sum_float", "", null)]
     public async Task PublishedHttpShapeReturnsScopedReferenceResults(string name, string unit, string? expected)
     {
@@ -121,7 +121,10 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
 
     [Theory]
     [InlineData("count_amount", "0")]
+    [InlineData("events", "0")]
     [InlineData("sum_amount", "0")]
+    [InlineData("sum_decimal", "0")]
+    [InlineData("sum_float", "0")]
     [InlineData("avg_amount", null)]
     [InlineData("min_amount", null)]
     [InlineData("max_amount", null)]
