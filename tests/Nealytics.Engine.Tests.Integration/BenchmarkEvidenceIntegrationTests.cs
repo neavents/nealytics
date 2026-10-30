@@ -5,6 +5,7 @@ using Octonica.ClickHouseClient;
 namespace Nealytics.Engine.Tests.Integration;
 
 [Collection("ClickHouse")]
+[Trait("Category", "PerformanceMeasurement")]
 public sealed class BenchmarkEvidenceIntegrationTests
 {
     [Theory]

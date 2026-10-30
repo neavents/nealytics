@@ -383,7 +383,12 @@ public sealed class IngestionDurabilityContractTests
 
         public new HttpClient CreateClient()
         {
+            ClientOptions.AllowAutoRedirect = false;
             HttpClient client = base.CreateClient();
+            client.BaseAddress = new UriBuilder(client.BaseAddress!)
+            {
+                Host = IPAddress.Loopback.ToString()
+            }.Uri;
             Assert.Equal(_backend, Services.GetRequiredService<WriteAheadLogger>().Selection.Backend);
             return client;
         }

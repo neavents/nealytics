@@ -44,7 +44,11 @@ The simplest way to run them locally:
 
 That script starts ClickHouse via `docker-compose.test.yml`, waits for it to be healthy, runs the suite, and tears the container down afterwards. Set `KEEP_CLICKHOUSE=1` to leave it running between runs.
 
-To point the tests at an existing ClickHouse instead, just export `TelemetryEngine__ClickHouseConnectionString` and run `dotnet test tests/Nealytics.Engine.Tests.Integration` directly. The tests never assume a specific container name or port.
+To point the tests at an existing ClickHouse instead, export `TelemetryEngine__ClickHouseConnectionString`
+and run `dotnet test tests/Nealytics.Engine.Tests.Integration --filter 'Category!=PerformanceMeasurement'`.
+The tests never assume a specific container name or port. The owner stopped measurements on
+2026-10-30; the default script and CI exclude the tagged measurement-harness fixtures. Pure helper
+unit and mutation tests continue without running workloads or collecting performance results.
 
 ### Coverage
 

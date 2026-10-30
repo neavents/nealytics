@@ -129,7 +129,7 @@ jobs:
           TelemetryEngine__JwtSymmetricKey: "integration-test-key-at-least-32-bytes-long!!"
           TelemetryEngine__AllowedProjectKeys: "test-key-1,test-key-2"
           TelemetryEngine__WriteAheadLogDirectory: "/tmp/nealytics-ci-wal/"
-        run: dotnet test tests/Nealytics.Engine.Tests.Integration --verbosity normal
+        run: dotnet test tests/Nealytics.Engine.Tests.Integration --filter 'Category!=PerformanceMeasurement' --verbosity normal
 
   smoke-test:
     runs-on: ubuntu-latest
