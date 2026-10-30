@@ -48,8 +48,19 @@ No latency gain may come from weakening persistence or changing producer behavio
 
 ## 4. Tests and evidence
 
+Owner update, 2026-10-30: stop all benchmarks and performance measurement. Continue building
+and developing with the existing correctness, durability, coverage, mutation, integration,
+end-to-end and native-platform tests. Do not restart measurements without a new owner request.
+This overrides the measurement acceptance requirements below for the current development work;
+retain historical evidence without using it for speed or capacity claims. Keep existing backend
+defaults until an explicitly authorized selection decision.
+
 Every implementation package includes tests and a second review against its brief and acceptance
 criteria. The owner requires extensive verification, not a minimal happy-path test.
+
+Use focused tests during implementation. The owner's later instruction is to avoid rerunning
+every suite for each change. Consolidate full-suite, coverage, mutation and platform qualification
+at meaningful implementation milestones, and repeat them when failures or later changes justify it.
 
 | Layer | Required evidence |
 | --- | --- |
@@ -106,6 +117,14 @@ named feat/correctness-and-safety cannot also contain child refs beneath that sa
 | A1 | feat/correctness-and-safety-a1-latency-baseline |
 | A2 | feat/correctness-and-safety-a2-compatibility-and-durability |
 | A3 | feat/correctness-and-safety-a3-bounded-wal-admission |
+| A3b | feat/correctness-and-safety-a3b-encoding-reservations |
+| A4 | feat/correctness-and-safety-a4-streaming-recovery |
+| A5 | feat/correctness-and-safety-a5-rollup-readiness |
+| A6 | feat/correctness-and-safety-a6-replay-delivery |
+| A7 | feat/correctness-and-safety-a7-resource-capacity |
+| A7b | feat/correctness-and-safety-a7b-request-admission |
+| A7c | feat/correctness-and-safety-a7c-backlog-capacity |
+| A8 | feat/correctness-and-safety-a8-wal-segments |
 | B1 | feat/ingestion-performance-b1-wal-io-boundary |
 | B2 | feat/ingestion-performance-b2-native-backend |
 | B3 | feat/ingestion-performance-b3-native-wal-integration |

@@ -1,0 +1,36 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~BoundedRequestPipeReaderTests|FullyQualifiedName~DurableIngestDispatcherTests|FullyQualifiedName~IngestionDurabilityContractTests|FullyQualifiedName~BeaconBatchIngestorTests|FullyQualifiedName~BeaconEndpointContractTests|FullyQualifiedName~IngestResponseHeaderTests|FullyQualifiedName~BodyLimitTests|FullyQualifiedName~TrackRequestReaderTests|FullyQualifiedName~TelemetryRequestJsonTests|FullyQualifiedName~WalReplayReaderTests",
+    "mutate": [
+      "Features/IngestTelemetry/BoundedRequestPipeReader.cs",
+      "Features/IngestTelemetry/IngestionRequestReader.cs",
+      "Features/IngestTelemetry/DurableIngestDispatcher.cs",
+      "Features/IngestTelemetry/TrackRequestReader.cs",
+      "Program.cs{8062..8118}",
+      "Program.cs{8119..8176}",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{4205..4268}",
+      "Features/IngestTelemetry/IngestTelemetryEndpoint.cs{2295..2427}",
+      "Features/IngestTelemetry/IngestTelemetryEndpoint.cs{3621..3684}",
+      "Features/IngestTelemetry/BeaconTelemetryEndpoint.cs{2719..2764}",
+      "Features/IngestTelemetry/BeaconBatchIngestor.cs{4376..4458}",
+      "Infrastructure/Serialization/TelemetryRequestJson.cs"
+    ],
+    "mutation-level": "Complete",
+    "concurrency": 2,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    }
+  }
+}

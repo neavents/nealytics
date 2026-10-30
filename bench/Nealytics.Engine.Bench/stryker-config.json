@@ -1,0 +1,23 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.Bench.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Bench.Tests/Nealytics.Engine.Bench.Tests.csproj"
+    ],
+    "mutate": [
+      "Measurements/**/*.cs"
+    ],
+    "mutation-level": "Complete",
+    "concurrency": 2,
+    "reporters": [
+      "progress",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    }
+  }
+}

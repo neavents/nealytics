@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using System.Collections.Generic;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Exporter;
@@ -34,6 +35,7 @@ using Nealytics.Engine.Infrastructure.Diagnostics;
 using Nealytics.Engine.Infrastructure.Security;
 using Nealytics.Engine.Infrastructure.Serialization;
 using Nealytics.Engine.Infrastructure.Storage;
+using Nealytics.Engine.Infrastructure.Storage.Delivery;
 using Octonica.ClickHouseClient;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -178,15 +180,18 @@ if (engineOpts.EnableRequestDecompression)
     builder.Services.AddRequestDecompression();
 }
 
-builder.Services.AddRateLimiter(limiter =>
+builder.Services.AddRateLimiter();
+builder.Services.AddOptions<RateLimiterOptions>().Configure<IOptions<TelemetryEngineOptions>>((limiter, configured) =>
 {
+    TelemetryEngineOptions capacityOptions = configured.Value;
     limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    limiter.GlobalLimiter = IngestionRequestAdmission.Create(capacityOptions);
     limiter.AddFixedWindowLimiter("ingestion", window =>
     {
-        window.PermitLimit = engineOpts.RateLimitPermitCount;
-        window.Window = TimeSpan.FromSeconds(engineOpts.RateLimitWindowSeconds);
+        window.PermitLimit = capacityOptions.RateLimitPermitCount;
+        window.Window = TimeSpan.FromSeconds(capacityOptions.RateLimitWindowSeconds);
         window.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-        window.QueueLimit = engineOpts.RateLimitQueueSize;
+        window.QueueLimit = capacityOptions.RateLimitQueueSize;
     });
 });
 
@@ -198,8 +203,14 @@ builder.Services.AddSingleton<IngestGate>();
 builder.Services.AddSingleton<ITenantAttributeWriter, ClickHouseTenantAttributeWriter>();
 builder.Services.AddSingleton<DimensionSanitizer>();
 builder.Services.AddSingleton<MeasureSanitizer>();
+builder.Services.AddSingleton<BeaconBatchIngestor>();
+builder.Services.AddSingleton<IngestionRequestReader>();
+builder.Services.AddSingleton<DurableIngestDispatcher>();
 builder.Services.AddHostedService<ClickHouseSchemaMigrator>();
-builder.Services.AddSingleton<ITelemetryBatchWriter, ClickHouseBatchWriter>();
+builder.Services.AddSingleton<ClickHouseBatchWriter>();
+builder.Services.AddSingleton<IDeliveryBatchWriter>(services => services.GetRequiredService<ClickHouseBatchWriter>());
+builder.Services.AddSingleton<TelemetryDeliveryJournal>();
+builder.Services.AddSingleton<ITelemetryBatchWriter, JournaledTelemetryBatchWriter>();
 builder.Services.AddHostedService<TelemetryBatchProcessor>();
 
 builder.Services.AddScoped<GetProjectTimelineQuery>();
@@ -302,15 +313,17 @@ if (engineOpts.EnablePrometheusScrape)
 
 app.MapGet("/health", () => Results.Ok());
 
-app.MapGet("/ready", async (ClickHouseConnectionFactory connectionFactory) =>
+app.MapGet("/ready", async (HttpContext context, ClickHouseConnectionFactory connectionFactory) =>
 {
+    using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+    timeout.CancelAfter(connectionFactory.ProbeTimeout);
     try
     {
         await using PooledClickHouseConnection lease =
-            await connectionFactory.AcquireAsync(CancellationToken.None);
+            await connectionFactory.AcquireAsync(ClickHouseWorkload.Probe, timeout.Token);
         await using ClickHouseCommand cmd = lease.Connection.CreateCommand();
         cmd.CommandText = "SELECT 1";
-        await cmd.ExecuteScalarAsync(CancellationToken.None);
+        await cmd.ExecuteScalarAsync(timeout.Token);
         return Results.Ok();
     }
     catch (Exception)

@@ -13,7 +13,7 @@ Use [docs/work-packages.md](docs/work-packages.md) to select a bounded package.
 - Follow SOLID through cohesive responsibilities, explicit contracts, and useful I/O boundaries.
   Preserve vertical feature slices and avoid speculative abstractions or dependency layers.
 - Keep existing ingestion endpoints, payloads, credentials, responses, and durability guarantees
-  compatible. Native io_uring and custom ingestion are planned internal implementation changes.
+  compatible. Native io_uring and custom ingestion are internal implementation selections.
 
 ## Source style
 
@@ -26,12 +26,15 @@ Use [docs/work-packages.md](docs/work-packages.md) to select a bounded package.
 
 ## Verification and branches
 
+- The owner stopped all benchmarking and performance measurement on 2026-10-30. Do not start
+  load sweeps, throughput/latency measurements or profiling unless the owner re-enables them.
+  Continue implementation, unit/integration/end-to-end tests, coverage, mutation and native checks.
 - Add meaningful unit, real-dependency integration, end-to-end, and failure-path coverage for
   changed behavior. Cover all new/changed maintained production lines and branches; report
   repository-wide coverage and investigate inherited gaps rather than conceal them.
 - Add and run Stryker.NET mutation checks for changed managed logic. Investigate surviving,
   uncovered, and timed-out mutants. Test native I/O separately on Linux x64 and ARM64.
-- Double-check correctness, resource ownership, formatting, compatibility, and performance evidence
+- Double-check correctness, resource ownership, formatting, compatibility, and applicable test evidence
   before delivery. Never claim a suite, coverage target, mutation result, or platform passed if unrun.
 - Use category and step feature branches listed in docs/engineering-rules.md. Do not merge into
   main, push main, or rewrite main. Keep unrelated work and unfinished rebases untouched.

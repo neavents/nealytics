@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using Nealytics.Engine.Infrastructure.Configuration;
 
@@ -47,6 +48,12 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        builder.ConfigureAppConfiguration(configuration => configuration.AddInMemoryCollection(
+            new Dictionary<string, string?>
+            {
+                ["TelemetryEngine:MaxConcurrentIngestionRequests"] = "64",
+                ["TelemetryEngine:IngestionRequestByteBudget"] = "67108864"
+            }));
         builder.ConfigureServices(services =>
         {
             services.Configure<TelemetryEngineOptions>(options =>

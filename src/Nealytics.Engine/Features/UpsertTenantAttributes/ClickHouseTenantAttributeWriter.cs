@@ -54,7 +54,8 @@ public sealed class ClickHouseTenantAttributeWriter : ITenantAttributeWriter
             ["updated_at"] = stamps,
         };
 
-        await using PooledClickHouseConnection lease = await _connectionFactory.AcquireAsync(cancellationToken);
+        await using PooledClickHouseConnection lease =
+            await _connectionFactory.AcquireAsync(ClickHouseWorkload.Maintenance, cancellationToken);
 
         try
         {
