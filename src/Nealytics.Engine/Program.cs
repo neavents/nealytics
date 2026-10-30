@@ -23,6 +23,7 @@ using Nealytics.Engine.Features.GetFunnel;
 using Nealytics.Engine.Features.GetSchema;
 using Nealytics.Engine.Features.ValidateTelemetry;
 using Nealytics.Engine.Features.GetEventTimeSeries;
+using Nealytics.Engine.Features.GetNamedMetric;
 using Nealytics.Engine.Features.GetProjectTimeline;
 using Nealytics.Engine.Features.GetRetention;
 using Nealytics.Engine.Features.GetSessionAnalytics;
@@ -66,6 +67,9 @@ builder.Services.AddSingleton(dimensionRegistry);
 
 MeasureRegistry measureRegistry = new(engineOpts, dimensionRegistry);
 builder.Services.AddSingleton(measureRegistry);
+
+NamedMetricRegistry namedMetricRegistry = new(engineOpts, measureRegistry);
+builder.Services.AddSingleton(namedMetricRegistry);
 
 TenantAttributeRegistry tenantAttributeRegistry = new(engineOpts);
 builder.Services.AddSingleton(tenantAttributeRegistry);
@@ -216,6 +220,7 @@ builder.Services.AddHostedService<TelemetryBatchProcessor>();
 builder.Services.AddScoped<GetProjectTimelineQuery>();
 builder.Services.AddScoped<GetSessionAnalyticsQuery>();
 builder.Services.AddScoped<GetEventTimeSeriesQuery>();
+builder.Services.AddScoped<GetNamedMetricQuery>();
 builder.Services.AddScoped<GetActiveUsersQuery>();
 builder.Services.AddScoped<GetTopEventsQuery>();
 builder.Services.AddScoped<GetBreakdownQuery>();
@@ -296,6 +301,7 @@ app.MapBeaconIngestion();
 app.MapGetProjectTimeline();
 app.MapGetSessionAnalytics();
 app.MapGetEventTimeSeries();
+app.MapGetNamedMetric();
 app.MapGetActiveUsers();
 app.MapGetTopEvents();
 app.MapGetBreakdown();

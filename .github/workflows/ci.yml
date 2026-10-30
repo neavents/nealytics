@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, 'feat/correctness-and-safety*', 'feat/ingestion-performance*']
+    branches: [main, 'feat/correctness-and-safety*', 'feat/ingestion-performance*', 'feat/analytics-customization*', 'feat/developer-operator-tools*', 'feat/integrations*']
   pull_request:
-    branches: [main, 'feat/correctness-and-safety*', 'feat/ingestion-performance*']
+    branches: [main, 'feat/correctness-and-safety*', 'feat/ingestion-performance*', 'feat/analytics-customization*', 'feat/developer-operator-tools*', 'feat/integrations*']
   workflow_dispatch:
 
 jobs:

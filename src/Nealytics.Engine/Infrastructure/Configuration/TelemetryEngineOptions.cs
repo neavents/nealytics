@@ -176,4 +176,7 @@ public sealed class TelemetryEngineOptions
     public int MaxConcurrentConnections { get; set; } = 20_000;
     public bool EnableRequestDecompression { get; set; } = true;
     public bool EnablePrometheusScrape { get; set; } = false;
+
+    public List<NamedMetricOptions> NamedMetrics { get; set; } = [];
+    public int MaxNamedMetrics { get; set; } = 128;
 }
