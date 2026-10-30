@@ -8,6 +8,7 @@ internal readonly record struct WalDirectoryStatus(int Value, int Error);
 
 internal interface IWalDirectoryOperations
 {
+    int OpenFlags { get; }
     WalDirectoryOpen Open(string path, int flags);
     WalDirectoryStatus Synchronize(SafeFileHandle handle);
     WalDirectoryStatus Lock(SafeFileHandle handle, int operation);

@@ -6,14 +6,19 @@ using Microsoft.Win32.SafeHandles;
 
 internal sealed partial class PosixWalDirectoryOperations : IWalDirectoryOperations
 {
+    public int OpenFlags => WalDirectoryDurability.OpenFlags(
+        OperatingSystem.IsLinux(), OperatingSystem.IsMacOS(), RuntimeInformation.ProcessArchitecture);
+
     public WalDirectoryOpen Open(string path, int flags)
     {
         int descriptor = OpenNative(path, flags);
         int error = Marshal.GetLastPInvokeError();
-        return descriptor < 0
+        return OwnDescriptor(descriptor, error);
+    }
+
+    internal static WalDirectoryOpen OwnDescriptor(int descriptor, int error) => descriptor < 0
             ? new WalDirectoryOpen(null, error)
             : new WalDirectoryOpen(new SafeFileHandle((IntPtr)descriptor, ownsHandle: true), error);
-    }
 
     public WalDirectoryStatus Synchronize(SafeFileHandle handle)
     {

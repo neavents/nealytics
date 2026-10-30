@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using Microsoft.Win32.SafeHandles;
 
 internal sealed class WalDirectory : IDisposable
 {
@@ -11,23 +12,37 @@ internal sealed class WalDirectory : IDisposable
     private readonly string _directory;
     private readonly Action<string> _synchronize;
     private readonly FileStream _lease;
+    private readonly Func<string, FileStream> _openActive;
 
     internal readonly record struct SegmentSize(long Bytes, long Records);
 
     internal static SegmentSize Measure(string path) => new SegmentSize(new FileInfo(path).Length, CountFrames(path));
 
     public WalDirectory(string directory, Action<string>? synchronize = null)
+        : this(directory, synchronize, OpenLease, OpenActive, WalDirectoryDurability.AcquireLease)
+    {
+    }
+
+    internal WalDirectory(
+        string directory,
+        Action<string>? synchronize,
+        Func<string, FileStream> openLease,
+        Func<string, FileStream> openActive,
+        Action<SafeFileHandle> acquireLease)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        ArgumentNullException.ThrowIfNull(openLease);
+        ArgumentNullException.ThrowIfNull(openActive);
+        ArgumentNullException.ThrowIfNull(acquireLease);
         _directory = Path.GetFullPath(directory);
         _synchronize = synchronize ?? WalDirectoryDurability.Synchronize;
+        _openActive = openActive;
         List<string> missing = FindMissingDirectories(_directory, Directory.Exists);
         Directory.CreateDirectory(_directory);
-        _lease = new FileStream(Path.Combine(_directory, ".nealytics-wal.lock"),
-            FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        _lease = openLease(Path.Combine(_directory, ".nealytics-wal.lock"));
         try
         {
-            WalDirectoryDurability.AcquireLease(_lease.SafeFileHandle);
+            acquireLease(_lease.SafeFileHandle);
             _lease.Flush(flushToDisk: true);
             _synchronize(_directory);
             foreach (string created in missing)
@@ -93,13 +108,19 @@ internal sealed class WalDirectory : IDisposable
             long next = checked(Generation(recovered[^1]) + 1);
             destination += "." + next.ToString("D20", CultureInfo.InvariantCulture);
         }
-        using (FileStream active = new FileStream(ActivePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        using (FileStream active = _openActive(ActivePath))
         {
             active.Flush(flushToDisk: true);
         }
         File.Move(ActivePath, destination);
         _synchronize(_directory);
     }
+
+    private static FileStream OpenLease(string path) =>
+        new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+
+    private static FileStream OpenActive(string path) =>
+        new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
 
     public void DeleteRecovery(IReadOnlyList<string> paths)
     {

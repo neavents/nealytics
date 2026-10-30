@@ -5,6 +5,103 @@ namespace Nealytics.Engine.Tests.Unit;
 
 public sealed class WalDirectoryTests
 {
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void InvalidDirectoryArgumentsIdentifyTheConfigurationInput(string? directory)
+    {
+        var error = Assert.ThrowsAny<ArgumentException>(() => new WalDirectory(directory!));
+        Assert.Equal("directory", error.ParamName);
+    }
+
+    [Theory]
+    [InlineData("openLease")]
+    [InlineData("openActive")]
+    [InlineData("acquireLease")]
+    public void MissingFileOperationsFailBeforeCreatingTheDirectory(string missing)
+    {
+        using Harness harness = new();
+        Func<string, FileStream> openLease = path => new FileStream(path, FileMode.OpenOrCreate);
+        Func<string, FileStream> openActive = path => new FileStream(path, FileMode.Open);
+        Action<Microsoft.Win32.SafeHandles.SafeFileHandle> acquireLease = _ => { };
+        var error = Assert.Throws<ArgumentNullException>(() =>
+        {
+            using var directory = new WalDirectory(harness.Path, _ => { },
+                missing == "openLease" ? null! : openLease,
+                missing == "openActive" ? null! : openActive,
+                missing == "acquireLease" ? null! : acquireLease);
+        });
+        Assert.Equal(missing, error.ParamName);
+        Assert.False(Directory.Exists(harness.Path));
+    }
+
+    [Fact]
+    public void LeaseAndActiveFileBarriersPrecedeDirectoryPublicationAndCoverEveryNewParent()
+    {
+        using Harness harness = new();
+        Directory.CreateDirectory(harness.Path);
+        string parent = Path.Combine(harness.Path, "parent");
+        string child = Path.Combine(parent, "child");
+        List<string> trace = [];
+        using WalDirectory directory = new(child, path => trace.Add("sync:" + path),
+            path => new ProbeFileStream(path, FileMode.OpenOrCreate, "lease", trace),
+            path => new ProbeFileStream(path, FileMode.Open, "active", trace),
+            _ => trace.Add("lock"));
+        Assert.Equal(new[] { "lock", "lease:True", "sync:" + child, "sync:" + parent, "sync:" + harness.Path }, trace);
+        File.WriteAllText(directory.ActivePath, "retained\n");
+        trace.Clear();
+
+        directory.SealActive();
+
+        Assert.Equal(new[] { "active:True", "sync:" + child }, trace);
+        Assert.Equal("retained\n", File.ReadAllText(Assert.Single(directory.RecoveryPaths())));
+    }
+
+    [Fact]
+    public void ExhaustedGenerationsFailBeforeTheActiveFileIsTouched()
+    {
+        using Harness harness = new();
+        using WalDirectory directory = new(harness.Path, _ => { });
+        string last = Path.Combine(harness.Path, "telemetry_wal.replay." + long.MaxValue.ToString("D20"));
+        File.WriteAllText(last, "older\n");
+        File.WriteAllText(directory.ActivePath, "active\n");
+
+        Assert.Throws<OverflowException>(directory.SealActive);
+
+        Assert.Equal("active\n", File.ReadAllText(directory.ActivePath));
+        Assert.Equal("older\n", File.ReadAllText(Assert.Single(directory.RecoveryPaths())));
+    }
+
+    [Fact]
+    public void ReleasedOwnershipCannotDeleteARecoveryFile()
+    {
+        using Harness harness = new();
+        WalDirectory directory = new(harness.Path, _ => { });
+        File.WriteAllText(directory.ActivePath, "retained\n");
+        directory.SealActive();
+        string path = Assert.Single(directory.RecoveryPaths());
+        directory.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => directory.DeleteRecovery([path]));
+
+        Assert.Equal("retained\n", File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void SegmentMeasurementsCountEveryTerminatorAcrossReadBuffersWithoutCountingATornTail()
+    {
+        using Harness harness = new();
+        Directory.CreateDirectory(harness.Path);
+        string path = Path.Combine(harness.Path, "segment");
+        string contents = new string('x', 65_536) + "\n" + new string('y', 65_537) + "\ntorn";
+        File.WriteAllText(path, contents);
+
+        var measured = WalDirectory.Measure(path);
+
+        Assert.Equal(contents.Length, measured.Bytes);
+        Assert.Equal(2, measured.Records);
+    }
+
     [Fact]
     public void RepeatedStartupNeverCopiesAnActiveFileOntoAPreviousTornTail()
     {
@@ -75,7 +172,9 @@ public sealed class WalDirectoryTests
         using WalDirectory directory = new(harness.Path, _ => { });
         File.WriteAllText(directory.ActivePath, "active\n");
         File.WriteAllText(System.IO.Path.Combine(harness.Path, name), "older\n");
-        Assert.Throws<InvalidDataException>(directory.SealActive);
+        string expected = $"Unrecognized WAL recovery segment '{name}'.";
+        Assert.Equal(expected, Assert.Throws<InvalidDataException>(() => directory.RecoveryPaths()).Message);
+        Assert.Equal(expected, Assert.Throws<InvalidDataException>(directory.SealActive).Message);
         Assert.Equal("active\n", File.ReadAllText(directory.ActivePath));
     }
 
@@ -90,7 +189,9 @@ public sealed class WalDirectoryTests
         string foreign = System.IO.Path.Combine(other.Path, "telemetry_wal.replay");
         Directory.CreateDirectory(other.Path);
         File.WriteAllText(foreign, "foreign\n");
-        Assert.Throws<ArgumentException>(() => directory.DeleteRecovery([foreign]));
+        var error = Assert.Throws<ArgumentException>(() => directory.DeleteRecovery([foreign]));
+        Assert.Equal("paths", error.ParamName);
+        Assert.Contains("Recovery files must belong to the owned WAL directory.", error.Message);
         Assert.Equal("foreign\n", File.ReadAllText(foreign));
         Assert.Equal("active\n", File.ReadAllText(directory.ActivePath));
     }
@@ -139,6 +240,19 @@ public sealed class WalDirectoryTests
             {
                 Directory.Delete(Path, true);
             }
+        }
+    }
+
+    private sealed class ProbeFileStream(string path, FileMode mode, string label, List<string> trace)
+        : FileStream(path, mode, FileAccess.ReadWrite, FileShare.None)
+    {
+        public override void Flush(bool flushToDisk)
+        {
+            if (flushToDisk)
+            {
+                trace.Add(label + ":True");
+            }
+            base.Flush(flushToDisk);
         }
     }
 }

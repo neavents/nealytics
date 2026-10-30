@@ -21,8 +21,7 @@ public sealed class WalDirectoryDurabilityTests
 
         Assert.True(handle.IsClosed);
         Assert.Equal(new[] { "open:directory", "open:directory", "sync", "sync" }, operations.Trace);
-        Assert.Equal(WalDirectoryDurability.OpenFlags(OperatingSystem.IsLinux(), OperatingSystem.IsMacOS(),
-            RuntimeInformation.ProcessArchitecture), operations.Flags);
+        Assert.Equal(operations.OpenFlags, operations.Flags);
     }
 
     [Theory]
@@ -115,6 +114,86 @@ public sealed class WalDirectoryDurabilityTests
     }
 
     [Fact]
+    public void UnsupportedPlatformValidationRunsBeforeAnyLeaseSystemCall()
+    {
+        using SafeFileHandle handle = FakeHandle();
+        PlatformNotSupportedException failure = new("unsupported directory platform");
+        Operations operations = new() { PlatformFailure = failure };
+
+        Assert.Same(failure, Assert.Throws<PlatformNotSupportedException>(
+            () => WalDirectoryDurability.AcquireLease(handle, operations)));
+        Assert.Empty(operations.Trace);
+        Assert.False(handle.IsClosed);
+    }
+
+    [Fact]
+    public void FailedNativeOpeningReturnsItsErrorWithoutInventingAHandle()
+    {
+        PosixWalDirectoryOperations operations = new();
+        string missing = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "missing");
+
+        WalDirectoryOpen result = operations.Open(missing, operations.OpenFlags);
+
+        Assert.Null(result.Handle);
+        Assert.Equal(2, result.Error);
+    }
+
+    [Fact]
+    public void DescriptorZeroIsAValidSuccessfulOpenAndPreservesItsCapturedError()
+    {
+        WalDirectoryOpen result = PosixWalDirectoryOperations.OwnDescriptor(0, 17);
+        try
+        {
+            Assert.NotNull(result.Handle);
+            Assert.False(result.Handle.IsInvalid);
+            Assert.Equal(IntPtr.Zero, result.Handle.DangerousGetHandle());
+            Assert.Equal(17, result.Error);
+        }
+        finally
+        {
+            result.Handle?.SetHandleAsInvalid();
+            result.Handle?.Dispose();
+        }
+    }
+
+    [Fact]
+    public void DisposingAnOpenedDirectoryReleasesItsNativeDescriptor()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "directory-handle-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        DateTime marker = new(2001, 2, 3, 4, 5, 6, DateTimeKind.Utc);
+        Directory.SetLastWriteTimeUtc(path, marker);
+        PosixWalDirectoryOperations operations = new();
+        WalDirectoryOpen opened = operations.Open(path, operations.OpenFlags);
+        Assert.NotNull(opened.Handle);
+        IntPtr descriptor = opened.Handle.DangerousGetHandle();
+        try
+        {
+            Assert.Equal(marker, File.GetLastWriteTimeUtc(opened.Handle));
+            opened.Handle.Dispose();
+            using SafeFileHandle borrowed = new(descriptor, ownsHandle: false);
+            DateTime? retainedIdentity = null;
+            try
+            {
+                retainedIdentity = File.GetLastWriteTimeUtc(borrowed);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+            }
+            if (retainedIdentity == marker)
+            {
+                using SafeFileHandle cleanup = new(descriptor, ownsHandle: true);
+            }
+            Assert.NotEqual(marker, retainedIdentity);
+        }
+        finally
+        {
+            opened.Handle.Dispose();
+            Directory.Delete(path);
+        }
+    }
+
+    [Fact]
     public void NativeOperationsReportInvalidDescriptorErrorsWithoutInventingSuccess()
     {
         PosixWalDirectoryOperations operations = new();
@@ -159,6 +238,8 @@ public sealed class WalDirectoryDurabilityTests
         public List<string> Trace { get; } = [];
         public int Flags { get; private set; }
         public IOException? SynchronizationFailure { get; init; }
+        public PlatformNotSupportedException? PlatformFailure { get; init; }
+        public int OpenFlags => PlatformFailure is null ? 1234 : throw PlatformFailure;
 
         public WalDirectoryOpen Open(string path, int flags)
         {

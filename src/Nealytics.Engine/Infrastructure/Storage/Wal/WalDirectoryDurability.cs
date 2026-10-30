@@ -15,7 +15,7 @@ internal static class WalDirectoryDurability
     internal static void Synchronize(string path, IWalDirectoryOperations operations)
     {
         ArgumentNullException.ThrowIfNull(operations);
-        int flags = OpenFlags(OperatingSystem.IsLinux(), OperatingSystem.IsMacOS(), RuntimeInformation.ProcessArchitecture);
+        int flags = operations.OpenFlags;
         WalDirectoryOpen opened;
         do
         {
@@ -45,7 +45,7 @@ internal static class WalDirectoryDurability
     {
         ArgumentNullException.ThrowIfNull(handle);
         ArgumentNullException.ThrowIfNull(operations);
-        OpenFlags(OperatingSystem.IsLinux(), OperatingSystem.IsMacOS(), RuntimeInformation.ProcessArchitecture);
+        _ = operations.OpenFlags;
         WalDirectoryStatus result;
         do
         {
