@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
@@ -31,6 +32,12 @@ public sealed class NamedMetricHttpTests : IClassFixture<NamedMetricHttpTests.Fa
                     TenantAttributes = [new() { Name = "cohort" }]
                 }));
                 services.PostConfigure<TelemetryEngineOptions>(options => options.ReadScopeClaim = "scope");
+                services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
+                    options.Events.OnForbidden = context =>
+                    {
+                        context.Response.Headers["X-Test-Forbidden"] = "handled";
+                        return Task.CompletedTask;
+                    });
             });
         }
     }
@@ -67,6 +74,11 @@ public sealed class NamedMetricHttpTests : IClassFixture<NamedMetricHttpTests.Fa
         using var request = Request(name + suffix, claims);
         using var response = await _client.SendAsync(request);
         Assert.Equal(status, (int)response.StatusCode);
+        if (status == 403)
+        {
+            Assert.Empty(await response.Content.ReadAsStringAsync());
+            Assert.Equal("handled", Assert.Single(response.Headers.GetValues("X-Test-Forbidden")));
+        }
         if (status == 404)
         {
             Assert.Equal("\"Unknown named metric.\"", await response.Content.ReadAsStringAsync());

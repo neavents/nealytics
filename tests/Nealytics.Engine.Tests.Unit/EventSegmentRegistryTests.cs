@@ -49,6 +49,8 @@ public sealed class EventSegmentRegistryTests
         Assert.Equal("options", Assert.Throws<ArgumentNullException>(() => new EventSegmentRegistry(null!, columns, measures)).ParamName);
         Assert.Equal("columns", Assert.Throws<ArgumentNullException>(() => new EventSegmentRegistry(options, null!, measures)).ParamName);
         Assert.Equal("measures", Assert.Throws<ArgumentNullException>(() => new EventSegmentRegistry(options, columns, null!)).ParamName);
+        options.EventSegments.Clear();
+        Assert.Equal("columns", Assert.Throws<ArgumentNullException>(() => new EventSegmentRegistry(options, null!, measures)).ParamName);
     }
 
     [Theory]

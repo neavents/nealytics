@@ -311,4 +311,17 @@ public sealed class NamedMetricRequestTests
         Assert.Equal("At most 32 filters are supported.", Create(options: options, segment: "selected",
             filters: Enumerable.Repeat("country:y", 33).ToArray()).Error);
     }
+
+    [Fact]
+    public void ASelectedEventSegmentCanHaveFewerConditionsThanTheCaller()
+    {
+        var options = EventSegmentRegistryTests.Options();
+        options.EventSegments[0].Filters = ["unit_key:u"];
+        var request = Create(options: options, segment: "selected", filters: ["country:x", "amount>2"]).Request!;
+        Assert.Equal(new[] { "unit_key", "country", "amount" }, request.Scope.Filters.Select(f => f.Column));
+        var query = GetNamedMetricQuery.BuildQuery(request);
+        Assert.Equal("u", query.Parameters.Single(p => p.Key == "filter0").Value);
+        Assert.Equal("x", query.Parameters.Single(p => p.Key == "filter1").Value);
+        Assert.Equal(2d, query.Parameters.Single(p => p.Key == "filter2").Value);
+    }
 }
