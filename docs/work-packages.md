@@ -10,7 +10,7 @@ resume them or switch defaults automatically.
 Date: 2026-10-29
 
 Purpose: A short execution index for the [detailed roadmap](product-strategy-and-roadmap.md).
-Implementation is active on the A/B feature branches; consult the
+The A/B functional milestone is complete and C is the current feature track; consult the
 [evidence ledger](implementation-status.md) for passed and remaining gates. Categories organize scope; they are not single
 implementation tasks, delivery estimates, or a commitment to implement every possible integration.
 
@@ -85,8 +85,9 @@ handoff in custom mode. Broad qualification is consolidated at implementation mi
 
 ## 3. How to split the later work
 
-C1 is active on `feat/analytics-customization-c1-named-metrics`; see the
-[named metrics brief](packages/c1-named-metrics.md). The category branch includes the qualified
+C1 is functionally qualified on `feat/analytics-customization-c1-named-metrics`; see the
+[named metrics brief](packages/c1-named-metrics.md) and
+[verification evidence](packages/c1-verification.md). The category branch includes the qualified
 A/B prerequisites through a normal feature merge. The owner authorized continuing beyond A/B;
 C remains the current implementation track, with D/E following bounded customer workflows.
 

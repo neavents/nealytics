@@ -2,6 +2,8 @@
 
 Branch: feat/analytics-customization-c1-named-metrics
 
+Status: functionally qualified at `e373697`; see [verification](c1-verification.md).
+
 Define version-1 named metrics in the existing TelemetryEngine schema configuration. Support
 event counts and permitted count/sum/avg/min/max aggregations of active declared measures,
 optionally restricted to one event type. Validate declarations before startup activation and
