@@ -198,7 +198,12 @@ public sealed class ReplayDeliveryIntegrationTests
         var dimensions = new DimensionRegistry(options.Value);
         var writer = new ClickHouseBatchWriter(factory, dimensions, new MeasureRegistry(options.Value, dimensions),
             options, NullLogger<ClickHouseBatchWriter>.Instance);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => writer.GetSourceIdAsync(timeout.Token));
+        async Task AssertUnsupportedSource()
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => writer.GetSourceIdAsync(timeout.Token));
+            Assert.Equal("Replay-safe delivery requires an Atomic ReplacingMergeTree source and a deduplication window of at least 100000 blocks.", error.Message);
+        }
+        await AssertUnsupportedSource();
         await Execute("ALTER TABLE nealytics_core.global_events MODIFY SETTING non_replicated_deduplication_window = 100000");
         Assert.NotEqual(Guid.Empty, await writer.GetSourceIdAsync(timeout.Token));
         await Assert.ThrowsAnyAsync<Exception>(() => writer.WriteAsync(
@@ -207,14 +212,14 @@ public sealed class ReplayDeliveryIntegrationTests
         await Execute("DROP DATABASE nealytics_core SYNC");
         await Execute("CREATE DATABASE nealytics_core");
         await Execute("CREATE TABLE nealytics_core.global_events (event_id UUID) ENGINE=MergeTree ORDER BY event_id SETTINGS non_replicated_deduplication_window=100000");
-        await Assert.ThrowsAsync<InvalidOperationException>(() => writer.GetSourceIdAsync(timeout.Token));
+        await AssertUnsupportedSource();
         var ordinary = await server.ExecScriptAsync(
             "SET allow_deprecated_database_ordinary=1; DROP DATABASE nealytics_core SYNC; "
             + "CREATE DATABASE nealytics_core ENGINE=Ordinary; "
             + "CREATE TABLE nealytics_core.global_events (event_id UUID) ENGINE=ReplacingMergeTree "
             + "ORDER BY event_id SETTINGS non_replicated_deduplication_window=100000;", timeout.Token);
         Assert.Equal(0, ordinary.ExitCode);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => writer.GetSourceIdAsync(timeout.Token));
+        await AssertUnsupportedSource();
     }
 
     [Fact]

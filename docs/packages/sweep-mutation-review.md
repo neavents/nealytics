@@ -48,3 +48,8 @@ The pool follow-up adds deterministic late-cancellation, reservation/shutdown or
 failure, reentrancy and synchronization-resource ownership tests, plus gated real-server disposal
 tests. A separate Complete-level pool configuration covers the factory, pool and lease with the
 same 100% thresholds and no maintained-source exclusions. Its result is not assumed passed.
+
+That pool run at 000bff5 now passes: 112 assertion kills and seven investigated progress timeouts,
+with no survivors or uncovered mutants. Five selected mutants fail compilation. The remaining
+database-delivery range is qualified separately, including the operator diagnostic for unsupported
+source tables; a passing unit-only or pool gate does not substitute for it.

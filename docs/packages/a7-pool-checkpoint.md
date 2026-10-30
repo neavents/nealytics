@@ -1,5 +1,30 @@
 # A7 workload-pool checkpoint
 
+## Current follow-up, 2026-10-30
+
+Source 000bff5 passes all 2,077 portable unit cases and all 189 isolated real-ClickHouse cases,
+with zero skips. Same-source OpenCover unit/integration collectors cover every maintained pool,
+factory and lease line and branch: 209/209 lines and 44/44 branch outcomes for the pool, 64/64
+and 6/6 for the factory, and 22/22 and 2/2 for the lease.
+
+The Complete-level pool mutation gate passes its unchanged 100% threshold: 112 assertion kills,
+seven timeout detections, zero survivors/uncovered mutants and five selected compile errors.
+The timeouts remove reservation/lease return or force an acquisition-idle wait when no acquisition
+can complete it. They detect lost progress and remain distinct from assertion kills. Evidence is
+retained in artifacts/verification/a7-pool-lifecycle-20261030, including its immutable source.
+
+Shutdown now publishes one cached task before cancellation callbacks can re-enter disposal.
+Cancellation callback failures and individual idle-connection cleanup failures cannot skip other
+cleanup or leave synchronization handles undisposed. Faulted and canceled completion states are
+preserved. Narrow internal asynchronous I/O delegates make these cases deterministic without
+changing public factory construction or wrapping pooled query execution.
+
+The owner stopped all benchmarks and measurement. Qualification continues through correctness,
+durability, coverage, mutation and platform tests. The historical checkpoint below identifies
+earlier evidence; its unfinished measurement items are not authorization to run them.
+
+## Earlier checkpoint
+
 The pool slice reserves separate read, ingestion-write, probe and maintenance capacity and bounds
 the complete acquisition operation. Ingestion writes and bounded readiness probes can progress
 while all read connections are borrowed. Scope-aware eviction preserves the other pools.
