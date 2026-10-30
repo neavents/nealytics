@@ -20,7 +20,9 @@ public static class NamedMetricRequestFactory
         QueryColumns columns,
         MeasureRegistry measures,
         int defaultRangeHours,
-        DateTime nowUtc)
+        DateTime nowUtc,
+        EventSegmentRegistry segments,
+        string? segment)
     {
         if (identity.Rejected)
         {
@@ -39,6 +41,15 @@ public static class NamedMetricRequestFactory
         if (definition is null)
         {
             return new(null, 404, "Unknown named metric.");
+        }
+        EventSegment? selection = null;
+        if (!string.IsNullOrEmpty(segment))
+        {
+            selection = segments.Find(segment);
+            if (selection is null)
+            {
+                return new(null, 404, "Unknown event segment.");
+            }
         }
         DateTime end = Milliseconds(nowUtc.ToUniversalTime());
         if (end.Year is < 1900 or > 2299 || defaultRangeHours is < 1 or > 3_506_328)
@@ -63,9 +74,17 @@ public static class NamedMetricRequestFactory
         {
             return new(null, 400, FilterRejection.Message(parsed, columns, measures, 256));
         }
+        IReadOnlyList<QueryFilter> combined = parsed.Filters;
+        if (selection is not null)
+        {
+            List<QueryFilter> conditions = new(selection.CompiledFilters.Count + parsed.Filters.Count);
+            conditions.AddRange(selection.CompiledFilters);
+            conditions.AddRange(parsed.Filters);
+            combined = conditions;
+        }
         if (definition.Measure is string measureName)
         {
-            string? violation = UnitSafety.Violation(measures.Find(measureName)!, definition.Aggregation, null, parsed.Filters);
+            string? violation = UnitSafety.Violation(measures.Find(measureName)!, definition.Aggregation, null, combined);
             if (violation is not null)
             {
                 return new(null, 400, violation);
@@ -80,9 +99,9 @@ public static class NamedMetricRequestFactory
             To = end,
             TrafficClass = trafficClass,
             EventType = definition.EventType,
-            Filters = parsed.Filters
+            Filters = combined
         };
-        return new(new NamedMetricRequest(definition, scope), 200, null);
+        return new(new NamedMetricRequest(definition, scope) { Segment = selection?.Name }, 200, null);
     }
 
     private static bool TryTime(string? value, DateTime fallback, out DateTime result)

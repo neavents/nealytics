@@ -5,7 +5,10 @@ using System.Text.Json.Serialization;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Query;
 
-public sealed record NamedMetricRequest(NamedMetric Definition, QueryScope Scope);
+public sealed record NamedMetricRequest(NamedMetric Definition, QueryScope Scope)
+{
+    public string? Segment { get; init; }
+}
 
 public readonly record struct NamedMetricRequestResult(
     NamedMetricRequest? Request, int StatusCode, string? Error);
@@ -19,6 +22,7 @@ public sealed class NamedMetricResponse
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? Value { get; init; }
     public string? Unit { get; init; }
+    public string? Segment { get; init; }
     public string NumericEncoding { get; init; } = "string";
     public string Source { get; init; } = "raw";
 }

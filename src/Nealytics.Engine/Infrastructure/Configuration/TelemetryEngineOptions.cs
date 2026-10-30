@@ -179,4 +179,7 @@ public sealed class TelemetryEngineOptions
 
     public List<NamedMetricOptions> NamedMetrics { get; set; } = [];
     public int MaxNamedMetrics { get; set; } = 128;
+
+    public List<EventSegmentOptions> EventSegments { get; set; } = [];
+    public int MaxEventSegments { get; set; } = 128;
 }

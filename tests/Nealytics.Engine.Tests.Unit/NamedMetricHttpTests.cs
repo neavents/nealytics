@@ -83,6 +83,16 @@ public sealed class NamedMetricHttpTests : IClassFixture<NamedMetricHttpTests.Fa
         Assert.Contains("must not exceed 256 characters", await response.Content.ReadAsStringAsync());
     }
 
+    [Fact]
+    public async Task UnknownEventSegmentHasItsOwnNotFoundDiagnostic()
+    {
+        using var request = Request("activity?segment=missing",
+            [new("scope", "metrics"), new("project_id", "p"), new("tenant_id", "t")]);
+        using var response = await _client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("\"Unknown event segment.\"", await response.Content.ReadAsStringAsync());
+    }
+
     private static HttpRequestMessage Request(string path, List<Claim> claims)
     {
         var token = new JwtSecurityToken(claims: claims, expires: DateTime.UtcNow.AddMinutes(5),

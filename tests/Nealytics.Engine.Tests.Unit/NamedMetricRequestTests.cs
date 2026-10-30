@@ -16,13 +16,14 @@ public sealed class NamedMetricRequestTests
     private static NamedMetricRequestResult Create(
         ReadIdentity? identity = null, string name = "activity", string? from = null, string? to = null,
         string? traffic = null, string[]? filters = null, TelemetryEngineOptions? options = null,
-        int hours = 24, DateTime? now = null)
+        int hours = 24, DateTime? now = null, string? segment = null)
     {
         options ??= NamedMetricRegistryTests.Options();
         var dimensions = new DimensionRegistry(options);
         var measures = new MeasureRegistry(options, dimensions);
         return NamedMetricRequestFactory.Create(identity ?? Identity, name, from, to, traffic, filters ?? [],
-            new NamedMetricRegistry(options, measures), new QueryColumns(dimensions), measures, hours, now ?? Now);
+            new NamedMetricRegistry(options, measures), new QueryColumns(dimensions), measures, hours, now ?? Now,
+            new EventSegmentRegistry(options, new QueryColumns(dimensions), measures), segment);
     }
 
     [Fact]
@@ -236,5 +237,78 @@ public sealed class NamedMetricRequestTests
         Assert.Equal(1, json.RootElement.GetProperty("version").GetInt32());
         Assert.Equal(Now, json.RootElement.GetProperty("to").GetDateTime());
         Assert.Equal(Now.AddHours(-1), json.RootElement.GetProperty("from").GetDateTime());
+    }
+
+    [Fact]
+    public void EventSegmentConditionsIntersectWithCallerFiltersAndPreserveEveryScope()
+    {
+        var options = EventSegmentRegistryTests.Options();
+        options.NamedMetrics[0].EventType = "action";
+        var result = Create(options: options, segment: "selected", filters: ["unit_key:v", "country:x"]);
+        Assert.Equal(200, result.StatusCode);
+        var request = result.Request!;
+        Assert.Equal("selected", request.Segment);
+        Assert.Equal("project", request.Scope.ProjectId);
+        Assert.Equal("tenant", request.Scope.TenantId);
+        Assert.Equal("action", request.Scope.EventType);
+        Assert.Equal("normal", request.Scope.TrafficClass);
+        Assert.Equal(new[] { "unit_key", "amount", "unit_key", "country" }, request.Scope.Filters.Select(f => f.Column));
+        Assert.Equal(new[] { "u", "2", "v", "x" }, request.Scope.Filters.Select(f => f.Value));
+        var query = GetNamedMetricQuery.BuildQuery(request);
+        Assert.Contains("AND toString(unit_key) = {filter0:String} AND amount >= {filter1:Float64}"
+            + " AND toString(unit_key) = {filter2:String} AND toString(country) = {filter3:String}", query.Sql);
+        Assert.Equal(2d, query.Parameters.Single(p => p.Key == "filter1").Value);
+    }
+
+    [Fact]
+    public void EventSegmentSelectionCannotBypassUnitSafetyOrOverwriteIdentity()
+    {
+        var options = EventSegmentRegistryTests.Options();
+        options.NamedMetrics[0].Measure = "amount";
+        options.NamedMetrics[0].Aggregation = "sum";
+        Assert.Equal(400, Create(options: options).StatusCode);
+        Assert.Equal(200, Create(options: options, segment: "selected").StatusCode);
+        options.EventSegments[0].Filters = ["tenant_id:other"];
+        Assert.Equal(400, Create(options: options, segment: "selected").StatusCode);
+        var result = Create(options: options, segment: "selected", filters: ["unit_key:u"]);
+        Assert.Equal("tenant", result.Request!.Scope.TenantId);
+        Assert.Equal("other", result.Request.Scope.Filters[0].Value);
+        Assert.Equal(403, Create(identity: new ReadIdentity(), options: options, segment: "missing").StatusCode);
+        Assert.Equal("Unknown named metric.", Create(name: "missing", options: options, segment: "missing").Error);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void NoEventSegmentKeepsTheOriginalSelection(string? segment)
+    {
+        var request = Create(segment: segment).Request!;
+        Assert.Null(request.Segment);
+        Assert.Empty(request.Scope.Filters);
+    }
+
+    [Theory]
+    [InlineData("unknown")]
+    [InlineData("Selected")]
+    [InlineData(" selected ")]
+    [InlineData(" ")]
+    [InlineData("selected,selected")]
+    public void UnknownEventSegmentsFailBeforeStorage(string segment)
+    {
+        var result = Create(options: EventSegmentRegistryTests.Options(), segment: segment);
+        Assert.Null(result.Request);
+        Assert.Equal(404, result.StatusCode);
+        Assert.Equal("Unknown event segment.", result.Error);
+    }
+
+    [Fact]
+    public void EventSegmentAndRequestBudgetsRemainSeparateAndBounded()
+    {
+        var options = EventSegmentRegistryTests.Options();
+        options.EventSegments[0].Filters = Enumerable.Repeat("country:x", 32).ToList();
+        Assert.Equal(64, Create(options: options, segment: "selected",
+            filters: Enumerable.Repeat("country:y", 32).ToArray()).Request!.Scope.Filters.Count);
+        Assert.Equal("At most 32 filters are supported.", Create(options: options, segment: "selected",
+            filters: Enumerable.Repeat("country:y", 33).ToArray()).Error);
     }
 }

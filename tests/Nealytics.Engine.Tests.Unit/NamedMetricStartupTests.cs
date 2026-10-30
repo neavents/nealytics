@@ -14,9 +14,11 @@ public sealed class NamedMetricStartupTests
     {
         await using var factory = new NoDatabaseWebFactory();
         Assert.Empty(factory.Services.GetRequiredService<NamedMetricRegistry>().Declared);
+        Assert.Empty(factory.Services.GetRequiredService<EventSegmentRegistry>().Declared);
         using var scope = factory.Services.CreateScope();
         Assert.NotNull(scope.ServiceProvider.GetRequiredService<GetNamedMetricQuery>());
         Assert.Empty(new SchemaResponse().NamedMetrics);
+        Assert.Empty(new SchemaResponse().EventSegments);
         var endpoint = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.Single(
             candidate => candidate.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName == "GetNamedMetric");
         Assert.Contains(endpoint.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>(),

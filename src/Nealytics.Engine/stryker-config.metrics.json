@@ -13,9 +13,9 @@
       "Infrastructure/Configuration/TelemetryEngineOptions.cs{6311..6358}",
       "Infrastructure/Query/ScopeClause.cs{4308..4333}",
       "Program.cs{2800..2927}",
-      "Program.cs{8967..9017}",
-      "Program.cs{11710..11734}",
-      "Features/GetSchema/GetSchemaEndpoint.cs{5232..5269}",
+      "Program.cs{9236..9286}",
+      "Program.cs{11886..11910}",
+      "Features/GetSchema/GetSchemaEndpoint.cs{5280..5317}",
       "Features/GetSchema/SchemaResponse.cs{3065..3256}"
     ],
     "mutation-level": "Complete",

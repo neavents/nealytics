@@ -75,6 +75,17 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         }
         options.NamedMetrics.Add(new() { Name = "sum_float", Measure = Floating, Aggregation = "sum", EventType = "action" });
         options.NamedMetrics.Add(new() { Name = "sum_decimal", Measure = DecimalAmount, Aggregation = "sum", EventType = "action" });
+        options.EventSegments =
+        [
+            new() { Name = "selected", Filters = [Units + ":u", Amount + ">8"] },
+            new() { Name = "other_tenant", Filters = ["tenant_id:other"] },
+            new() { Name = "different_type", Filters = ["event_type:different"] },
+            new() { Name = "literal", Filters = [Units + ":u' OR 1=1 --"] }
+        ];
+        foreach (var (name, operation) in new[] { ("eq", "="), ("ne", "!="), ("lt", "<"), ("lte", "<="), ("gt", ">"), ("gte", ">=") })
+        {
+            options.EventSegments.Add(new() { Name = name, Filters = [Amount + operation + "7"] });
+        }
         _factory = new Factory(options);
         _client = _factory.CreateClient();
         _client.BaseAddress = new UriBuilder(_client.BaseAddress!) { Host = IPAddress.Loopback.ToString() }.Uri;
@@ -219,6 +230,59 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         Assert.Equal("1", document.RootElement.GetProperty("value").GetString());
     }
 
+    [Theory]
+    [InlineData("selected", "2")]
+    [InlineData("eq", "1")]
+    [InlineData("ne", "2")]
+    [InlineData("lt", "0")]
+    [InlineData("lte", "1")]
+    [InlineData("gt", "2")]
+    [InlineData("gte", "3")]
+    [InlineData("other_tenant", "0")]
+    [InlineData("different_type", "0")]
+    [InlineData("literal", "0")]
+    public async Task EventSegmentPredicatesExecuteAsScopedParameterizedIntersections(string segment, string expected)
+    {
+        using var response = await GetAsync("events&segment=" + segment);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(expected, document.RootElement.GetProperty("value").GetString());
+        Assert.Equal(segment, document.RootElement.GetProperty("segment").GetString());
+    }
+
+    [Fact]
+    public async Task EventSegmentsSupportUnitSafetyAndRemainConstrainedByCallerFiltersAndMembership()
+    {
+        using var sum = await GetAsync("sum_amount&segment=selected");
+        Assert.Equal(HttpStatusCode.OK, sum.StatusCode);
+        using var sumJson = JsonDocument.Parse(await sum.Content.ReadAsStringAsync());
+        Assert.Equal("18446744073709551614", sumJson.RootElement.GetProperty("value").GetString());
+        using var contradictory = await GetAsync("events&segment=selected&filter=" + Units + ":v");
+        using var contradictoryJson = JsonDocument.Parse(await contradictory.Content.ReadAsStringAsync());
+        Assert.Equal("0", contradictoryJson.RootElement.GetProperty("value").GetString());
+        using var members = await GetAsync("events&segment=other_tenant", null);
+        using var membersJson = JsonDocument.Parse(await members.Content.ReadAsStringAsync());
+        Assert.Equal("0", membersJson.RootElement.GetProperty("value").GetString());
+        using var unknown = await GetAsync("events&segment=missing");
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+        Assert.Equal("\"Unknown event segment.\"", await unknown.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task EventSegmentDiscoveryPublishesOnlyDeclarativeFilters()
+    {
+        using var request = Authorized("/api/v1/schema", "t", "schema");
+        using var response = await _client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var declarations = document.RootElement.GetProperty("eventSegments");
+        Assert.Equal(10, declarations.GetArrayLength());
+        var selected = declarations.EnumerateArray().Single(s => s.GetProperty("name").GetString() == "selected");
+        Assert.Equal(1, selected.GetProperty("version").GetInt32());
+        Assert.Equal(new[] { Units + ":u", Amount + ">8" }, selected.GetProperty("filters").EnumerateArray().Select(v => v.GetString()));
+        Assert.False(selected.TryGetProperty("compiledFilters", out _));
+    }
+
     private async Task<HttpResponseMessage> GetAsync(string name, string? tenant = "t")
     {
         int split = name.IndexOf('&');
@@ -267,6 +331,7 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
                 services.AddSingleton(attributes);
                 services.AddSingleton(new QueryColumns(dimensions, attributes));
                 services.AddSingleton(new NamedMetricRegistry(_declared, measures));
+                services.AddSingleton(new EventSegmentRegistry(_declared, new QueryColumns(dimensions, attributes), measures));
                 services.PostConfigure<TelemetryEngineOptions>(options => options.ReadScopeClaim = "scope");
                 foreach (var descriptor in services.Where(d => d.ServiceType == typeof(IHostedService)
                     && (d.ImplementationType == typeof(ClickHouseSchemaMigrator)

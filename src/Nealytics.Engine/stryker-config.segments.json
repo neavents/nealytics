@@ -1,0 +1,40 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj",
+      "../../tests/Nealytics.Engine.Tests.Integration/Nealytics.Engine.Tests.Integration.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~NamedMetric|FullyQualifiedName~EventSegment",
+    "mutate": [
+      "Infrastructure/Configuration/NamedMetricRegistry.cs",
+      "Features/GetNamedMetric/*.cs",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{6242..6306}",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{6311..6358}",
+      "Infrastructure/Query/ScopeClause.cs{4308..4333}",
+      "Program.cs{2800..2927}",
+      "Program.cs{9236..9286}",
+      "Program.cs{11886..11910}",
+      "Features/GetSchema/GetSchemaEndpoint.cs{5280..5317}",
+      "Features/GetSchema/SchemaResponse.cs{3065..3256}",
+      "Infrastructure/Configuration/EventSegmentRegistry.cs",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{6360..6483}",
+      "Program.cs{3053..3320}",
+      "Features/GetSchema/GetSchemaEndpoint.cs{5318..5373}",
+      "Features/GetSchema/SchemaResponse.cs{3258..3456}"
+    ],
+    "mutation-level": "Complete",
+    "concurrency": 2,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    }
+  }
+}
