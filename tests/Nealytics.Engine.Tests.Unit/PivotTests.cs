@@ -26,12 +26,17 @@ public class PivotTests
         Rollups = [.. rollups],
     };
 
-    private static (QueryColumns Columns, MeasureRegistry Measures, RollupRegistry Rollups) Registries(params RollupOptions[] rollups)
+    private static (QueryColumns Columns, MeasureRegistry Measures, RollupRegistry Rollups) VerifiedRegistries(params RollupOptions[] rollups)
     {
         TelemetryEngineOptions options = Options(rollups);
         DimensionRegistry dimensions = new(options);
         MeasureRegistry measures = new(options, dimensions);
-        return (new QueryColumns(dimensions), measures, new RollupRegistry(options, dimensions, measures));
+        RollupRegistry rollupsRegistry = new(options, dimensions, measures);
+        foreach (Rollup rollup in rollupsRegistry.Declared)
+        {
+            rollupsRegistry.MarkRoutable(rollup);
+        }
+        return (new QueryColumns(dimensions), measures, rollupsRegistry);
     }
 
     private static PivotRequestResult Create(
@@ -46,7 +51,7 @@ public class PivotTests
         string? from = null,
         string? to = null)
     {
-        (QueryColumns columns, MeasureRegistry measures, _) = Registries();
+        (QueryColumns columns, MeasureRegistry measures, _) = VerifiedRegistries();
         return PivotRequestFactory.Create(
             "proj", "tenant", groupBy, metrics ?? ["events"], filters ?? [], from, to, null,
             orderBy, order, traffic, mode, exact, columns, measures, 10_000, 24, Now);
@@ -158,7 +163,7 @@ public class PivotTests
 
     private static PivotRequest Routed(RollupRegistry rollups, params string[] metrics)
     {
-        (QueryColumns columns, MeasureRegistry measures, _) = Registries();
+        (QueryColumns columns, MeasureRegistry measures, _) = VerifiedRegistries();
         PivotRequestResult parsed = PivotRequestFactory.Create(
             "proj", "tenant", "widget_id", metrics, [], Midnight.ToString("O"), NextMidnight.ToString("O"),
             null, null, null, null, null, null, columns, measures, 10_000, 24, Now);
@@ -178,7 +183,7 @@ public class PivotTests
     [Fact]
     public void RollupSql_MergesEachStateUnderItsOwnCondition()
     {
-        (_, _, RollupRegistry rollups) = Registries(Daily());
+        (_, _, RollupRegistry rollups) = VerifiedRegistries(Daily());
         PivotRequest request = Routed(rollups, "events:view", "sessions:open", "avg(dwell_ms):open");
 
         PivotRollupPlan? plan = PivotRollupPlanner.Select(request, rollups);
@@ -198,7 +203,7 @@ public class PivotTests
     [Fact]
     public void RollupIsRefusedWhenAnyMetricCannotBeAnsweredFromIt()
     {
-        (_, _, RollupRegistry rollups) = Registries(Daily());
+        (_, _, RollupRegistry rollups) = VerifiedRegistries(Daily());
 
         PivotRollupPlanner.Select(Routed(rollups, "events:view", "p95(dwell_ms)"), rollups).Should().BeNull("percentiles never route");
         PivotRollupPlanner.Select(Routed(rollups, "events:tap"), rollups).Should().BeNull("tap is not in the rollup");
@@ -210,7 +215,7 @@ public class PivotTests
     [Fact]
     public void ARollupCoveringEveryEventTypeAnswersUnscopedMetrics()
     {
-        (_, _, RollupRegistry rollups) = Registries(Daily(types: ""));
+        (_, _, RollupRegistry rollups) = VerifiedRegistries(Daily(types: ""));
 
         PivotRollupPlanner.Select(Routed(rollups, "sessions", "events"), rollups).Should().NotBeNull();
     }
@@ -218,7 +223,7 @@ public class PivotTests
     [Fact]
     public void ADriftedRollupIsNotRouted()
     {
-        (_, _, RollupRegistry rollups) = Registries(Daily());
+        (_, _, RollupRegistry rollups) = VerifiedRegistries(Daily());
         rollups.MarkUnroutable(rollups.Declared[0], "drift");
 
         PivotRollupPlanner.Select(Routed(rollups, "events:view"), rollups).Should().BeNull();

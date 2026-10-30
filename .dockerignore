@@ -5,6 +5,8 @@
 **/obj
 **/publish
 **/artifacts
+**/StrykerOutput
+**/__pycache__
 **/*.user
 **/*.suo
 **/.DS_Store

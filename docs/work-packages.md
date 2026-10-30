@@ -1,11 +1,17 @@
 # Nealytics delivery categories and work packages
 
-Status: Discussion draft 0.1
+Status: Implementation index 0.2
 
-Date: 2026-10-28
+Owner update, 2026-10-30: all benchmarking and performance measurement are stopped. Continue
+the A/B implementation and functional qualification using the engineering rules. Measurement
+requirements in the original package descriptions are deferred by this instruction. Do not
+resume them or switch defaults automatically.
+
+Date: 2026-10-29
 
 Purpose: A short execution index for the [detailed roadmap](product-strategy-and-roadmap.md).
-All packages below are proposed and not started. Categories organize scope; they are not single
+Implementation is active on the A/B feature branches; consult the
+[evidence ledger](implementation-status.md) for passed and remaining gates. Categories organize scope; they are not single
 implementation tasks, delivery estimates, or a commitment to implement every possible integration.
 
 Implementation must follow the owner's [engineering rules and branch policy](engineering-rules.md):
@@ -60,6 +66,22 @@ follow-up packages after the base backend works.
 Replay/rollup defects discovered by A2 require their own A-category fixes before a release relies
 on the affected totals. They must not be hidden inside a throughput patch. Likewise, reserved
 database capacity and streaming recovery are separate A packages, not extra scope attached to B3.
+
+A4 now has a separate [bounded streaming-recovery brief](packages/a4-streaming-recovery.md).
+It bounds the recovery reader and batch owner while retaining the current record format. Durable
+segment rotation/delivery identities and reserved capacity remain separate A requirements.
+
+A3b has an [encoding reservation brief](packages/a3b-encoding-reservations.md) after B4 exposed a
+valid-record rejection at tight byte limits. It keeps actual output bounded while separating the
+JSON writer's scratch reservation from committed bytes.
+
+A5 has a [rollup readiness brief](packages/a5-rollup-readiness.md) after a real memory-pressure
+failure exposed routing to partial backfill results. It establishes persisted completion before
+routing; stable delivery identity and resumable rebuild semantics remain separate A6 work.
+
+B5 has a [custom ingestion brief](packages/b5-custom-ingestion.md). Implementation retains managed
+execution as the default and adds direct bounded pipe reading and caller-independent durable
+handoff in custom mode. Broad qualification is consolidated at implementation milestones.
 
 ## 3. How to split the later work
 

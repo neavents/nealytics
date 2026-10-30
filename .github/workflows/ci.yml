@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feat/correctness-and-safety*', 'feat/ingestion-performance*']
   pull_request:
-    branches: [main]
+    branches: [main, 'feat/correctness-and-safety*', 'feat/ingestion-performance*']
+  workflow_dispatch:
 
 jobs:
   build:
@@ -30,7 +31,61 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Unit tests
-        run: dotnet test tests/Nealytics.Engine.Tests.Unit --verbosity normal
+        shell: bash
+        run: |
+          if dotnet test tests/Nealytics.Engine.Tests.Unit --collect:"XPlat Code Coverage" --results-directory artifacts/unit --logger 'trx;LogFileName=unit.trx' --verbosity normal; then
+            exit 0
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          report = Path('artifacts/unit/unit.trx')
+          if report.exists():
+              namespace = {'t': 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'}
+              failures = [result for result in ET.parse(report).getroot().findall('.//t:UnitTestResult', namespace)
+                          if result.attrib.get('outcome') == 'Failed']
+              for result in failures[:5]:
+                  error = result.find('t:Output/t:ErrorInfo/t:Message', namespace)
+                  text = result.attrib['testName'] + ': ' + (error.text or '' if error is not None else '')
+                  text = text[:2500].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                  print('::error title=Unit test failed::' + text)
+          PY
+          exit 1
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-coverage
+          path: artifacts/unit
+
+  benchmark-tests:
+    name: Harness helper correctness
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Harness helper unit tests
+        run: dotnet test tests/Nealytics.Engine.Bench.Tests --collect:"XPlat Code Coverage" --results-directory artifacts/benchmark --verbosity normal
+
+      - name: Restore pinned mutation tooling
+        run: dotnet tool restore
+
+      - name: Harness helper mutation tests
+        working-directory: bench/Nealytics.Engine.Bench
+        run: dotnet stryker --config-file stryker-config.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-verification
+          path: |
+            artifacts/benchmark
+            bench/Nealytics.Engine.Bench/StrykerOutput
 
   integration-tests:
     runs-on: ubuntu-latest
@@ -75,7 +130,7 @@ jobs:
           TelemetryEngine__JwtSymmetricKey: "integration-test-key-at-least-32-bytes-long!!"
           TelemetryEngine__AllowedProjectKeys: "test-key-1,test-key-2"
           TelemetryEngine__WriteAheadLogDirectory: "/tmp/nealytics-ci-wal/"
-        run: dotnet test tests/Nealytics.Engine.Tests.Integration --verbosity normal
+        run: dotnet test tests/Nealytics.Engine.Tests.Integration --filter 'Category!=PerformanceMeasurement' --verbosity normal
 
   smoke-test:
     runs-on: ubuntu-latest
@@ -120,7 +175,7 @@ jobs:
   publish-image:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests, smoke-test]
+    needs: [unit-tests, benchmark-tests, integration-tests, smoke-test]
     permissions:
       contents: read
       packages: write
