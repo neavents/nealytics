@@ -31,14 +31,17 @@ internal sealed class MetricProjection
             ? expression.Evaluate(values)?.Format() : values[metric.Name];
 
     internal static string? UnitViolation(
-        NamedMetric metric, MeasureRegistry measures, IReadOnlyList<QueryFilter> filters)
+        NamedMetric metric, MeasureRegistry measures, IReadOnlyList<QueryFilter> filters,
+        IReadOnlyList<string>? groupBy = null)
     {
         IReadOnlyList<NamedMetric> components = metric.CompiledExpression is null ? [metric] : metric.Dependencies;
         foreach (NamedMetric component in components)
         {
             if (component.Measure is string measure)
             {
-                string? violation = UnitSafety.Violation(measures.Find(measure)!, component.Aggregation, null, filters);
+                string? unitGroup = component.UnitDimension is string dimension && groupBy is not null && groupBy.Contains(dimension)
+                    ? dimension : null;
+                string? violation = UnitSafety.Violation(measures.Find(measure)!, component.Aggregation, unitGroup, filters);
                 if (violation is not null)
                 {
                     return violation;

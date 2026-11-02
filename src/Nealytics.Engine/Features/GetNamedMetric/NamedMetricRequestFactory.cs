@@ -22,7 +22,9 @@ public static class NamedMetricRequestFactory
         int defaultRangeHours,
         DateTime nowUtc,
         EventSegmentRegistry segments,
-        string? segment)
+        string? segment,
+        IReadOnlyList<QueryFilter>? additionalFilters = null,
+        IReadOnlyList<string>? groupBy = null)
     {
         if (identity.Rejected)
         {
@@ -82,7 +84,14 @@ public static class NamedMetricRequestFactory
             conditions.AddRange(parsed.Filters);
             combined = conditions;
         }
-        string? violation = MetricProjection.UnitViolation(definition, measures, combined);
+        if (additionalFilters is not null && additionalFilters.Count > 0)
+        {
+            List<QueryFilter> extended = new(combined.Count + additionalFilters.Count);
+            extended.AddRange(combined);
+            extended.AddRange(additionalFilters);
+            combined = extended;
+        }
+        string? violation = MetricProjection.UnitViolation(definition, measures, combined, groupBy);
         if (violation is not null)
         {
             return new(null, 400, violation);
