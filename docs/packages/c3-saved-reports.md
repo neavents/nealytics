@@ -1,6 +1,8 @@
 # C3: saved scalar reports
 
 Branch: `feat/analytics-customization-c3-saved-reports`.
+Status: functionally qualified at `a540b92`; see [verification](c3-verification.md).
+
 Prerequisite: qualified C2 category snapshot `1f70b02`. Selected 2026-11-03.
 
 Declare version-1 saved reports in the existing TelemetryEngine configuration. Each report has

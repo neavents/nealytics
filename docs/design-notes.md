@@ -405,3 +405,24 @@ fixtures run with one worker and early abort disabled: parallel add/drop and cle
 on the shared test table can invalidate fixture cleanup. The two scopes retain the complete
 original executable-mutant set and 100% thresholds; ordinary suites and artifact smoke remain
 independent checks. Failed/partial reports retain their original source identity.
+
+## C3 saved scalar reports
+
+Reports resolve metric/segment references into an immutable bounded catalog at startup. A
+request validates common scope once and checks every field's unit requirements before leasing
+a connection. Report field aliases are response metadata; SQL reads values by ordinal and never
+uses aliases as physical identifiers. Fixed shared segments combine with caller filters using
+the existing AND contract. Tenant and project restrictions stay in the common WHERE clause.
+
+Metrics can declare different event types. Applying the first metric's type to the common scope
+would silently remove rows needed by later fields. Reports therefore clear that one-field scope
+and bind per-field event-type conditions inside conditional aggregates. The shared expression
+builder preserves C1's unconditioned expressions exactly. Count-of-measure uses an explicit
+nonnull condition; nullable extrema/averages use OrNullIf and integer sums widen before SumIf.
+ClickHouse documents the combinator semantics in its
+[aggregate function reference](https://clickhouse.com/docs/reference/functions/aggregate-functions/combinators).
+
+The 16-field ceiling bounds plan and response shape, not scan work. All fields share a raw event
+source, one query and one read lease; separate segments, formulas and rollup planning would need
+their own contracts. No speed claim follows from query shape. See the
+[operator guide](saved-reports.md) for the supported configuration and numeric semantics.

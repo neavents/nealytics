@@ -1,6 +1,7 @@
 # Named metrics
 
 Named metric queries also accept an optional [reusable event segment](event-segments.md).
+Combine several metrics through [saved scalar reports](saved-reports.md).
 
 Named metrics are operator declarations in the existing `TelemetryEngine` configuration.
 They activate at restart and run through the existing self-hosted executable and ClickHouse.
@@ -113,5 +114,4 @@ adding unlike units. Unit annotations describe values; the engine does not conve
 
 Remove a declaration to disable its name at the next restart. Definitions themselves introduce
 no physical schema migration or rewrite. Existing measure/dimension changes retain their
-ordinary migration requirements. Formulas, reusable segments, reports and live deployment APIs
-are separate follow-up packages.
+ordinary migration requirements. Formulas and live deployment APIs remain separate packages.

@@ -5,7 +5,7 @@
       "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj",
       "../../tests/Nealytics.Engine.Tests.Integration/Nealytics.Engine.Tests.Integration.csproj"
     ],
-    "test-case-filter": "FullyQualifiedName~NamedMetric",
+    "test-case-filter": "FullyQualifiedName~NamedMetric|FullyQualifiedName~SavedReport",
     "mutate": [
       "Infrastructure/Configuration/NamedMetricRegistry.cs",
       "Features/GetNamedMetric/*.cs",
