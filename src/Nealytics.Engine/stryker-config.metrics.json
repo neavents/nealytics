@@ -24,7 +24,8 @@
       "Infrastructure/Query/FormulaNumber.cs",
       "Infrastructure/Query/MetricProjection.cs",
       "Infrastructure/Query/MetricProjectionSql.cs",
-      "Infrastructure/Query/MetricAggregateReader.cs"
+      "Infrastructure/Query/MetricAggregateReader.cs",
+      "Infrastructure/Query/FormulaUnit.cs"
     ],
     "mutation-level": "Complete",
     "concurrency": 1,
