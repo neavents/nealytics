@@ -100,6 +100,10 @@ C remains partially implemented: named metrics and event segments are complete b
 Reports, formulas, transforms, project overrides and hybrid planning remain separate work.
 New D/E packages have not started, and hosted-platform work remains outside current scope.
 
+C3 is active on `feat/analytics-customization-c3-saved-reports`; see the
+[saved scalar-report brief](packages/c3-saved-reports.md). It combines up to 16 named metrics
+and one shared optional segment in one scoped query. Formulas and grouped reports stay separate.
+
 The [C1 timestamp review](packages/c1-time-boundary-review.md) records an inherited DateTime
 parameter-inference limitation in legacy reads. The new metric slice binds timestamps explicitly;
 broader legacy corrections remain a separate compatibility review.

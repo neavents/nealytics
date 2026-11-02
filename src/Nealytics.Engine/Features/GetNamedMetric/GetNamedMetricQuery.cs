@@ -6,7 +6,6 @@ using System.Data.Common;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Storage;
 using Octonica.ClickHouseClient;
@@ -19,28 +18,9 @@ public sealed class GetNamedMetricQuery
 
     internal static (string Sql, IReadOnlyList<KeyValuePair<string, object?>> Parameters) BuildQuery(NamedMetricRequest request)
     {
-        NamedMetric definition = request.Definition;
-        string function = definition.Aggregation;
-        if (function is "min" or "max" or "avg")
-        {
-            function += "OrNull";
-        }
-        string? column = definition.Measure;
-        if (definition.WidenSum)
-        {
-            column = "toInt256(" + column + ")";
-        }
-        StringBuilder sql = new StringBuilder("SELECT toString(");
-        if (definition.Aggregation == "sum")
-        {
-            sql.Append("coalesce(");
-        }
-        sql.Append(function).Append('(').Append(column).Append(')');
-        if (definition.Aggregation == "sum")
-        {
-            sql.Append(", 0)");
-        }
-        sql.Append(") FROM nealytics_core.global_events");
+        StringBuilder sql = new StringBuilder("SELECT ");
+        MetricAggregateSql.Append(sql, request.Definition);
+        sql.Append(" FROM nealytics_core.global_events");
         ScopeClause.AppendRaw(sql, request.Scope, exclusiveEnd: true);
         return (sql.ToString(), ScopeClause.Parameters(request.Scope));
     }

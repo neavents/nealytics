@@ -12,11 +12,12 @@
       "Infrastructure/Configuration/TelemetryEngineOptions.cs{6242..6306}",
       "Infrastructure/Configuration/TelemetryEngineOptions.cs{6311..6358}",
       "Infrastructure/Query/ScopeClause.cs{4308..4333}",
-      "Program.cs{2800..2927}",
-      "Program.cs{9236..9286}",
-      "Program.cs{11886..11910}",
-      "Features/GetSchema/GetSchemaEndpoint.cs{5280..5317}",
-      "Features/GetSchema/SchemaResponse.cs{3065..3256}"
+      "Program.cs{2848..2975}",
+      "Program.cs{9439..9489}",
+      "Program.cs{12140..12164}",
+      "Features/GetSchema/GetSchemaEndpoint.cs{5326..5363}",
+      "Features/GetSchema/SchemaResponse.cs{3065..3256}",
+      "Infrastructure/Query/MetricAggregateSql.cs"
     ],
     "mutation-level": "Complete",
     "concurrency": 1,

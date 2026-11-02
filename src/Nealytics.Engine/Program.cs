@@ -24,6 +24,7 @@ using Nealytics.Engine.Features.GetSchema;
 using Nealytics.Engine.Features.ValidateTelemetry;
 using Nealytics.Engine.Features.GetEventTimeSeries;
 using Nealytics.Engine.Features.GetNamedMetric;
+using Nealytics.Engine.Features.GetSavedReport;
 using Nealytics.Engine.Features.GetProjectTimeline;
 using Nealytics.Engine.Features.GetRetention;
 using Nealytics.Engine.Features.GetSessionAnalytics;
@@ -79,6 +80,9 @@ builder.Services.AddSingleton(queryColumns);
 
 EventSegmentRegistry eventSegmentRegistry = new(engineOpts, queryColumns, measureRegistry);
 builder.Services.AddSingleton(eventSegmentRegistry);
+
+SavedReportRegistry savedReportRegistry = new(engineOpts, namedMetricRegistry, eventSegmentRegistry);
+builder.Services.AddSingleton(savedReportRegistry);
 
 RollupRegistry rollupRegistry = new(engineOpts, dimensionRegistry, measureRegistry, tenantAttributeRegistry);
 builder.Services.AddSingleton(rollupRegistry);
@@ -227,6 +231,7 @@ builder.Services.AddScoped<GetProjectTimelineQuery>();
 builder.Services.AddScoped<GetSessionAnalyticsQuery>();
 builder.Services.AddScoped<GetEventTimeSeriesQuery>();
 builder.Services.AddScoped<GetNamedMetricQuery>();
+builder.Services.AddScoped<GetSavedReportQuery>();
 builder.Services.AddScoped<GetActiveUsersQuery>();
 builder.Services.AddScoped<GetTopEventsQuery>();
 builder.Services.AddScoped<GetBreakdownQuery>();
@@ -307,6 +312,7 @@ app.MapGetProjectTimeline();
 app.MapGetSessionAnalytics();
 app.MapGetEventTimeSeries();
 app.MapGetNamedMetric();
+app.MapGetSavedReport();
 app.MapGetActiveUsers();
 app.MapGetTopEvents();
 app.MapGetBreakdown();
