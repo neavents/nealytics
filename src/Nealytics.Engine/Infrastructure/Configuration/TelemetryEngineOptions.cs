@@ -182,4 +182,7 @@ public sealed class TelemetryEngineOptions
 
     public List<EventSegmentOptions> EventSegments { get; set; } = [];
     public int MaxEventSegments { get; set; } = 128;
+
+    public List<SavedReportOptions> SavedReports { get; set; } = [];
+    public int MaxSavedReports { get; set; } = 128;
 }

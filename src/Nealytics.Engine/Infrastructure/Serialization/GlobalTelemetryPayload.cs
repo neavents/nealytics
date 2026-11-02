@@ -8,6 +8,7 @@ using Nealytics.Engine.Features.GetProjectTimeline;
 using Nealytics.Engine.Features.GetSessionAnalytics;
 using Nealytics.Engine.Features.GetEventTimeSeries;
 using Nealytics.Engine.Features.GetNamedMetric;
+using Nealytics.Engine.Features.GetSavedReport;
 using Nealytics.Engine.Features.GetActiveUsers;
 using Nealytics.Engine.Features.GetTopEvents;
 using Nealytics.Engine.Features.GetBreakdown;
@@ -71,6 +72,7 @@ public sealed class GlobalTelemetryPayload
 [JsonSerializable(typeof(List<SessionSummaryItem>))]
 [JsonSerializable(typeof(EventTimeSeriesResponse))]
 [JsonSerializable(typeof(NamedMetricResponse))]
+[JsonSerializable(typeof(SavedReportResponse))]
 [JsonSerializable(typeof(EventTimeSeriesPoint))]
 [JsonSerializable(typeof(List<EventTimeSeriesPoint>))]
 [JsonSerializable(typeof(ActiveUsersResponse))]

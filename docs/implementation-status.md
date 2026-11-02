@@ -1,10 +1,13 @@
 # Categories A and B implementation evidence
 
-Next-track status: C1 named metrics and C2 reusable event segments are functionally complete;
-see [C1 qualification](packages/c1-verification.md) and [C2 qualification](packages/c2-verification.md).
-Current production source is `f84e1c2`, with verification-only follow-ups through `df4bbd5`.
-The latest suites pass 2,283 unit and 219 integration cases; all 304 scoped managed/storage
-mutants are assertion-killed. The A/B counts below describe their historical qualified snapshot.
+Next-track status: C1 named metrics, C2 reusable event segments and C3 saved scalar reports
+are functionally complete; see [C1 qualification](packages/c1-verification.md),
+[C2 qualification](packages/c2-verification.md) and [C3 qualification](packages/c3-verification.md).
+Current production and test source is `a540b92`, followed by documentation/mutation-filter updates.
+The latest suites pass 2,386 unit and 237 integration cases; all 227 C3 scoped managed/storage
+mutants are assertion-killed. Every changed maintained line and recorded branch outcome is covered.
+Category C remains partial: formulas, transforms, project overrides and hybrid planning are future
+packages. The A/B counts below describe their historical qualified snapshot.
 
 Objective: complete correctness/resource safety and ingestion performance, including native Linux
 io_uring and custom ingestion, with existing callers unchanged. Main remains untouched.

@@ -53,3 +53,7 @@ project override or live-edit API in this package. The engine remains one execut
 definition and stop selecting its name to disable it; stored data is unchanged. Before rolling
 back to C1, update clients to stop sending `segment`: C1 ignores that unknown parameter and
 would execute the unsegmented query.
+
+[Saved reports](saved-reports.md) may fix one segment for every report field. Remove or update
+those references before removing the segment declaration. Report callers cannot replace that
+configured segment with a query parameter.

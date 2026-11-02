@@ -96,9 +96,15 @@ C2 is functionally qualified on `feat/analytics-customization-c2-event-segments`
 [verification evidence](packages/c2-verification.md). It adds one bounded AND selection
 to named metrics without changing ingestion or introducing user/session cohort semantics.
 
-C remains partially implemented: named metrics and event segments are complete bounded slices.
-Reports, formulas, transforms, project overrides and hybrid planning remain separate work.
+C remains partially implemented: named metrics, event segments and saved scalar reports are
+complete bounded slices. Formulas, grouped reports, transforms, project overrides and hybrid
+planning remain separate work.
 New D/E packages have not started, and hosted-platform work remains outside current scope.
+
+C3 is functionally qualified on `feat/analytics-customization-c3-saved-reports`; see the
+[saved scalar-report brief](packages/c3-saved-reports.md) and
+[verification evidence](packages/c3-verification.md). It combines up to 16 named metrics
+and one shared optional segment in one scoped query. Formulas and grouped reports stay separate.
 
 The [C1 timestamp review](packages/c1-time-boundary-review.md) records an inherited DateTime
 parameter-inference limitation in legacy reads. The new metric slice binds timestamps explicitly;

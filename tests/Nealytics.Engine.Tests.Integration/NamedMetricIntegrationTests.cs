@@ -10,6 +10,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
 using Nealytics.Engine.Features.BatchProcessor;
 using Nealytics.Engine.Features.GetNamedMetric;
+using Nealytics.Engine.Features.GetSavedReport;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Storage;
@@ -85,6 +86,24 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         foreach (var (name, operation) in new[] { ("eq", "="), ("ne", "!="), ("lt", "<"), ("lte", "<="), ("gt", ">"), ("gte", ">=") })
         {
             options.EventSegments.Add(new() { Name = name, Filters = [Amount + operation + "7"] });
+        }
+        options.NamedMetrics.Add(new() { Name = "all_events" });
+        options.NamedMetrics.Add(new() { Name = "different_events", EventType = "different" });
+        options.NamedMetrics.Add(new() { Name = "empty_events", EventType = "absent" });
+        options.NamedMetrics.Add(new() { Name = "empty_sum", Measure = Amount, Aggregation = "sum", EventType = "absent" });
+        options.NamedMetrics.Add(new() { Name = "empty_avg", Measure = Amount, Aggregation = "avg", EventType = "absent" });
+        options.NamedMetrics.Add(new() { Name = "untyped_sum", Measure = Amount, Aggregation = "sum" });
+        string[] reportMetrics = ["events", "count_amount", "sum_amount", "avg_amount", "min_amount", "max_amount",
+            "sum_float", "sum_decimal", "all_events", "different_events", "empty_events", "empty_sum", "empty_avg",
+            "events", "untyped_sum", "avg_amount"];
+        foreach (var (name, segment) in new[] { ("overview", ""), ("selected_report", "selected"),
+            ("empty_report", "literal"), ("different_report", "different_type"), ("other_report", "other_tenant") })
+        {
+            options.SavedReports.Add(new()
+            {
+                Name = name, Segment = segment,
+                Fields = reportMetrics.Select((metric, index) => new SavedReportFieldOptions { Name = "f" + index, Metric = metric }).ToList()
+            });
         }
         _factory = new Factory(options);
         _client = _factory.CreateClient();
@@ -171,7 +190,7 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Contains(document.RootElement.GetProperty("metrics").EnumerateArray(), m => m.GetString() == "events");
         var metrics = document.RootElement.GetProperty("namedMetrics");
-        Assert.Equal(8, metrics.GetArrayLength());
+        Assert.Equal(14, metrics.GetArrayLength());
         var sum = metrics.EnumerateArray().Single(m => m.GetProperty("name").GetString() == "sum_amount");
         Assert.Equal(Units, sum.GetProperty("unitDimension").GetString());
         Assert.Equal(Amount, sum.GetProperty("measure").GetString());
@@ -283,6 +302,151 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         Assert.False(selected.TryGetProperty("compiledFilters", out _));
     }
 
+    [Theory]
+    [InlineData("overview", "3", "4", "18446744073709551624")]
+    [InlineData("selected_report", "2", "3", "18446744073709551624")]
+    public async Task SavedReportReturnsOrderedExactValuesWithIndependentEventTypes(
+        string name, string events, string allEvents, string untypedSum)
+    {
+        using var response = await ReportAsync(name, "&filter=" + Units + ":u");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = document.RootElement;
+        Assert.Equal(name, root.GetProperty("name").GetString());
+        Assert.Equal(1, root.GetProperty("version").GetInt32());
+        Assert.Equal("raw", root.GetProperty("source").GetString());
+        Assert.Equal("string", root.GetProperty("numericEncoding").GetString());
+        Assert.Equal(new DateTime(2090, 1, 1, 0, 0, 0, DateTimeKind.Utc), root.GetProperty("from").GetDateTime());
+        Assert.Equal(new DateTime(2090, 1, 1, 0, 0, 2, DateTimeKind.Utc), root.GetProperty("to").GetDateTime());
+        if (name == "selected_report")
+        {
+            Assert.Equal("selected", root.GetProperty("segment").GetString());
+        }
+        var fields = root.GetProperty("fields");
+        Assert.Equal(16, fields.GetArrayLength());
+        Assert.Equal(Enumerable.Range(0, 16).Select(index => "f" + index),
+            fields.EnumerateArray().Select(field => field.GetProperty("name").GetString()));
+        string? Value(int index) => fields[index].GetProperty("value").GetString();
+        Assert.Equal(events, Value(0));
+        Assert.Equal("events", fields[0].GetProperty("metric").GetString());
+        Assert.Equal("records", fields[0].GetProperty("unit").GetString());
+        Assert.Equal("2", Value(1));
+        Assert.Equal("18446744073709551614", Value(2));
+        Assert.Equal("9223372036854775807", Value(4));
+        Assert.Equal("9223372036854775807", Value(5));
+        Assert.Null(Value(6));
+        Assert.Equal("0.3003", Value(7));
+        Assert.Equal(allEvents, Value(8));
+        Assert.Equal("1", Value(9));
+        Assert.Equal("0", Value(10));
+        Assert.Equal("0", Value(11));
+        Assert.Null(Value(12));
+        Assert.Equal(events, Value(13));
+        Assert.Equal(untypedSum, Value(14));
+        Assert.Equal(Value(3), Value(15));
+        Assert.False(fields[0].TryGetProperty("definition", out _));
+    }
+
+    [Theory]
+    [InlineData("empty_report", "")]
+    [InlineData("overview", "&filter=country:absent")]
+    [InlineData("other_report", "")]
+    public async Task EmptyReportsReturnZeroCountsAndSumsAndExplicitNullExtrema(string name, string extra)
+    {
+        using var response = await ReportAsync(name, extra + "&filter=" + Units + ":u");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var fields = document.RootElement.GetProperty("fields");
+        foreach (int index in new[] { 0, 1, 2, 6, 7, 8, 9, 10, 11, 13, 14 })
+        {
+            Assert.Equal("0", fields[index].GetProperty("value").GetString());
+        }
+        foreach (int index in new[] { 3, 4, 5, 12, 15 })
+        {
+            Assert.Equal(JsonValueKind.Null, fields[index].GetProperty("value").ValueKind);
+        }
+    }
+
+    [Fact]
+    public async Task SharedSegmentsAndCallerFiltersIntersectAllFieldsWithoutOverridingMetricTypes()
+    {
+        using var different = await ReportAsync("different_report", "&filter=" + Units + ":u");
+        Assert.Equal(HttpStatusCode.OK, different.StatusCode);
+        using var json = JsonDocument.Parse(await different.Content.ReadAsStringAsync());
+        var fields = json.RootElement.GetProperty("fields");
+        Assert.Equal("0", fields[0].GetProperty("value").GetString());
+        Assert.Equal("1", fields[8].GetProperty("value").GetString());
+        Assert.Equal("1", fields[9].GetProperty("value").GetString());
+        Assert.Equal("10", fields[14].GetProperty("value").GetString());
+        using var selected = await ReportAsync("selected_report", "&filter=" + Units + ":v");
+        using var selectedJson = JsonDocument.Parse(await selected.Content.ReadAsStringAsync());
+        Assert.Equal("0", selectedJson.RootElement.GetProperty("fields")[0].GetProperty("value").GetString());
+        using var average = await ReportAsync("overview", "&filter=" + Units + ":v");
+        using var averageJson = JsonDocument.Parse(await average.Content.ReadAsStringAsync());
+        Assert.Equal("7", averageJson.RootElement.GetProperty("fields")[3].GetProperty("value").GetString());
+    }
+
+    [Theory]
+    [InlineData("t", "", "3")]
+    [InlineData("other", "", "1")]
+    [InlineData(null, "", "3")]
+    [InlineData(null, "&tenant=other", "0")]
+    [InlineData("t", "&traffic=bot", "1")]
+    [InlineData("t", "&traffic=all", "4")]
+    public async Task ReportsPreserveTenantMembershipAndTrafficRestrictions(string? tenant, string extra, string expected)
+    {
+        using var response = await ReportAsync("overview", extra + "&filter=" + Units + ":u", tenant);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(expected, document.RootElement.GetProperty("fields")[0].GetProperty("value").GetString());
+    }
+
+    [Theory]
+    [InlineData("", 400)]
+    [InlineData("&segment=selected&filter=", 400)]
+    [InlineData("&unknown=x&filter=", 400)]
+    public async Task ReportValidationRejectsUnitAmbiguityAndUnsupportedParameters(string extra, int expected)
+    {
+        using var response = await ReportAsync("overview", extra.Length == 0 ? "" : extra + Units + ":u");
+        Assert.Equal(expected, (int)response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("1900-01-01T00:00:00Z", "1900-01-01T00:00:00.001Z")]
+    [InlineData("2299-12-31T23:59:59.998Z", "2299-12-31T23:59:59.999Z")]
+    public async Task ReportCalendarEdgesUseDateTime64AndReturnEmptyAggregates(string from, string to)
+    {
+        using var request = Authorized("/api/v1/analytics/reports/selected_report?from=" + from + "&to=" + to, "t", "reports");
+        using var response = await _client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("0", document.RootElement.GetProperty("fields")[0].GetProperty("value").GetString());
+    }
+
+    [Fact]
+    public async Task SchemaPublishesCanonicalReportsAndNeverCompiledFields()
+    {
+        using var request = Authorized("/api/v1/schema", "t", "schema");
+        using var response = await _client.SendAsync(request);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var reports = document.RootElement.GetProperty("savedReports");
+        Assert.Equal(5, reports.GetArrayLength());
+        var report = reports.EnumerateArray().Single(item => item.GetProperty("name").GetString() == "selected_report");
+        Assert.Equal(1, report.GetProperty("version").GetInt32());
+        Assert.Equal("selected", report.GetProperty("segment").GetString());
+        var first = report.GetProperty("fields")[0];
+        Assert.Equal("f0", first.GetProperty("name").GetString());
+        Assert.Equal("events", first.GetProperty("metric").GetString());
+        Assert.False(first.TryGetProperty("definition", out _));
+    }
+
+    private async Task<HttpResponseMessage> ReportAsync(string name, string extra = "", string? tenant = "t")
+    {
+        using var request = Authorized("/api/v1/analytics/reports/" + name
+            + "?from=2090-01-01T00:00:00Z&to=2090-01-01T00:00:02Z" + extra, tenant, "reports");
+        return await _client.SendAsync(request);
+    }
+
     private async Task<HttpResponseMessage> GetAsync(string name, string? tenant = "t")
     {
         int split = name.IndexOf('&');
@@ -330,8 +494,11 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
                 services.AddSingleton(measures);
                 services.AddSingleton(attributes);
                 services.AddSingleton(new QueryColumns(dimensions, attributes));
-                services.AddSingleton(new NamedMetricRegistry(_declared, measures));
-                services.AddSingleton(new EventSegmentRegistry(_declared, new QueryColumns(dimensions, attributes), measures));
+                var metrics = new NamedMetricRegistry(_declared, measures);
+                var segments = new EventSegmentRegistry(_declared, new QueryColumns(dimensions, attributes), measures);
+                services.AddSingleton(metrics);
+                services.AddSingleton(segments);
+                services.AddSingleton(new SavedReportRegistry(_declared, metrics, segments));
                 services.PostConfigure<TelemetryEngineOptions>(options => options.ReadScopeClaim = "scope");
                 foreach (var descriptor in services.Where(d => d.ServiceType == typeof(IHostedService)
                     && (d.ImplementationType == typeof(ClickHouseSchemaMigrator)
