@@ -87,7 +87,7 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         {
             options.EventSegments.Add(new() { Name = name, Filters = [Amount + operation + "7"] });
         }
-        options.NamedMetrics.Add(new() { Name = "all_events" });
+        options.NamedMetrics.Add(new() { Name = "all_events", Unit = "records" });
         options.NamedMetrics.Add(new() { Name = "different_events", EventType = "different" });
         options.NamedMetrics.Add(new() { Name = "empty_events", EventType = "absent" });
         options.NamedMetrics.Add(new() { Name = "empty_sum", Measure = Amount, Aggregation = "sum", EventType = "absent" });
@@ -105,6 +105,38 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
                 Fields = reportMetrics.Select((metric, index) => new SavedReportFieldOptions { Name = "f" + index, Metric = metric }).ToList()
             });
         }
+        MetricExpressionOptions Constant(string value) => new() { Operator = "constant", Value = value };
+        MetricExpressionOptions Reference(string name) => new() { Operator = "metric", Metric = name };
+        MetricExpressionOptions Operation(string operation, params MetricExpressionOptions[] arguments) =>
+            new() { Operator = operation, Arguments = arguments.ToList() };
+        options.NamedMetrics.Add(new()
+        {
+            Name = "share", Aggregation = "formula", Unit = "percent",
+            Expression = Operation("multiply", Operation("divide", Reference("events"), Reference("all_events")), Constant("100"))
+        });
+        options.NamedMetrics.Add(new()
+        {
+            Name = "scaled", Aggregation = "formula",
+            Expression = Operation("multiply", Reference("sum_amount"), Constant("1.0001"))
+        });
+        options.NamedMetrics.Add(new() { Name = "constant_value", Aggregation = "formula", Expression = Constant("9007199254740993.0001") });
+        options.NamedMetrics.Add(new()
+        {
+            Name = "empty_ratio", Aggregation = "formula", Expression = Operation("divide", Reference("empty_events"), Reference("empty_events"))
+        });
+        options.NamedMetrics.Add(new()
+        {
+            Name = "nullable_formula", Aggregation = "formula", Expression = Operation("add", Reference("empty_avg"), Reference("empty_avg"))
+        });
+        options.NamedMetrics.Add(new()
+        {
+            Name = "float_formula", Aggregation = "formula", Expression = Operation("multiply", Reference("sum_float"), Constant("2"))
+        });
+        options.SavedReports.Add(new()
+        {
+            Name = "formula_report", Fields = new[] { "share", "scaled", "constant_value", "empty_ratio", "nullable_formula", "float_formula" }
+                .Select(name => new SavedReportFieldOptions { Name = name, Metric = name }).ToList()
+        });
         _factory = new Factory(options);
         _client = _factory.CreateClient();
         _client.BaseAddress = new UriBuilder(_client.BaseAddress!) { Host = IPAddress.Loopback.ToString() }.Uri;
@@ -190,7 +222,7 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Contains(document.RootElement.GetProperty("metrics").EnumerateArray(), m => m.GetString() == "events");
         var metrics = document.RootElement.GetProperty("namedMetrics");
-        Assert.Equal(14, metrics.GetArrayLength());
+        Assert.Equal(20, metrics.GetArrayLength());
         var sum = metrics.EnumerateArray().Single(m => m.GetProperty("name").GetString() == "sum_amount");
         Assert.Equal(Units, sum.GetProperty("unitDimension").GetString());
         Assert.Equal(Amount, sum.GetProperty("measure").GetString());
@@ -430,7 +462,7 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         using var response = await _client.SendAsync(request);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var reports = document.RootElement.GetProperty("savedReports");
-        Assert.Equal(5, reports.GetArrayLength());
+        Assert.Equal(6, reports.GetArrayLength());
         var report = reports.EnumerateArray().Single(item => item.GetProperty("name").GetString() == "selected_report");
         Assert.Equal(1, report.GetProperty("version").GetInt32());
         Assert.Equal("selected", report.GetProperty("segment").GetString());
@@ -438,6 +470,41 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         Assert.Equal("f0", first.GetProperty("name").GetString());
         Assert.Equal("events", first.GetProperty("metric").GetString());
         Assert.False(first.TryGetProperty("definition", out _));
+    }
+
+    [Theory]
+    [InlineData("share", "", "80")]
+    [InlineData("share", "&filter=", "75")]
+    [InlineData("scaled", "&filter=", "18448588748116922569.1614")]
+    [InlineData("constant_value", "", "9007199254740993.0001")]
+    [InlineData("empty_ratio", "", null)]
+    [InlineData("nullable_formula", "&filter=", null)]
+    [InlineData("float_formula", "", null)]
+    public async Task FormulaMetricsFinalizeExactComponentsAndPreserveNullSemantics(string name, string suffix, string? expected)
+    {
+        using var response = await GetAsync(name + (suffix.Length == 0 ? "" : suffix + Units + ":u"));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(expected, document.RootElement.GetProperty("value").GetString());
+        if (name == "share")
+        {
+            Assert.Equal("percent", document.RootElement.GetProperty("unit").GetString());
+        }
+    }
+
+    [Fact]
+    public async Task FormulaReportsCombinePrimitiveAndComputedValuesInOneScopedProjection()
+    {
+        using var response = await ReportAsync("formula_report", "&filter=" + Units + ":u");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(new string?[] { "75", "18448588748116922569.1614", "9007199254740993.0001", null, null, null },
+            document.RootElement.GetProperty("fields").EnumerateArray().Select(field => field.GetProperty("value").GetString()));
+        using var invalid = await ReportAsync("formula_report");
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        using var selected = await GetAsync("share&segment=selected");
+        using var selectedJson = JsonDocument.Parse(await selected.Content.ReadAsStringAsync());
+        Assert.Equal("66.6666666666666666666666666666666667", selectedJson.RootElement.GetProperty("value").GetString());
     }
 
     private async Task<HttpResponseMessage> ReportAsync(string name, string extra = "", string? tenant = "t")

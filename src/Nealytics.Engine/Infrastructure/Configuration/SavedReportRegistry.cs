@@ -5,6 +5,7 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Nealytics.Engine.Infrastructure.Query;
 
 public sealed class SavedReportFieldOptions
 {
@@ -93,6 +94,10 @@ public sealed class SavedReportRegistry
                     throw Invalid(index, $"fields[{fieldIndex}] metric is not declared");
                 }
                 fields.Add(new SavedReportField(fieldName, metric.Name) { Definition = metric });
+            }
+            if (new MetricProjection(fields.Select(field => field.Definition)).Components.Count > 128)
+            {
+                throw Invalid(index, "report aggregate projection exceeds 128 components");
             }
             definitions.Add(new SavedReport(name, 1, segment, Array.AsReadOnly(fields.ToArray())));
         }

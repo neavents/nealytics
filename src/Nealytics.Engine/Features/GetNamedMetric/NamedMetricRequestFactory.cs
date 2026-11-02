@@ -82,13 +82,10 @@ public static class NamedMetricRequestFactory
             conditions.AddRange(parsed.Filters);
             combined = conditions;
         }
-        if (definition.Measure is string measureName)
+        string? violation = MetricProjection.UnitViolation(definition, measures, combined);
+        if (violation is not null)
         {
-            string? violation = UnitSafety.Violation(measures.Find(measureName)!, definition.Aggregation, null, combined);
-            if (violation is not null)
-            {
-                return new(null, 400, violation);
-            }
+            return new(null, 400, violation);
         }
         QueryScope scope = new QueryScope
         {

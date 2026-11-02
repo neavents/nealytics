@@ -2,62 +2,46 @@ namespace Nealytics.Engine.Features.GetNamedMetric;
 
 using System;
 using System.Collections.Generic;
-using System.Data.Common;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Storage;
-using Octonica.ClickHouseClient;
 
 public sealed class GetNamedMetricQuery
 {
-    private readonly ClickHouseConnectionFactory _connections;
+    private readonly MetricAggregateReader _reader;
 
-    public GetNamedMetricQuery(ClickHouseConnectionFactory connections) => _connections = connections;
+    public GetNamedMetricQuery(ClickHouseConnectionFactory connections) => _reader = new MetricAggregateReader(connections);
 
     internal static (string Sql, IReadOnlyList<KeyValuePair<string, object?>> Parameters) BuildQuery(NamedMetricRequest request)
     {
         StringBuilder sql = new StringBuilder("SELECT ");
-        MetricAggregateSql.Append(sql, request.Definition);
+        List<KeyValuePair<string, object?>> parameters = ScopeClause.Parameters(request.Scope);
+        MetricProjection projection = new MetricProjection([request.Definition]);
+        MetricProjectionSql.Append(sql, projection.Components, parameters, request.Definition.CompiledExpression is not null);
         sql.Append(" FROM nealytics_core.global_events");
         ScopeClause.AppendRaw(sql, request.Scope, exclusiveEnd: true);
-        return (sql.ToString(), ScopeClause.Parameters(request.Scope));
+        return (sql.ToString(), parameters);
     }
 
     public async Task<NamedMetricResponse> ExecuteAsync(NamedMetricRequest request, CancellationToken cancellationToken)
     {
         (string sql, IReadOnlyList<KeyValuePair<string, object?>> parameters) = BuildQuery(request);
-        await using PooledClickHouseConnection lease = await _connections.AcquireAsync(cancellationToken);
-        await using ClickHouseCommand command = lease.Connection.CreateCommand();
-        command.CommandText = sql;
-        foreach (KeyValuePair<string, object?> parameter in parameters)
-        {
-            ClickHouseParameter bound = new ClickHouseParameter
-            {
-                ParameterName = parameter.Key,
-                Value = parameter.Value
-            };
-            if (parameter.Value is DateTime)
-            {
-                bound.ClickHouseDbType = ClickHouseDbType.DateTime2;
-            }
-            command.Parameters.Add(bound);
-        }
-        await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-        await reader.ReadAsync(cancellationToken);
-        string? value = reader.IsDBNull(0) ? null : reader.GetString(0);
+        MetricProjection projection = new MetricProjection([request.Definition]);
+        IReadOnlyDictionary<string, string?> values = await _reader.ReadAsync(
+            sql, parameters, projection.Components, cancellationToken);
         return new NamedMetricResponse
         {
             Name = request.Definition.Name,
             Version = request.Definition.Version,
             From = request.Scope.From,
             To = request.Scope.To,
-            Value = NormalizeValue(value),
+            Value = MetricProjection.Evaluate(request.Definition, values),
             Unit = request.Definition.Unit,
             Segment = request.Segment
         };
     }
 
-    internal static string? NormalizeValue(string? value) => value is "nan" or "inf" or "-inf" ? null : value;
+    internal static string? NormalizeValue(string? value) => MetricProjection.NormalizeValue(value);
 }
