@@ -15,7 +15,7 @@ internal readonly record struct FormulaNumber(BigInteger Numerator, BigInteger D
         ReadOnlySpan<char> text = value.AsSpan();
         int exponentIndex = text.IndexOfAny('e', 'E');
         int exponent = 0;
-        if (exponentIndex >= 0)
+        if (exponentIndex != -1)
         {
             if (!int.TryParse(text[(exponentIndex + 1)..], NumberStyles.AllowLeadingSign,
                     CultureInfo.InvariantCulture, out exponent) || exponent is < -308 or > 308)
@@ -56,15 +56,8 @@ internal readonly record struct FormulaNumber(BigInteger Numerator, BigInteger D
             return null;
         }
         int power = exponent - Math.Max(scale, 0);
-        BigInteger denominator = BigInteger.One;
-        if (power >= 0)
-        {
-            numerator *= BigInteger.Pow(10, power);
-        }
-        else
-        {
-            denominator = BigInteger.Pow(10, -power);
-        }
+        numerator *= BigInteger.Pow(10, Math.Max(power, 0));
+        BigInteger denominator = BigInteger.Pow(10, Math.Max(-power, 0));
         return Create(negative ? -numerator : numerator, denominator);
     }
 
@@ -92,7 +85,7 @@ internal readonly record struct FormulaNumber(BigInteger Numerator, BigInteger D
             rounded++;
         }
         BigInteger integer = BigInteger.DivRem(rounded, scale, out BigInteger fraction);
-        string sign = Numerator.Sign < 0 && !rounded.IsZero ? "-" : string.Empty;
+        string sign = Numerator.Sign == -1 && !rounded.IsZero ? "-" : string.Empty;
         string whole = integer.ToString(CultureInfo.InvariantCulture);
         if (fraction.IsZero)
         {
@@ -108,7 +101,7 @@ internal readonly record struct FormulaNumber(BigInteger Numerator, BigInteger D
         {
             return null;
         }
-        if (denominator.Sign < 0)
+        if (denominator.Sign == -1)
         {
             numerator = -numerator;
             denominator = -denominator;

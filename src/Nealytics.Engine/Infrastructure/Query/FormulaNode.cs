@@ -5,7 +5,7 @@ using Nealytics.Engine.Infrastructure.Configuration;
 
 internal sealed record FormulaNode(
     string Operator, FormulaNumber? Constant, NamedMetric? Metric, IReadOnlyList<FormulaNode> Arguments,
-    string? UnitKey, string? Unit)
+    FormulaUnit? UnitKey, string? Unit)
 {
     internal FormulaNumber? Evaluate(IReadOnlyDictionary<string, string?> values)
     {

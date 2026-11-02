@@ -54,6 +54,7 @@ public sealed class NamedMetricFormulaTests
     [InlineData("-")]
     [InlineData(".")]
     [InlineData("1.2.3")]
+    [InlineData("1..2")]
     [InlineData(" 1")]
     [InlineData("1 ")]
     [InlineData("1,2")]
@@ -76,6 +77,10 @@ public sealed class NamedMetricFormulaTests
     [InlineData("add", "9007199254740993", "0.0001", "9007199254740993.0001")]
     [InlineData("subtract", "1.2", "0.2", "1")]
     [InlineData("subtract", "1", "3", "-2")]
+    [InlineData("add", "0.5", "0.125", "0.625")]
+    [InlineData("subtract", "0.5", "0.125", "0.375")]
+    [InlineData("multiply", "0.5", "0.125", "0.0625")]
+    [InlineData("divide", "0.5", "0.125", "4")]
     [InlineData("multiply", "1.0006", "100", "100.06")]
     [InlineData("divide", "1", "3", "0.3333333333333333333333333333333333")]
     [InlineData("divide", "1", "6", "0.1666666666666666666666666666666667")]
@@ -157,6 +162,8 @@ public sealed class NamedMetricFormulaTests
         Assert.Equal("later", metric.Expression.Arguments[0].Metric);
         Assert.Equal("0.0001", metric.Expression.Arguments[1].Value);
         Assert.Equal("activity", Assert.Single(metric.Dependencies).Name);
+        Assert.Same(registry.Find("later"), metric.CompiledExpression!.Arguments[0].Metric);
+        Assert.Same(registry.Find("activity"), registry.Find("later")!.CompiledExpression!.Metric);
         Assert.Equal("9007199254740993.0001", MetricProjection.Evaluate(metric,
             new Dictionary<string, string?> { ["activity"] = "9007199254740993" }));
         expression.Operator = "divide";
@@ -293,7 +300,7 @@ public sealed class NamedMetricFormulaTests
         }
         else
         {
-            Assert.Contains("depth", Assert.Throws<InvalidOperationException>(() => NamedMetricRegistryTests.Build(options)).Message);
+            Assert.Contains("dependency depth exceeds eight", Assert.Throws<InvalidOperationException>(() => NamedMetricRegistryTests.Build(options)).Message);
         }
         options.NamedMetrics.Reverse();
         if (valid)
@@ -302,8 +309,49 @@ public sealed class NamedMetricFormulaTests
         }
         else
         {
-            Assert.Contains("depth", Assert.Throws<InvalidOperationException>(() => NamedMetricRegistryTests.Build(options)).Message);
+            Assert.Contains("expanded depth or node count", Assert.Throws<InvalidOperationException>(() => NamedMetricRegistryTests.Build(options)).Message);
         }
+    }
+
+    [Fact]
+    public void ReferenceExpansionIncludesExactlySixtyFourNodesAndCountsArgumentDepth()
+    {
+        var options = Options(Reference("large"));
+        options.NamedMetrics.Add(new() { Name = "large", Aggregation = "formula", Expression = Tree(6) });
+        Assert.Equal("32", MetricProjection.Evaluate(NamedMetricRegistryTests.Build(options).Find("computed")!,
+            new Dictionary<string, string?>()));
+        var expression = Constant("1");
+        for (int index = 0; index < 7; index++)
+        {
+            expression = Operation("negate", expression);
+        }
+        options.NamedMetrics[2].Expression = expression;
+        Assert.Contains("expanded depth or node count", Assert.Throws<InvalidOperationException>(() => NamedMetricRegistryTests.Build(options)).Message);
+    }
+
+    [Fact]
+    public void IndependentFormulasDoNotAccumulateDependencyDepth()
+    {
+        var options = new TelemetryEngineOptions();
+        for (int index = 0; index < 128; index++)
+        {
+            options.NamedMetrics.Add(new() { Name = "f" + index, Aggregation = "formula", Expression = Constant("1") });
+        }
+        Assert.Equal(128, NamedMetricRegistryTests.Build(options).Declared.Count);
+    }
+
+    [Fact]
+    public void DimensionlessAnnotationsCanBeOverriddenWithoutChangingDimensionalInference()
+    {
+        var options = Options(Reference("labeled"));
+        options.NamedMetrics[1].Unit = "ratio";
+        options.NamedMetrics.Add(new() { Name = "labeled", Aggregation = "formula", Unit = "percent", Expression = Constant("1") });
+        var compiled = NamedMetricRegistryTests.Build(options).Find("computed")!;
+        Assert.Equal("ratio", compiled.Unit);
+        Assert.Null(compiled.CompiledExpression!.UnitKey);
+        options.NamedMetrics[0].Measure = "amount";
+        options.NamedMetrics[1].Expression = Operation("add", Reference("activity"), Constant("1"));
+        Assert.NotNull(NamedMetricRegistryTests.Build(options).Find("computed"));
     }
 
     [Fact]
@@ -440,6 +488,28 @@ public sealed class NamedMetricFormulaTests
         options.NamedMetrics[0].Unit = "";
         options.NamedMetrics[0].Measure = "amount";
         Assert.Null(NamedMetricRegistryTests.Build(options).Find("computed")!.Unit);
+    }
+
+    [Theory]
+    [InlineData("count", "", "", "records", "Annotation", "records", null)]
+    [InlineData("sum", "amount", "unit_key", "", "Dimension", "unit_key", null)]
+    [InlineData("sum", "amount", "", "", "Measure", "amount", null)]
+    [InlineData("sum", "amount", "unit_key", "units", "Annotation", "units", "unit_key")]
+    public void DimensionalIdentityUsesTypedComponentsWithoutAmbiguousStringTags(
+        string aggregation, string measure, string dimension, string unit, string kind, string name, string? keyDimension)
+    {
+        var options = Options(Operation("multiply", Reference("activity"), Constant("1")));
+        options.NamedMetrics[0].Aggregation = aggregation;
+        options.NamedMetrics[0].Measure = measure;
+        options.NamedMetrics[0].Unit = unit;
+        options.Measures[0].UnitDimension = dimension;
+        var metric = NamedMetricRegistryTests.Build(options).Find("computed")!;
+        var key = metric.CompiledExpression!.UnitKey!.Value;
+        Assert.Equal(kind, key.Kind.ToString());
+        Assert.Equal(name, key.Name);
+        Assert.Equal(keyDimension, key.Dimension);
+        Assert.Equal(string.IsNullOrEmpty(unit) ? null : unit, metric.Unit);
+        Assert.Equal("2", MetricProjection.Evaluate(metric, new Dictionary<string, string?> { ["activity"] = "2" }));
     }
 
     [Fact]

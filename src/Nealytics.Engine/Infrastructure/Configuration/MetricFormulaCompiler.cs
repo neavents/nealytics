@@ -120,7 +120,7 @@ internal sealed class MetricFormulaCompiler
             {
                 CountExpanded(nested, index, depth + 1, ref count);
             }
-            string? key = PrimitiveUnit(metric);
+            FormulaUnit? key = PrimitiveUnit(metric);
             return (new MetricExpression(operation, null, metric.Name, Array.Empty<MetricExpression>()),
                 new FormulaNode(operation, null, metric, Array.Empty<FormulaNode>(), key, metric.Unit));
         }
@@ -130,8 +130,9 @@ internal sealed class MetricFormulaCompiler
         {
             (expressions[argument], nodes[argument]) = CompileNode(declaration.Arguments[argument], index, depth + 1, ref count);
         }
-        string? unitKey = InferUnit(operation, nodes, index);
-        string? unit = unitKey is null ? null : nodes.First(node => node.UnitKey == unitKey).Unit;
+        FormulaUnit? unitKey = InferUnit(operation, nodes, index);
+        string? unit = operation == "negate" ? nodes[0].Unit
+            : unitKey is FormulaUnit inferred && inferred.Kind == FormulaUnitKind.Annotation ? inferred.Name : null;
         return (new MetricExpression(operation!, null, null, Array.AsReadOnly(expressions)),
             new FormulaNode(operation!, null, null, Array.AsReadOnly(nodes), unitKey, unit));
     }
@@ -152,24 +153,24 @@ internal sealed class MetricFormulaCompiler
         }
     }
 
-    private static string? PrimitiveUnit(NamedMetric metric) =>
+    private static FormulaUnit? PrimitiveUnit(NamedMetric metric) =>
         metric.Aggregation == "formula" ? metric.CompiledExpression!.UnitKey
-        : metric.Unit is string unit ? "unit:" + unit + ":" + metric.UnitDimension
-        : metric.UnitDimension is string dimension ? "dimension:" + dimension
-        : metric.Measure is string measure && metric.Aggregation != "count" ? "measure:" + measure : null;
+        : metric.Unit is string unit ? new FormulaUnit(FormulaUnitKind.Annotation, unit, metric.UnitDimension)
+        : metric.UnitDimension is string dimension ? new FormulaUnit(FormulaUnitKind.Dimension, dimension, null)
+        : metric.Measure is string measure && metric.Aggregation != "count" ? new FormulaUnit(FormulaUnitKind.Measure, measure, null) : null;
 
-    private static string? InferUnit(string operation, IReadOnlyList<FormulaNode> nodes, int index)
+    private static FormulaUnit? InferUnit(string operation, IReadOnlyList<FormulaNode> nodes, int index)
     {
-        string? left = nodes[0].UnitKey;
+        FormulaUnit? left = nodes[0].UnitKey;
         if (operation == "negate")
         {
             return left;
         }
-        string? right = nodes[1].UnitKey;
+        FormulaUnit? right = nodes[1].UnitKey;
         return operation switch
         {
             "add" or "subtract" when left == right => left,
-            "multiply" when left is null || right is null => left ?? right,
+            "multiply" when left is null || right is null => left is null ? right : left,
             "divide" when left == right => null,
             "divide" when right is null => left,
             _ => throw Invalid(index, "formula combines incompatible dimensional units")
