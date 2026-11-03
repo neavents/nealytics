@@ -34,7 +34,6 @@ internal static class NdjsonRecordReader
                 ReadOnlySequence<byte> buffer = result.Buffer;
                 if (buffer.IsEmpty && result.IsCompleted && partialLength == 0)
                 {
-                    reader.AdvanceTo(buffer.End);
                     yield break;
                 }
                 SequencePosition? newline = buffer.PositionOf((byte)'\n');

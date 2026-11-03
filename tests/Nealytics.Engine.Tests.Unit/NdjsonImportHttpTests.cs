@@ -1,4 +1,10 @@
 using System.Net;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Http.Metadata;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Routing;
+using Nealytics.Engine.Features.ImportNdjson;
 using System.Net.Http.Headers;
 using System.IO.Compression;
 using Nealytics.Engine.Features.IngestTelemetry;
@@ -27,6 +33,44 @@ public sealed class NdjsonImportHttpTests : IClassFixture<NdjsonImportHttpTests.
     {
         _factory = factory;
         _client = factory.Client;
+    }
+
+    [Fact]
+    public void EndpointMetadataDeclaresTheImportContractAndIndependentAdmissionPolicy()
+    {
+        var endpoint = ImportEndpoint();
+        Assert.Equal("ImportNdjson", endpoint.Metadata.GetMetadata<IEndpointNameMetadata>()!.EndpointName);
+        Assert.Equal("ndjson-import", endpoint.Metadata.GetMetadata<EnableRateLimitingAttribute>()!.PolicyName);
+        Assert.Equal(ClickHouseWorkload.Write, endpoint.Metadata.GetMetadata<ClickHouseWorkloadMetadata>()!.Workload);
+        var response = Assert.Single(endpoint.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>());
+        Assert.Equal(202, response.StatusCode);
+        Assert.Equal(typeof(NdjsonImportResponse), response.Type);
+    }
+
+    [Fact]
+    public async Task AcceptedImportsApplyTheirConfiguredLimitToTheHostFeature()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var context = new DefaultHttpContext { RequestServices = scope.ServiceProvider };
+        context.Request.QueryString = new QueryString("?k=server-key");
+        context.Request.ContentType = "application/x-ndjson";
+        context.Request.Body = new MemoryStream();
+        context.Response.Body = new MemoryStream();
+        var feature = new MutableBodyLimit();
+        context.Features.Set<IHttpMaxRequestBodySizeFeature>(feature);
+        await ImportEndpoint().RequestDelegate!(context);
+        Assert.Equal(202, context.Response.StatusCode);
+        Assert.Equal(4096, feature.MaxRequestBodySize);
+    }
+
+    private RouteEndpoint ImportEndpoint() => Assert.Single(
+        _factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>(),
+        endpoint => endpoint.RoutePattern.RawText == Route);
+
+    private sealed class MutableBodyLimit : IHttpMaxRequestBodySizeFeature
+    {
+        public bool IsReadOnly => false;
+        public long? MaxRequestBodySize { get; set; }
     }
 
     [Theory]

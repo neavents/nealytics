@@ -115,8 +115,10 @@ public sealed class NdjsonStreamingOwnershipTests
 
     private static async Task<List<NdjsonRecord>> Collect(PipeReader reader, int limit, TrackingPool pool, CancellationToken token = default)
     {
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(2));
         List<NdjsonRecord> records = [];
-        await foreach (var record in NdjsonRecordReader.ReadAsync(reader, limit, token, pool)) records.Add(record);
+        await foreach (var record in NdjsonRecordReader.ReadAsync(reader, limit, deadline.Token, pool)) records.Add(record);
         return records;
     }
 

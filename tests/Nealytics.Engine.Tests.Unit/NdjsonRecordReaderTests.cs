@@ -14,8 +14,10 @@ public sealed class NdjsonRecordReaderTests
 
     internal static async Task<List<NdjsonRecord>> Collect(PipeReader reader, int limit = 65_536, CancellationToken cancellationToken = default)
     {
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(2));
         List<NdjsonRecord> records = [];
-        await foreach (var record in NdjsonRecordReader.ReadAsync(reader, limit, cancellationToken))
+        await foreach (var record in NdjsonRecordReader.ReadAsync(reader, limit, deadline.Token))
         {
             records.Add(record);
         }
@@ -134,10 +136,29 @@ public sealed class NdjsonRecordReaderTests
         var reader = new ProbeReader(pipe.Reader);
         using CancellationTokenSource cancellation = new();
         if (tokenCancellation) cancellation.Cancel();
-        else pipe.Reader.CancelPendingRead();
+        else
+        {
+            await pipe.Writer.CompleteAsync();
+            pipe.Reader.CancelPendingRead();
+        }
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Collect(reader, cancellationToken: cancellation.Token));
         Assert.Equal(1, reader.Completions);
         await pipe.Writer.CompleteAsync();
+    }
+
+    [Fact]
+    public async Task OversizedInputReleasesItsPipeBufferBeforeYieldingTheRejection()
+    {
+        var reader = new ProbeReader(new SegmentedReader("xx"u8.ToArray()));
+        await using (var records = NdjsonRecordReader.ReadAsync(reader, 1, CancellationToken.None).GetAsyncEnumerator())
+        {
+            Assert.True(await records.MoveNextAsync());
+            Assert.Equal("line_too_large", records.Current.Error);
+            Assert.Equal(2, reader.Consumed);
+            Assert.Equal(2, reader.Examined);
+            Assert.Equal(0, reader.Completions);
+        }
+        Assert.Equal(1, reader.Completions);
     }
 
     [Fact]
