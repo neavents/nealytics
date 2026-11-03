@@ -34,10 +34,6 @@ internal abstract class MeasureColumnBuffer : IDisposable
 
     protected abstract void SetAbsent(int index);
 
-    protected bool WithinDeclaredBounds(double value) =>
-        (Measure.Minimum is not double minimum || value >= minimum)
-        && (Measure.Maximum is not double maximum || value <= maximum);
-
     internal static MeasureColumnBuffer Create(Measure measure, int capacity) => measure.Kind switch
     {
         MeasureValueKind.UInt8 => new NumericBuffer<byte>(measure, capacity),
@@ -72,12 +68,7 @@ internal abstract class MeasureColumnBuffer : IDisposable
                 return true;
             }
 
-            if (!T.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out T parsed))
-            {
-                return false;
-            }
-
-            if (!WithinDeclaredBounds(double.CreateSaturating(parsed)))
+            if (!MeasureValueRules.TryParse(Measure, raw, out T parsed))
             {
                 return false;
             }
