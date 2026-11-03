@@ -16,6 +16,7 @@ using Nealytics.Engine.Infrastructure.Security;
 using Nealytics.Engine.Infrastructure.Storage;
 using Nealytics.Engine.Infrastructure.Storage.Delivery;
 using Nealytics.Engine.Infrastructure.Serialization;
+using Nealytics.Engine.Features.UpsertTenantAttributes;
 
 namespace Nealytics.Engine.Tests.Unit;
 
@@ -171,6 +172,50 @@ public sealed class ProjectContextProgramTests
         public string SchemaFingerprint { get; set; } = "";
         public Task<Guid> GetSourceIdAsync(CancellationToken cancellationToken) => Task.FromResult(_source);
         public Task WriteDeliveryAsync(TelemetryDeliveryUnit unit, CancellationToken cancellationToken) => throw new IOException("ambiguous insert");
+    }
+
+    [Theory]
+    [InlineData("alpha-key", "alpha", 200)]
+    [InlineData("beta-key", "beta", 400)]
+    [InlineData("alpha-key", "beta", 403)]
+    [InlineData("alpha-public", "alpha", 403)]
+    [InlineData("unknown-key", "unknown", 403)]
+    public async Task TenantAttributeWritesKeepThePinnedProjectsLogicalAllowlist(string key, string project, int status)
+    {
+        var target = new AttributeCapture();
+        await using var factory = new ProjectContextHttpTests.Factory(configure: services => services.AddSingleton<ITenantAttributeWriter>(target));
+        using var client = factory.CreateClient();
+        string body = JsonSerializer.Serialize(new
+        {
+            projectId = project,
+            tenants = new[] { new { tenantId = "t", attributes = new Dictionary<string, string> { ["cohort"] = "group" } } }
+        });
+        using var response = await client.PostAsync("/api/v1/tenants/attributes?k=" + key, new StringContent(body, Encoding.UTF8, "application/json"));
+        Assert.Equal(status, (int)response.StatusCode);
+        if (status == 200)
+        {
+            Assert.Equal("alpha", Assert.Single(target.Projects));
+            Assert.Equal("cohort", Assert.Single(target.Rows).Attribute);
+            Assert.Equal("group", target.Rows[0].Value);
+            Assert.Equal("t", target.Rows[0].TenantId);
+        }
+        else
+        {
+            Assert.Empty(target.Projects);
+            Assert.Empty(target.Rows);
+        }
+    }
+
+    private sealed class AttributeCapture : ITenantAttributeWriter
+    {
+        internal List<string> Projects { get; } = [];
+        internal List<TenantAttributeRow> Rows { get; } = [];
+        public Task WriteAsync(string project, IReadOnlyList<TenantAttributeRow> rows, DateTime updatedAt, CancellationToken cancellationToken)
+        {
+            Projects.Add(project);
+            Rows.AddRange(rows);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class KeyLog : ILogger<ApiKeyValidator>
