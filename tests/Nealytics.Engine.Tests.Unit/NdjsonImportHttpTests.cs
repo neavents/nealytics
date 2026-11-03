@@ -50,6 +50,32 @@ public sealed class NdjsonImportHttpTests : IClassFixture<NdjsonImportHttpTests.
     }
 
     [Fact]
+    public void RepeatedRateLimitConfigurationKeepsIndependentAdmissionInstances()
+    {
+        var factory = _factory.Services.GetRequiredService<IOptionsFactory<RateLimiterOptions>>();
+        var first = factory.Create(Options.DefaultName);
+        var second = factory.Create(Options.DefaultName);
+        try
+        {
+            Assert.NotSame(first.GlobalLimiter, second.GlobalLimiter);
+            Assert.Equal(429, first.RejectionStatusCode);
+            Assert.Equal(429, second.RejectionStatusCode);
+            var context = new DefaultHttpContext();
+            context.Request.ContentLength = 0;
+            context.SetEndpoint(ImportEndpoint(_factory));
+            using var left = first.GlobalLimiter!.AttemptAcquire(context);
+            using var right = second.GlobalLimiter!.AttemptAcquire(context);
+            Assert.True(left.IsAcquired);
+            Assert.True(right.IsAcquired);
+        }
+        finally
+        {
+            first.GlobalLimiter?.Dispose();
+            second.GlobalLimiter?.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task AcceptedImportsApplyTheirConfiguredLimitToTheHostFeature()
     {
         using var scope = _factory.Services.CreateScope();
