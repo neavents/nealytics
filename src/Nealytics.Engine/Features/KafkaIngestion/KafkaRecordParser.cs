@@ -30,7 +30,7 @@ internal sealed class KafkaRecordParser
         {
             throw new InvalidDataException("Kafka record is empty, a tombstone or exceeds MaxMessageBytes.");
         }
-        GlobalTelemetryPayload payload;
+        GlobalTelemetryPayload payload = null!;
         try
         {
             using JsonDocument document = JsonDocument.Parse(value);

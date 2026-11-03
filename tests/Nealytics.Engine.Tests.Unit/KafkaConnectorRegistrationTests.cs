@@ -74,6 +74,10 @@ public sealed class KafkaConnectorRegistrationTests
         consumer.Subscribe(settings.Topic);
         Assert.Null(consumer.Consume(TimeSpan.FromMilliseconds(100)));
         Assert.NotNull(consumer.Name);
+        using var license = typeof(KafkaConnector).Assembly.GetManifestResourceStream("Kafka.LICENSES.txt");
+        Assert.NotNull(license);
+        using var text = new StreamReader(license);
+        Assert.Equal(File.ReadAllText(Path.Combine(RepositoryFiles.Root().FullName, "licenses", "Kafka.LICENSES.txt")), text.ReadToEnd());
         consumer.Close();
         Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(IHostedService) && descriptor.ImplementationType == typeof(KafkaConnector));
     }

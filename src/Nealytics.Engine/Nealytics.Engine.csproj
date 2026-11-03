@@ -47,7 +47,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Infrastructure/Storage/Wal/Native/liburing.LICENSE" />
-    <EmbeddedResource Include="ThirdParty/Kafka.LICENSES.txt" />
+    <EmbeddedResource Include="../../licenses/Kafka.LICENSES.txt" LogicalName="Kafka.LICENSES.txt" />
   </ItemGroup>
 
 </Project>

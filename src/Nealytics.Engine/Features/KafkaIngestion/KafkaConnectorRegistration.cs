@@ -12,7 +12,8 @@ internal static class KafkaConnectorRegistration
     public static void AddKafkaConnector(this IServiceCollection services, TelemetryEngineOptions options,
         ProjectCatalog projects)
     {
-        if (options.Kafka is not { Enabled: true } kafka)
+        KafkaConnectorOptions? kafka = options.Kafka;
+        if (kafka is null || !kafka.Enabled)
         {
             return;
         }
