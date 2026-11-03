@@ -35,7 +35,7 @@ internal static class ComputedDimensionSql
 
     private static string Bucket(double width, string source)
     {
-        string step = "toFloat64('" + width.ToString("R", CultureInfo.InvariantCulture) + "')";
+        string step = "toFloat64('" + width.ToString(CultureInfo.InvariantCulture) + "')";
         string bucket = "floor(toFloat64(" + source + ") / " + step + ") * " + step;
         return "if(isFinite(" + bucket + "), " + bucket + ", NULL)";
     }

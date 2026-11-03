@@ -142,6 +142,37 @@ public sealed class ProjectContextProgramTests
         Assert.Equal(3, diagnostic["KeyCount"]);
     }
 
+    [Fact]
+    public async Task AmbiguousDeliveryFencesEveryPhysicalAndLogicalProjectRollup()
+    {
+        var target = new AmbiguousWriter();
+        await using var factory = new ProjectContextHttpTests.Factory(configure: services => services.AddSingleton<IDeliveryBatchWriter>(target));
+        using var client = factory.CreateClient();
+        var catalog = factory.Services.GetRequiredService<ProjectCatalog>();
+        target.SchemaFingerprint = TelemetryDeliverySchema.Fingerprint(new TelemetryColumnLayout(catalog.Storage.Dimensions, catalog.Storage.Measures));
+        foreach (var rollup in catalog.Storage.Rollups.Declared)
+        {
+            catalog.Storage.Rollups.MarkRoutable(rollup);
+        }
+        var payload = new GlobalTelemetryPayload { ProjectId = "alpha", TenantId = "t", SessionId = "s", EventType = "e" };
+        await factory.Services.GetRequiredService<WriteAheadLogger>().AppendAsync(payload, CancellationToken.None);
+        var writer = factory.Services.GetRequiredService<ITelemetryBatchWriter>();
+        Assert.Equal("ambiguous insert", (await Assert.ThrowsAsync<IOException>(() => writer.WriteAsync([payload], 1, CancellationToken.None))).Message);
+        Assert.All(catalog.Storage.Rollups.Declared, rollup => Assert.False(catalog.Storage.Rollups.IsRoutable(rollup)));
+        foreach (var project in catalog.Declared)
+        {
+            Assert.Equal("a delivery has an uncertain materialized-view outcome", project.Rollups.UnroutableReason(Assert.Single(project.Rollups.Declared)));
+        }
+    }
+
+    private sealed class AmbiguousWriter : IDeliveryBatchWriter
+    {
+        private readonly Guid _source = Guid.NewGuid();
+        public string SchemaFingerprint { get; set; } = "";
+        public Task<Guid> GetSourceIdAsync(CancellationToken cancellationToken) => Task.FromResult(_source);
+        public Task WriteDeliveryAsync(TelemetryDeliveryUnit unit, CancellationToken cancellationToken) => throw new IOException("ambiguous insert");
+    }
+
     private sealed class KeyLog : ILogger<ApiKeyValidator>
     {
         internal List<Dictionary<string, object?>> Messages { get; } = [];
