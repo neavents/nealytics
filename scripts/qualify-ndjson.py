@@ -71,7 +71,8 @@ def main():
             headers['Content-Encoding'] = 'gzip'
             body = gzip.compress(body)
         if chunked:
-            body = (body[index:index + 17] for index in range(0, len(body), 17))
+            data = body
+            body = (data[index:index + 17] for index in range(0, len(data), 17))
         try:
             connection.request(method, path, body=body, headers=headers, encode_chunked=chunked)
             response = connection.getresponse()
