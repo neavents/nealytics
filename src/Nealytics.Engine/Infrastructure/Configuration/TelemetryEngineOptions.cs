@@ -194,4 +194,5 @@ public sealed class TelemetryEngineOptions
 
     public List<SavedReportOptions> SavedReports { get; set; } = [];
     public int MaxSavedReports { get; set; } = 128;
+    public KafkaConnectorOptions? Kafka { get; set; }
 }

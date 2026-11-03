@@ -13,7 +13,7 @@
       "Infrastructure/Storage/WriteAheadLogger.Batch.cs",
       "Infrastructure/Storage/Wal/WalAdmission.cs",
       "Infrastructure/Storage/Wal/WalBatchAppendResult.cs",
-      "Program.cs{11037..11090}",
+      "Program.cs{11085..11138}",
       "Infrastructure/Configuration/TelemetryEngineOptions.cs{4147..4199}"
     ],
     "mutation-level": "Complete",
