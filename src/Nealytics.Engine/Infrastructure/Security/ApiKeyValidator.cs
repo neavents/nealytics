@@ -3,6 +3,7 @@ namespace Nealytics.Engine.Infrastructure.Security;
 using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
+using System.Linq;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -102,6 +103,10 @@ public sealed partial class ApiKeyValidator
             declared[declaredPin.Key] = (entry.Scope, declaredPin.ProjectId, entry.EventTypes);
         }
 
+        ProjectKeyBoundary? boundary = engine.ProjectSchemas is { Count: > 0 }
+            ? new ProjectKeyBoundary(engine.ProjectSchemas.Select(schema => schema.ProjectId.Trim()).ToFrozenSet(StringComparer.Ordinal), engine.AllowLegacyProjectSchema)
+            : null;
+
         Dictionary<string, IngestionKeyPolicy> policies = new(declared.Count, StringComparer.Ordinal);
 
         foreach (KeyValuePair<string, (IngestionKeyScope Scope, string? Pin, EventTypePattern EventTypes)> entry in declared)
@@ -111,9 +116,9 @@ public sealed partial class ApiKeyValidator
                 pinned++;
             }
 
-            policies[entry.Key] = entry.Value.Scope == IngestionKeyScope.Unscoped && entry.Value.Pin is null
+            policies[entry.Key] = boundary is null && entry.Value.Scope == IngestionKeyScope.Unscoped && entry.Value.Pin is null
                 ? IngestionKeyPolicy.Unpinned
-                : new IngestionKeyPolicy(entry.Value.Scope, entry.Value.Pin, entry.Value.EventTypes);
+                : new IngestionKeyPolicy(entry.Value.Scope, entry.Value.Pin, entry.Value.EventTypes, boundary);
         }
 
         _policies = policies.ToFrozenDictionary(StringComparer.Ordinal);
@@ -154,5 +159,5 @@ public sealed partial class ApiKeyValidator
         || MayWriteProject(policy, projectId);
 
     public static bool MayWriteProject(IngestionKeyPolicy policy, string projectId) =>
-        policy.PinnedProject is null || string.Equals(policy.PinnedProject, projectId, StringComparison.Ordinal);
+        policy.PermitsProject(projectId);
 }

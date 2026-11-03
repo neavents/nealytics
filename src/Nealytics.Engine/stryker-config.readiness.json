@@ -11,7 +11,7 @@
       "Infrastructure/Storage/ClickHouseSchemaMigrator.cs{11913..12505}",
       "Infrastructure/Storage/ClickHouseSchemaMigrator.cs{18700..22497}",
       "Infrastructure/Configuration/RollupRegistry.cs{13392..13535}",
-      "Infrastructure/Configuration/RollupRegistry.cs{14435..14544}"
+      "Infrastructure/Configuration/RollupRegistry.cs{15148..15257}"
     ],
     "mutation-level": "Complete",
     "concurrency": 1,

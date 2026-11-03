@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
+using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Serialization;
 using Nealytics.Engine.Infrastructure.Storage;
 using Nealytics.Engine.Infrastructure.Storage.Wal;
@@ -14,21 +15,25 @@ internal sealed class DurableIngestDispatcher
     private readonly TelemetryChannelBroker _broker;
     private readonly IngestionRequestReader _reader;
     private readonly IHostApplicationLifetime _lifetime;
+    private readonly ProjectCatalog? _projects;
 
     public DurableIngestDispatcher(
         WriteAheadLogger wal,
         TelemetryChannelBroker broker,
         IngestionRequestReader reader,
-        IHostApplicationLifetime lifetime)
+        IHostApplicationLifetime lifetime,
+        ProjectCatalog? projects = null)
     {
         _wal = wal;
         _broker = broker;
         _reader = reader;
         _lifetime = lifetime;
+        _projects = projects;
     }
 
     public async Task AppendAsync(GlobalTelemetryPayload payload, CancellationToken cancellationToken)
     {
+        ProjectMeasureNormalizer.Normalize(payload, _projects);
         await _wal.AppendAsync(payload, cancellationToken);
         await _broker.PublishAsync(payload, PublishToken(cancellationToken));
     }
@@ -39,6 +44,10 @@ internal sealed class DurableIngestDispatcher
         CancellationToken publishToken)
     {
         int offset = 0;
+        foreach (GlobalTelemetryPayload payload in payloads)
+        {
+            ProjectMeasureNormalizer.Normalize(payload, _projects);
+        }
         CancellationToken dispatchToken = PublishToken(publishToken);
         while (offset < payloads.Count)
         {

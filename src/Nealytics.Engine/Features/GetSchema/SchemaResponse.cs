@@ -80,6 +80,9 @@ public sealed class SchemaResponse
 
     public IReadOnlyList<SchemaMeasure> Measures { get; init; } = Array.Empty<SchemaMeasure>();
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProjectId { get; init; }
+
     public IReadOnlyList<string> Metrics { get; init; } = Array.Empty<string>();
 
     public IReadOnlyList<Nealytics.Engine.Infrastructure.Configuration.NamedMetric> NamedMetrics { get; init; }

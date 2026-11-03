@@ -346,6 +346,24 @@ public sealed class RollupRegistry
         }
     }
 
+    private RollupRegistry(IReadOnlyList<Rollup> definitions, ConcurrentDictionary<string, string> readiness)
+    {
+        Declared = Array.AsReadOnly(definitions.ToArray());
+        _unroutable = readiness;
+    }
+
+    internal static RollupRegistry FromDefinitions(IReadOnlyList<Rollup> definitions)
+    {
+        RollupRegistry registry = new(definitions, new ConcurrentDictionary<string, string>(StringComparer.Ordinal));
+        foreach (Rollup rollup in definitions)
+        {
+            registry.MarkUnroutable(rollup, "completion has not been verified");
+        }
+        return registry;
+    }
+
+    internal RollupRegistry ShareReadiness(RollupRegistry logical) => new(logical.Declared, _unroutable);
+
     public IReadOnlyList<Rollup> Declared { get; }
 
     public IEnumerable<Rollup> Routable

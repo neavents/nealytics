@@ -8,8 +8,8 @@
     "test-case-filter": "FullyQualifiedName~NamedMetric|FullyQualifiedName~EventSegment|FullyQualifiedName~ComputedDimension",
     "mutate": [
       "Features/GetNamedMetric/GetNamedMetricQuery.cs",
-      "Features/GetSchema/GetSchemaEndpoint.cs{5384..5421}",
-      "Features/GetSchema/GetSchemaEndpoint.cs{5422..5477}",
+      "Features/GetSchema/GetSchemaEndpoint.cs{5496..5533}",
+      "Features/GetSchema/GetSchemaEndpoint.cs{5534..5589}",
       "Infrastructure/Query/MetricAggregateReader.cs"
     ],
     "mutation-level": "Complete",

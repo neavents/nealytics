@@ -8,7 +8,7 @@
     "test-case-filter": "FullyQualifiedName~SavedReport|FullyQualifiedName~NamedMetric|FullyQualifiedName~EventSegment|FullyQualifiedName~ComputedDimension|FullyQualifiedName~FilterParser",
     "mutate": [
       "Features/GetSavedReport/GetSavedReportQuery.cs",
-      "Features/GetSchema/GetSchemaEndpoint.cs{5548..5597}"
+      "Features/GetSchema/GetSchemaEndpoint.cs{5660..5709}"
     ],
     "mutation-level": "Complete",
     "concurrency": 1,

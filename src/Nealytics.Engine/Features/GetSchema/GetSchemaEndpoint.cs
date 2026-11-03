@@ -16,6 +16,7 @@ public static class GetSchemaEndpoint
     {
         endpoints.MapGet("/api/v1/schema", async (
             HttpContext context,
+            ProjectRequestContext projectContext,
             QueryColumns columns,
             DimensionRegistry dimensions,
             MeasureRegistry measures,
@@ -139,6 +140,7 @@ public static class GetSchemaEndpoint
                 Dimensions = schemaDimensions,
                 Measures = schemaMeasures,
                 Metrics = metrics,
+                ProjectId = projectContext.Current.ProjectId,
                 NamedMetrics = namedMetrics.Declared,
                 EventSegments = eventSegments.Declared,
                 SavedReports = savedReports.Declared,
