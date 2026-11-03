@@ -112,7 +112,17 @@ public sealed class KafkaConnectorIntegrationTests : IAsyncLifetime
     private async Task WaitForOffset(string group, int partition, Offset expected)
     {
         using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(30));
-        while (Committed(group, partition) != expected) await Task.Delay(50, timeout.Token);
+        while (true)
+        {
+            try
+            {
+                if (Committed(group, partition) == expected) return;
+            }
+            catch (KafkaException exception) when (exception.Error.Code is ErrorCode.NotCoordinatorForGroup or ErrorCode.GroupCoordinatorNotAvailable)
+            {
+            }
+            await Task.Delay(50, timeout.Token);
+        }
     }
 
     private static async Task WaitForCount(string project, long expected)
