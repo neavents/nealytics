@@ -7,7 +7,7 @@ implementation and functional qualification using the engineering rules. Measure
 requirements in the original package descriptions are deferred by this instruction. Do not
 resume them or switch defaults automatically.
 
-Date: 2026-11-03
+Date: 2026-11-04
 
 Purpose: A short execution index for the [detailed roadmap](product-strategy-and-roadmap.md).
 The A/B functional milestone and selected C1–C8 scope are qualified; consult the
@@ -154,3 +154,14 @@ of changed persistent formats. Do not promise a fixed duration before the brief 
 Work proceeds sequentially through bounded packages. C-E are not simultaneous projects.
 Review one package's evidence before building on its changed contract; retain the longer roadmap
 as design context rather than a checklist to execute in one turn.
+
+## E1: Kafka first
+
+Owner selection, 2026-11-04: category E leads with the [Kafka connector](packages/e1-kafka-connector.md)
+before category D. The first adapter is one optional topic/group pinned to one project, with
+explicit at-least-once delivery and bounded resource settings. NDJSON work is preserved unfinished
+on `feat/integrations-e1-ndjson-import` and is not a prerequisite or part of this branch.
+Other imports, sinks, connectors and hosting remain separately selected future packages.
+
+E1's bounded implementation is now functionally qualified; see the [evidence ledger](packages/e1-kafka-verification.md)
+and [operator guide](kafka-connector.md). This does not complete category E or select its next adapter.

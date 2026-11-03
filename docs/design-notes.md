@@ -426,3 +426,28 @@ The 16-field ceiling bounds plan and response shape, not scan work. All fields s
 source, one query and one read lease; separate segments, formulas and rollup planning would need
 their own contracts. No speed claim follows from query shape. See the
 [operator guide](saved-reports.md) for the supported configuration and numeric semantics.
+
+## E1 Kafka durable source ownership
+
+One optional sequential consumer reuses project-local validation and the existing dispatcher.
+Automatic offset storage/commits are both disabled; the next partition offset is committed only
+after WAL persistence and live handoff. Blocking commits deliberately establish a clear first
+adapter contract. There is no performance or capacity claim. A later batching/parallelism change
+must preserve contiguous per-partition durable prefixes, rebalance ownership and bounded buffers.
+
+Kafka offsets and ClickHouse/WAL transactions are not atomic. A failed/uncertain commit can
+re-read a durably accepted record into a new WAL identity. This is at-least-once ingestion and
+cannot qualify C8's append-only/unique-source assertion, so that optimization combination fails
+at startup. A supplied eventId cannot stand in for durable source deduplication.
+
+The consumer observes both application shutdown and its worker token. Custom handoff can be
+cancelled by application shutdown before BackgroundService.StopAsync cancels the worker token;
+that ordering is a normal shutdown path. Close/dispose still own native cleanup. A completed
+handoff can have an explicit commit race with shutdown; checking cancellation immediately before
+a network commit cannot make the two atomic. Incomplete handoffs are never committed.
+
+Poison records and dependency failures stop the host instead of inventing an implicit discard,
+retry or quarantine policy. Failure diagnostics expose a fixed stage and source position; raw
+upstream exceptions are not attached. Topic/group security, broker retention and manual source
+repair remain explicit operator choices. Native redist and managed licenses are embedded in the
+single-file artifact and retained verbatim in the repository's licenses directory.

@@ -19,6 +19,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Confluent.Kafka" Version="2.15.1" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
     <PackageReference Include="Octonica.ClickHouseClient" Version="4.1.3" />
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
@@ -37,8 +38,7 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(NealyticsNativeLibrary)' != ''">
-    <Content Include="$(NealyticsNativeLibrary)" Link="libnealytics_wal.so"
-             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(NealyticsNativeLibrary)" Link="libnealytics_wal.so" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
@@ -47,6 +47,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Infrastructure/Storage/Wal/Native/liburing.LICENSE" />
+    <EmbeddedResource Include="../../licenses/Kafka.LICENSES.txt" LogicalName="Kafka.LICENSES.txt" />
   </ItemGroup>
 
 </Project>

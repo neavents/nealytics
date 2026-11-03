@@ -22,6 +22,7 @@ RUN RID=$([ "$TARGETARCH" = "arm64" ] && echo linux-arm64 || echo linux-x64) && 
     dotnet restore src/Nealytics.Engine/Nealytics.Engine.csproj -r "$RID"
 
 COPY src/ src/
+COPY licenses/ licenses/
 COPY --from=native /native-output/libnealytics_wal.so /native-output/libnealytics_wal.so
 RUN RID=$([ "$TARGETARCH" = "arm64" ] && echo linux-arm64 || echo linux-x64) && \
     dotnet publish src/Nealytics.Engine/Nealytics.Engine.csproj \

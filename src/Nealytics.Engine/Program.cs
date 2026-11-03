@@ -16,6 +16,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using Nealytics.Engine.Features.BatchProcessor;
+using Nealytics.Engine.Features.KafkaIngestion;
 using Nealytics.Engine.Features.GetActiveUsers;
 using Nealytics.Engine.Features.GetBreakdown;
 using Nealytics.Engine.Features.GetDistribution;
@@ -288,6 +289,8 @@ else
     builder.Services.AddSingleton<ITelemetryBatchWriter, JournaledTelemetryBatchWriter>();
 }
 builder.Services.AddHostedService<TelemetryBatchProcessor>();
+
+builder.Services.AddKafkaConnector(engineOpts, projectCatalog);
 
 builder.Services.AddScoped<GetProjectTimelineQuery>();
 builder.Services.AddScoped<GetSessionAnalyticsQuery>();
