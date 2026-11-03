@@ -50,7 +50,7 @@ internal static class ReportParameterBinding
             }
             filters.Add(new QueryFilter
             {
-                Column = parameter.Column,
+                Column = parameter.ResolvedColumn,
                 Value = value,
                 Comparison = parameter.Predicate,
                 IsMeasure = parameter.Type == "number"

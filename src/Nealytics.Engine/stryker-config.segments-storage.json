@@ -5,11 +5,11 @@
       "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj",
       "../../tests/Nealytics.Engine.Tests.Integration/Nealytics.Engine.Tests.Integration.csproj"
     ],
-    "test-case-filter": "FullyQualifiedName~NamedMetric|FullyQualifiedName~EventSegment",
+    "test-case-filter": "FullyQualifiedName~NamedMetric|FullyQualifiedName~EventSegment|FullyQualifiedName~ComputedDimension",
     "mutate": [
       "Features/GetNamedMetric/GetNamedMetricQuery.cs",
-      "Features/GetSchema/GetSchemaEndpoint.cs{5326..5363}",
-      "Features/GetSchema/GetSchemaEndpoint.cs{5364..5419}",
+      "Features/GetSchema/GetSchemaEndpoint.cs{5384..5421}",
+      "Features/GetSchema/GetSchemaEndpoint.cs{5422..5477}",
       "Infrastructure/Query/MetricAggregateReader.cs"
     ],
     "mutation-level": "Complete",

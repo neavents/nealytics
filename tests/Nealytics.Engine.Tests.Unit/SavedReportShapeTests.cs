@@ -52,7 +52,7 @@ public sealed class SavedReportShapeTests
         Assert.Equal("hour", report.Interval);
         Assert.Equal(7, report.Limit);
         Assert.True(report.IsGrouped);
-        Assert.Equal(new ReportParameter("location", "country", "string", "eq", false, "GB"), report.Parameters[0]);
+        Assert.Equal(new ReportParameter("location", "country", "string", "eq", false, "GB") { ResolvedColumn = "country" }, report.Parameters[0]);
         Assert.Equal(FilterComparison.GreaterOrEqual, report.Parameters[1].Predicate);
         Assert.Equal("number", report.Parameters[1].Type);
         Assert.True(report.Parameters[1].Required);

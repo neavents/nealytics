@@ -5,7 +5,7 @@
       "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj",
       "../../tests/Nealytics.Engine.Tests.Integration/Nealytics.Engine.Tests.Integration.csproj"
     ],
-    "test-case-filter": "FullyQualifiedName~SavedReport|FullyQualifiedName~NamedMetric|FullyQualifiedName~EventSegment",
+    "test-case-filter": "FullyQualifiedName~SavedReport|FullyQualifiedName~NamedMetric|FullyQualifiedName~EventSegment|FullyQualifiedName~ComputedDimension",
     "mutate": [
       "Infrastructure/Query/MetricAggregateReader.cs",
       "Features/GetSavedReport/GetSavedReportQuery.cs"

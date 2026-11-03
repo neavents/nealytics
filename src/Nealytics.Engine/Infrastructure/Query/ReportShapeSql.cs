@@ -20,7 +20,7 @@ internal static class ReportShapeSql
         {
             sql.Append(bucket).Append(", ");
         }
-        foreach (string column in definition.GroupBy)
+        foreach (string column in definition.GroupExpressions)
         {
             sql.Append("toString(").Append(column).Append("), ");
         }

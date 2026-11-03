@@ -90,14 +90,13 @@ public static class FilterParser
             (string token, FilterComparison comparison) = matched.Value;
             string measureName = entry[..operatorAt];
             string number = entry[(operatorAt + token.Length)..];
-            Measure? measure = measures.Find(measureName);
-
-            if (measure is null)
+            string? measureColumn = ResolveMeasure(measureName, measures, columns);
+            if (measureColumn is null)
             {
                 return Fail(Outcome.UnknownColumn, entry, measureName);
             }
 
-            if (number.Length == 0 || number.Length > maxValueLength
+            if (number.Length > maxValueLength
                 || !double.TryParse(number, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed)
                 || !double.IsFinite(parsed))
             {
@@ -106,8 +105,8 @@ public static class FilterParser
 
             filters.Add(new QueryFilter
             {
-                Column = measure.Name,
-                Value = parsed.ToString("R", CultureInfo.InvariantCulture),
+                Column = measureColumn,
+                Value = parsed.ToString(CultureInfo.InvariantCulture),
                 Comparison = comparison,
                 IsMeasure = true,
             });
@@ -118,6 +117,16 @@ public static class FilterParser
 
     private static Result Fail(Outcome outcome, string offender, string column) =>
         new() { Outcome = outcome, Offender = offender, Column = column, Filters = [] };
+
+    private static string? ResolveMeasure(string name, MeasureRegistry measures, QueryColumns columns)
+    {
+        Measure? measure = measures.Find(name);
+        if (measure is not null)
+        {
+            return measure.Name;
+        }
+        return columns.TryResolveNumeric(name, out string column) ? column : null;
+    }
 
     private static int IndexOfComparison(ReadOnlySpan<char> text)
     {
@@ -136,8 +145,7 @@ public static class FilterParser
     {
         foreach ((string token, FilterComparison comparison) in Comparisons)
         {
-            if (index + token.Length <= entry.Length
-                && string.CompareOrdinal(entry, index, token, 0, token.Length) == 0)
+            if (entry.AsSpan(index).StartsWith(token, StringComparison.Ordinal))
             {
                 return (token, comparison);
             }

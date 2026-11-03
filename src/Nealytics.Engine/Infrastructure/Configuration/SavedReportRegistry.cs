@@ -37,6 +37,7 @@ public sealed record SavedReport(
     public string? Interval { get; init; }
     public int Limit { get; init; } = 100;
     public IReadOnlyList<ReportParameter> Parameters { get; init; } = Array.Empty<ReportParameter>();
+    internal IReadOnlyList<string> GroupExpressions { get; init; } = Array.Empty<string>();
     internal bool IsGrouped => GroupBy.Count > 0 || Interval is not null;
 }
 
@@ -64,8 +65,9 @@ public sealed class SavedReportRegistry
         }
 
         DimensionRegistry dimensions = new(options);
-        QueryColumns columns = new(dimensions);
         MeasureRegistry measures = new(options, dimensions);
+        ComputedDimensionRegistry computed = new(options, dimensions, measures);
+        QueryColumns columns = new(dimensions, null, computed);
         List<SavedReport> definitions = new(configured.Count);
         HashSet<string> names = new(StringComparer.Ordinal);
         for (int index = 0; index < configured.Count; index++)
@@ -138,6 +140,7 @@ public sealed class SavedReportRegistry
             definitions.Add(new SavedReport(name, 1, segment, Array.AsReadOnly(fields.ToArray()))
             {
                 GroupBy = groups,
+                GroupExpressions = Array.AsReadOnly(groups.Select(columns.ExpressionFor).ToArray()),
                 Interval = interval,
                 Limit = declaration.Limit,
                 Parameters = parameters
@@ -162,11 +165,12 @@ public sealed class SavedReportRegistry
         HashSet<string> seen = new(StringComparer.Ordinal);
         for (int position = 0; position < configured.Count; position++)
         {
-            if (!columns.TryResolve(configured[position]?.Trim(), out string column) || !seen.Add(column))
+            string? name = configured[position]?.Trim();
+            if (!columns.TryResolve(name, out _) || !seen.Add(name!))
             {
                 throw Invalid(index, "group columns must be unique active event columns");
             }
-            groups[position] = column;
+            groups[position] = name!;
         }
         return Array.AsReadOnly(groups);
     }

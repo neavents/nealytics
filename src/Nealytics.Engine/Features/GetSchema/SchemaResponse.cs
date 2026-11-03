@@ -91,6 +91,9 @@ public sealed class SchemaResponse
     public IReadOnlyList<Nealytics.Engine.Infrastructure.Configuration.SavedReport> SavedReports { get; init; }
         = Array.Empty<Nealytics.Engine.Infrastructure.Configuration.SavedReport>();
 
+    public IReadOnlyList<Nealytics.Engine.Infrastructure.Configuration.ComputedDimension> ComputedDimensions { get; init; }
+        = Array.Empty<Nealytics.Engine.Infrastructure.Configuration.ComputedDimension>();
+
     public IReadOnlyList<string> Grains { get; init; } = Array.Empty<string>();
 
     public IReadOnlyList<SchemaRollup> Rollups { get; init; } = Array.Empty<SchemaRollup>();

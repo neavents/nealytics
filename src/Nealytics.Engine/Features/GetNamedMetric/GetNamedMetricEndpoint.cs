@@ -20,7 +20,7 @@ public static class GetNamedMetricEndpoint
             HttpContext context,
             NamedMetricRegistry metrics,
             EventSegmentRegistry segments,
-            QueryColumns columns,
+            AnalyticsColumns columns,
             MeasureRegistry measures,
             TenantAttributeRegistry tenantAttributes,
             IOptions<TelemetryEngineOptions> options,
@@ -32,7 +32,7 @@ public static class GetNamedMetricEndpoint
                 context.Request.Query["from"].ToString(), context.Request.Query["to"].ToString(),
                 context.Request.Query["traffic"].ToString(),
                 context.Request.Query["filter"].Select(value => value!).ToArray(),
-                metrics, columns, measures, options.Value.DefaultSessionQueryRangeHours, DateTime.UtcNow,
+                metrics, columns.Value, measures, options.Value.DefaultSessionQueryRangeHours, DateTime.UtcNow,
                 segments, context.Request.Query["segment"].ToString());
             if (parsed.Request is null)
             {

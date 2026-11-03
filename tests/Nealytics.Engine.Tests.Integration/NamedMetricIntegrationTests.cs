@@ -55,7 +55,8 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
             Row(_project, "other", "action", "normal", "2090-01-01 00:00:01.000", "11", "u", "0", "11"),
             Row(_project + "_other", "t", "action", "normal", "2090-01-01 00:00:01.000", "12", "u", "0", "12"),
             Row(_project, "t", "action", "normal", "2090-01-01 01:00:00.000", "20", "u", "0", "2"),
-            Row(_project, "t", "action", "normal", "2090-01-02 00:00:00.000", "30", "u", "0", "3")
+            Row(_project, "t", "action", "normal", "2090-01-02 00:00:00.000", "30", "u", "0", "3"),
+            Row(_project, "t", "computed", "normal", "2090-01-03 00:00:00.000", "13", "  ÅBÇ  ", "13", "13")
         ];
         await ClickHouseTestSupport.ExecuteAsync("INSERT INTO nealytics_core.global_events"
             + $" (event_id,project_id,tenant_id,session_id,event_type,traffic_class,timestamp,{Amount},{Units},{Floating},{DecimalAmount}) VALUES "
@@ -178,6 +179,33 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         {
             Name = "nullable_report", GroupBy = [Units], Fields = [new() { Name = "events", Metric = "all_events" }]
         });
+        options.ComputedDimensions =
+        [
+            new() { Name = "units_lower", Source = Units, Operation = "lower" },
+            new() { Name = "units_upper", Source = Units, Operation = "upper" },
+            new() { Name = "units_trim", Source = Units, Operation = "trim" },
+            new() { Name = "units_part", Source = "units_trim", Operation = "substring", Start = 2, Length = 1 },
+            new()
+            {
+                Name = "units_map", Source = "units_upper", Operation = "map", Default = "other",
+                Mapping = [new() { From = "U", To = "first" }, new() { From = "V", To = "second" }]
+            },
+            new() { Name = "amount_band", Source = Amount, Operation = "bucket", Width = 10 }
+        ];
+        foreach (var computed in options.ComputedDimensions)
+        {
+            options.SavedReports.Add(new()
+            {
+                Name = "computed_" + computed.Name, GroupBy = [computed.Name],
+                Fields = [new() { Name = "events", Metric = "all_events" }]
+            });
+        }
+        options.SavedReports.Add(new()
+        {
+            Name = "computed_parameter", Fields = [new() { Name = "events", Metric = "all_events" }],
+            Parameters = [new() { Name = "band", Column = "amount_band", Type = "number", Comparison = "gte", Default = "10" }]
+        });
+        options.EventSegments.Add(new() { Name = "computed_selection", Filters = ["units_map:first"] });
         _factory = new Factory(options);
         _client = _factory.CreateClient();
         _client.BaseAddress = new UriBuilder(_client.BaseAddress!) { Host = IPAddress.Loopback.ToString() }.Uri;
@@ -368,7 +396,7 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var declarations = document.RootElement.GetProperty("eventSegments");
-        Assert.Equal(10, declarations.GetArrayLength());
+        Assert.Equal(11, declarations.GetArrayLength());
         var selected = declarations.EnumerateArray().Single(s => s.GetProperty("name").GetString() == "selected");
         Assert.Equal(1, selected.GetProperty("version").GetInt32());
         Assert.Equal(new[] { Units + ":u", Amount + ">8" }, selected.GetProperty("filters").EnumerateArray().Select(v => v.GetString()));
@@ -505,7 +533,7 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         using var response = await _client.SendAsync(request);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var reports = document.RootElement.GetProperty("savedReports");
-        Assert.Equal(13, reports.GetArrayLength());
+        Assert.Equal(20, reports.GetArrayLength());
         var report = reports.EnumerateArray().Single(item => item.GetProperty("name").GetString() == "selected_report");
         Assert.Equal(1, report.GetProperty("version").GetInt32());
         Assert.Equal("selected", report.GetProperty("segment").GetString());
@@ -693,6 +721,80 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         Assert.Equal("1", Assert.Single(rows).Values["events"]);
     }
 
+    [Theory]
+    [InlineData("units_lower", "  åbç  ")]
+    [InlineData("units_upper", "  ÅBÇ  ")]
+    [InlineData("units_trim", "ÅBÇ")]
+    [InlineData("units_part", "B")]
+    [InlineData("units_map", "other")]
+    [InlineData("amount_band", "10")]
+    public async Task ComputedDimensionsGroupUsingNativeNullSafeOperatorsWithoutLeakingSql(string name, string expected)
+    {
+        using var response = await ShapedAsync("computed_" + name, "2090-01-03T00:00:00Z", "2090-01-03T00:00:00.001Z");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var row = Assert.Single(document.RootElement.GetProperty("rows").EnumerateArray());
+        Assert.Equal(name, row.GetProperty("groups")[0].GetProperty("name").GetString());
+        Assert.Equal(expected, row.GetProperty("groups")[0].GetProperty("value").GetString());
+        Assert.Equal("1", row.GetProperty("fields")[0].GetProperty("value").GetString());
+    }
+
+    [Fact]
+    public async Task ComputedFiltersSegmentsAndParametersKeepTheSameAuthorizedSelection()
+    {
+        using var selected = await GetAsync("events&segment=computed_selection");
+        Assert.Equal(HttpStatusCode.OK, selected.StatusCode);
+        using var json = JsonDocument.Parse(await selected.Content.ReadAsStringAsync());
+        Assert.Equal("3", json.RootElement.GetProperty("value").GetString());
+        using var numeric = await GetAsync("all_events&filter=amount_band>=10");
+        using var numericJson = JsonDocument.Parse(await numeric.Content.ReadAsStringAsync());
+        Assert.Equal("3", numericJson.RootElement.GetProperty("value").GetString());
+        using var response = await ShapedAsync("computed_parameter", "2090-01-03T00:00:00Z", "2090-01-03T00:00:00.001Z");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("1", document.RootElement.GetProperty("fields")[0].GetProperty("value").GetString());
+        using var excluded = await ShapedAsync("computed_parameter", "2090-01-03T00:00:00Z", "2090-01-03T00:00:00.001Z", "&param.band=20");
+        using var excludedJson = JsonDocument.Parse(await excluded.Content.ReadAsStringAsync());
+        Assert.Equal("0", excludedJson.RootElement.GetProperty("fields")[0].GetProperty("value").GetString());
+    }
+
+    [Fact]
+    public async Task ComputedMapsPreserveNullGroupsAndLegacyEndpointsRetainTheirOwnAllowlist()
+    {
+        using var response = await ShapedAsync("computed_units_map", "2090-01-01T00:00:00Z", "2090-01-01T00:00:04Z");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var rows = document.RootElement.GetProperty("rows");
+        Assert.Equal(3, rows.GetArrayLength());
+        Assert.Equal(JsonValueKind.Null, rows[0].GetProperty("groups")[0].GetProperty("value").ValueKind);
+        Assert.Equal("first", rows[1].GetProperty("groups")[0].GetProperty("value").GetString());
+        Assert.Equal("second", rows[2].GetProperty("groups")[0].GetProperty("value").GetString());
+        using var legacy = Authorized("/api/v1/analytics/breakdown?groupBy=units_map", "t", "breakdown");
+        using var rejected = await _client.SendAsync(legacy);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+    }
+
+    [Fact]
+    public async Task ComputedDiscoveryExposesDeclarationsAndKeepsCompiledExpressionsPrivate()
+    {
+        using var request = Authorized("/api/v1/schema", "t", "schema");
+        using var response = await _client.SendAsync(request);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var definitions = document.RootElement.GetProperty("computedDimensions");
+        Assert.Equal(6, definitions.GetArrayLength());
+        var mapping = definitions.EnumerateArray().Single(definition => definition.GetProperty("name").GetString() == "units_map");
+        Assert.Equal("units_upper", mapping.GetProperty("source").GetString());
+        Assert.Equal("map", mapping.GetProperty("operation").GetString());
+        Assert.Equal("U", mapping.GetProperty("mapping")[0].GetProperty("from").GetString());
+        Assert.Equal("first", mapping.GetProperty("mapping")[0].GetProperty("to").GetString());
+        Assert.False(mapping.TryGetProperty("expression", out _));
+        Assert.False(mapping.TryGetProperty("numeric", out _));
+        var report = document.RootElement.GetProperty("savedReports").EnumerateArray()
+            .Single(definition => definition.GetProperty("name").GetString() == "computed_units_map");
+        Assert.Equal("units_map", report.GetProperty("groupBy")[0].GetString());
+        Assert.False(report.TryGetProperty("groupExpressions", out _));
+    }
+
     private async Task<HttpResponseMessage> ShapedAsync(string name, string from, string to, string extra = "")
     {
         using var request = Authorized("/api/v1/analytics/reports/" + name + "?from=" + from + "&to=" + to + extra, "t", "reports");
@@ -753,8 +855,12 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
                 services.AddSingleton(measures);
                 services.AddSingleton(attributes);
                 services.AddSingleton(new QueryColumns(dimensions, attributes));
+                var computed = new ComputedDimensionRegistry(_declared, dimensions, measures);
+                var analytics = new QueryColumns(dimensions, attributes, computed);
+                services.AddSingleton(computed);
+                services.AddSingleton(new AnalyticsColumns(analytics));
                 var metrics = new NamedMetricRegistry(_declared, measures);
-                var segments = new EventSegmentRegistry(_declared, new QueryColumns(dimensions, attributes), measures);
+                var segments = new EventSegmentRegistry(_declared, analytics, measures);
                 services.AddSingleton(metrics);
                 services.AddSingleton(segments);
                 services.AddSingleton(new SavedReportRegistry(_declared, metrics, segments));
