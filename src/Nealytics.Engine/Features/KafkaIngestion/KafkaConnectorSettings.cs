@@ -80,7 +80,7 @@ internal sealed class KafkaConnectorSettings
             MessageMaxBytes = options.MaxMessageBytes,
             FetchMaxBytes = options.MaxMessageBytes,
             MaxPartitionFetchBytes = options.MaxMessageBytes,
-            ReceiveMessageMaxBytes = checked(options.QueueBufferKiB * 1_024 + 512),
+            ReceiveMessageMaxBytes = options.QueueBufferKiB * 1_024 + 512,
             QueuedMaxMessagesKbytes = options.QueueBufferKiB,
             QueuedMinMessages = 1,
             SecurityProtocol = security,

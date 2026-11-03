@@ -1,0 +1,40 @@
+name: Kafka connector
+
+on:
+  push:
+    branches: ['feat/integrations*']
+  pull_request:
+    branches: [main, 'feat/integrations*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  published:
+    name: Published Linux ${{ matrix.architecture }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-24.04
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Build the single-file image on its actual architecture
+        run: docker build --tag nealytics-kafka-qualification:local .
+
+      - name: Kafka, WAL, storage, restart and poison-prefix checks
+        run: python3 scripts/qualify-kafka.py --image nealytics-kafka-qualification:local --architecture '${{ matrix.architecture }}' --output 'artifacts/kafka/${{ matrix.architecture }}'
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: kafka-${{ matrix.architecture }}
+          retention-days: 7
+          path: artifacts/kafka/${{ matrix.architecture }}

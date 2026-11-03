@@ -161,6 +161,7 @@ public sealed class KafkaConnectorSettingsTests
         var options = KafkaTestSupport.Options();
         change(options);
         var error = Assert.Throws<InvalidOperationException>(() => KafkaTestSupport.Settings(options));
+        Assert.StartsWith("Kafka ", error.Message);
         Assert.DoesNotContain("secret", error.ToString());
     }
 

@@ -50,6 +50,7 @@ public sealed class KafkaRecordParserTests
     public void RejectsInvalidInputBeforeAnyPersistence(string? json)
     {
         var error = Assert.Throws<InvalidDataException>(() => Parser().Parse(json is null ? null : Encoding.UTF8.GetBytes(json), DateTime.UtcNow));
+        Assert.StartsWith("Kafka record", error.Message);
         Assert.DoesNotContain("hidden", error.Message);
         Assert.Null(error.InnerException);
     }

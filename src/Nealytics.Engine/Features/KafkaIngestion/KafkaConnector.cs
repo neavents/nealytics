@@ -52,7 +52,6 @@ internal sealed class KafkaConnector : BackgroundService
                     GlobalTelemetryPayload payload = _parser.Parse(record.Message.Value, DateTime.UtcNow);
                     stage = "persist-and-dispatch";
                     await _dispatcher.AppendAsync(payload, cancellationToken);
-                    cancellationToken.ThrowIfCancellationRequested();
                     stage = "commit";
                     consumer.Commit([new TopicPartitionOffset(record.TopicPartition, record.Offset + 1)]);
                 }

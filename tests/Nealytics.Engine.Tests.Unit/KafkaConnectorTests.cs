@@ -14,7 +14,7 @@ public sealed class KafkaConnectorTests
     {
         await using var harness = new Harness(factory: () => throw new IOException("secret library detail"));
         await harness.Start();
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Connector.ExecuteTask!);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Connector.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(2)));
         Assert.Contains("during create", error.Message);
         Assert.Contains("partition -1, offset -1", error.Message);
         Assert.DoesNotContain("secret", error.ToString());
@@ -118,7 +118,7 @@ public sealed class KafkaConnectorTests
         await using var harness = new Harness(file: new FaultFile(writeFailure));
         harness.Consumer.Configure().Consume(Arg.Any<CancellationToken>()).Returns(Record());
         await harness.Start();
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Connector.ExecuteTask!);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Connector.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(2)));
         Assert.Contains("persist-and-dispatch", error.Message);
         Assert.DoesNotContain("secret", error.ToString());
         Assert.Null(error.InnerException);
@@ -136,7 +136,7 @@ public sealed class KafkaConnectorTests
         harness.Consumer.Configure().Consume(Arg.Any<CancellationToken>()).Returns(Record());
         harness.Consumer.When(c => c.Commit(Arg.Any<IEnumerable<TopicPartitionOffset>>())).Do(_ => throw new KafkaException(new Error(ErrorCode.Local_State, "secret broker detail")));
         await harness.Start();
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Connector.ExecuteTask!);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Connector.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(2)));
         Assert.Contains("during commit", error.Message);
         Assert.Contains("partition 2, offset 41", error.Message);
         Assert.DoesNotContain("secret", error.ToString());
@@ -154,13 +154,29 @@ public sealed class KafkaConnectorTests
         await using var harness = new Harness();
         harness.Consumer.Configure().Consume(Arg.Any<CancellationToken>()).Returns(Record("secret input"));
         await harness.Start();
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Connector.ExecuteTask!);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Connector.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(2)));
         Assert.Contains("during validate", error.Message);
         Assert.DoesNotContain("secret", error.ToString());
         Assert.Equal(0, harness.Wal.UncommittedRecordCount);
         harness.Consumer.Received(1).Consume(Arg.Any<CancellationToken>());
         harness.Consumer.DidNotReceive().Commit(Arg.Any<IEnumerable<TopicPartitionOffset>>());
         harness.Consumer.Received(1).Close();
+        harness.Consumer.Received(1).Dispose();
+    }
+
+    [Fact]
+    public async Task CloseFailureAfterACompletedLoopRetainsItsStage()
+    {
+        await using var harness = new Harness();
+        harness.Consumer.Configure().Consume(Arg.Any<CancellationToken>()).Returns(Record());
+        harness.Consumer.When(c => c.Commit(Arg.Any<IEnumerable<TopicPartitionOffset>>())).Do(_ => harness.Stopping.Cancel());
+        harness.Consumer.When(c => c.Close()).Do(_ => throw new IOException("secret"));
+        await harness.Start();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Connector.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.Contains("during close", error.Message);
+        Assert.DoesNotContain("secret", error.ToString());
+        Assert.Equal(1, harness.Wal.UncommittedRecordCount);
+        harness.Consumer.Received(1).Commit(Arg.Any<IEnumerable<TopicPartitionOffset>>());
         harness.Consumer.Received(1).Dispose();
     }
 
@@ -182,7 +198,8 @@ public sealed class KafkaConnectorTests
             await WaitFor(() => harness.Consumer.ReceivedCalls().Any(c => c.GetMethodInfo().Name == "Consume"));
             await harness.Stop();
         }
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Connector.ExecuteTask!);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Connector.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.Contains("during " + (stage is "dispose" or "close" ? "consume" : stage), error.Message);
         Assert.DoesNotContain("secret", error.ToString());
         Assert.Null(error.InnerException);
         harness.Consumer.DidNotReceive().Commit(Arg.Any<IEnumerable<TopicPartitionOffset>>());
