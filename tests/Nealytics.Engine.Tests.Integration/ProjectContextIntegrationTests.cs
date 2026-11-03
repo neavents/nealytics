@@ -50,7 +50,6 @@ public sealed class ProjectContextIntegrationTests
                 }
             ]
         };
-        await ClickHouseTestSupport.ExecuteAsync($"ALTER TABLE nealytics_core.global_events ADD COLUMN {left} Nullable(String), ADD COLUMN {right} Nullable(String), ADD COLUMN {measure} Nullable(Int64)");
         try
         {
             await using var factory = new Factory(options);
@@ -115,7 +114,7 @@ public sealed class ProjectContextIntegrationTests
         finally
         {
             await ClickHouseTestSupport.DeleteProjectsAsync(alpha, beta);
-            await ClickHouseTestSupport.ExecuteAsync($"ALTER TABLE nealytics_core.global_events DROP COLUMN {left}, DROP COLUMN {right}, DROP COLUMN {measure}");
+            await ClickHouseTestSupport.ExecuteAsync($"ALTER TABLE nealytics_core.global_events DROP COLUMN IF EXISTS {left}, DROP COLUMN IF EXISTS {right}, DROP COLUMN IF EXISTS {measure}");
         }
     }
 
@@ -139,7 +138,8 @@ public sealed class ProjectContextIntegrationTests
             base.ConfigureWebHost(builder);
             builder.ConfigureServices(services =>
             {
-                foreach (var descriptor in services.Where(descriptor => descriptor.ServiceType == typeof(IHostedService)).ToArray())
+                foreach (var descriptor in services.Where(descriptor => descriptor.ServiceType == typeof(IHostedService)
+                    && descriptor.ImplementationType == typeof(TelemetryBatchProcessor)).ToArray())
                 {
                     services.Remove(descriptor);
                 }
