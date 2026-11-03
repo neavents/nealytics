@@ -147,6 +147,7 @@ public sealed class SavedReportShapeTests
     [InlineData(12, "comparison is unsupported")]
     [InlineData(13, "comparison is unsupported")]
     [InlineData(14, "default must")]
+    [InlineData(15, "type must match")]
     public void InvalidParameterDeclarationsAreRejected(int invalidCase, string diagnostic)
     {
         var options = Options();
@@ -169,6 +170,7 @@ public sealed class SavedReportShapeTests
             case 12: parameter.Comparison = null!; break;
             case 13: parameter.Comparison = "ne"; break;
             case 14: parameter.Default = " "; break;
+            case 15: parameter.Type = "number"; parameter.Column = null!; break;
         }
         var error = Assert.Throws<InvalidOperationException>(() => SavedReportRegistryTests.Build(options));
         Assert.StartsWith("TelemetryEngine:SavedReports[0]: ", error.Message);

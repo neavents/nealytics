@@ -653,7 +653,7 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         string source = "(SELECT {projectId:String} AS project_id, {tenantId:String} AS tenant_id, 'normal' AS traffic_class,"
             + " toDateTime64({at:String}, 3, 'UTC') AS timestamp)";
         string sql = query.Sql.Replace("nealytics_core.global_events", source, StringComparison.Ordinal);
-        var parameters = query.Parameters.Append(new KeyValuePair<string, object?>("at", from)).ToArray();
+        var parameters = query.Parameters.Append(new KeyValuePair<string, object?>("at", request.Scope.From.ToString("yyyy-MM-dd HH:mm:ss.fff", System.Globalization.CultureInfo.InvariantCulture))).ToArray();
         var reader = new MetricAggregateReader(scope.ServiceProvider.GetRequiredService<ClickHouseConnectionFactory>());
         var row = Assert.Single(await reader.ReadRowsAsync(sql, parameters, [], 0, true, 1, CancellationToken.None));
         Assert.Equal(DateTime.Parse(expected, System.Globalization.CultureInfo.InvariantCulture,

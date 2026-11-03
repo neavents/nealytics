@@ -27,7 +27,8 @@ internal static class ReportParameterBinding
         foreach (ReportParameter parameter in declarations)
         {
             string? value = parameter.Default;
-            if (values is not null && values.TryGetValue(parameter.Name, out string[]? supplied))
+            string[]? supplied = null;
+            if (values is not null && values.TryGetValue(parameter.Name, out supplied))
             {
                 if (supplied is null || supplied.Length != 1 || supplied[0] is null)
                 {
@@ -58,8 +59,11 @@ internal static class ReportParameterBinding
         return new(Array.AsReadOnly(filters.ToArray()), null);
     }
 
-    internal static bool IsValidValue(string type, string value) =>
-        !string.IsNullOrWhiteSpace(value) && value.Length <= 256
-        && (type == "string" || type == "number" && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture,
-            out double numeric) && double.IsFinite(numeric));
+    internal static bool IsValidValue(string type, string value)
+    {
+        double numeric = default;
+        return !string.IsNullOrWhiteSpace(value) && value.Length <= 256
+            && (type == "string" || type == "number" && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture,
+                out numeric) && double.IsFinite(numeric));
+    }
 }
