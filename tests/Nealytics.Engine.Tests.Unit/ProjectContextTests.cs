@@ -282,6 +282,16 @@ public sealed class ProjectContextTests
     }
 
     [Fact]
+    public void MissingProjectSchemaCollectionsKeepLegacyCredentialBehavior()
+    {
+        var options = new TelemetryEngineOptions { ProjectSchemas = null!, AllowedProjectKeys = "legacy" };
+        var keys = new ApiKeyValidator(Microsoft.Extensions.Options.Options.Create(options), NullLogger<ApiKeyValidator>.Instance);
+        Assert.True(keys.TryResolve("legacy", out var policy));
+        Assert.Same(IngestionKeyPolicy.Unpinned, policy);
+        Assert.True(keys.MayWriteProject("legacy", "any"));
+    }
+
+    [Fact]
     public void RequestContextIsSelectedOnceAndHasAnExplicitDefaultOutsideHttp()
     {
         var catalog = Build(Options());
