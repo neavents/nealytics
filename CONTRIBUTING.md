@@ -81,5 +81,5 @@ commentary. Production code, SQL, and configuration remain comment-free.
   Performance measurements remain stopped under the owner's current instruction. Never report
   a suite or target as passing when it was not run.
 - CI runs build, unit, integration, smoke and pure harness-helper correctness checks on the
-  configured A/B feature branches as well as main. Native qualification has separate actual Linux
+  configured A/B/C feature branches as well as main. Native qualification has separate actual Linux
   x64/ARM64 jobs. Measurement-harness integration fixtures are excluded from normal test runs.

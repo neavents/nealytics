@@ -1,8 +1,9 @@
 # Category C qualification ledger
 
 Date: 2026-11-03. Selected scope: [C completion contract](c-completion-plan.md).
-C4–C7 and C8 managed mutation gates have passed. C8 storage mutation qualification is still running;
-this record is updated with final results before category integration.
+The selected C1–C8 scope is implemented and functionally qualified. All C4–C8 managed/storage
+mutation gates pass; category integration is confined to `feat/analytics-customization`.
+Separate step branches remain available. Main and the original unfinished rebase are untouched.
 
 ## Implemented contracts
 
@@ -13,7 +14,7 @@ this record is updated with final results before category integration.
 | C5 | Typed declared parameters, bounded grouped reports and UTC hour/day time series | `1bd49f6` |
 | C6 | Deterministic read-time mapping, normalization, substring and numeric buckets | `50e8107` |
 | C7 | Authenticated logical project catalogs, compatible bounded physical union and project-specific ingestion constraints | `2bdc02d` |
-| C8 | Explicit accuracy contracts, opt-in raw/rollup/hybrid state plans and administrative explanations | Runtime `747b348`; additional isolation/shared-fixture tests `db1bd02` |
+| C8 | Explicit accuracy contracts, opt-in raw/rollup/hybrid state plans and administrative explanations | Runtime `747b348`; final routing/row assertions `0b946ba` |
 
 The [operator guide](../analytics-customization.md) defines activation, numerical/null semantics,
 limits, authorization, raw fallback, migration and rollback preconditions. Declarations activate
@@ -30,25 +31,28 @@ computed/grouped/filter results and raw/state-reference parity. The integration 
 
 The final warning-free build and all **2,874 unit cases** passed at `db1bd02`, including five
 additional C7 HTTP cases for pinned-project tenant-attribute authorization and logical allowlists.
+The fresh full integration run at `0b946ba` passed **297 cases**, including the routing check,
+with zero failures or skips. Its collector is `5fc437c3-b65e-4941-b115-e11a64b7a617`.
 The production source tree is unchanged from `747b348`. The final unit collector is
-`abc3b091-4a69-4b57-90d7-6b946307a125`. All 23 C8 database cases also passed using the shared schema fixture
-at `db1bd02`; each case still has its own project/data and all existing assertions. The fixture
-shares initialization, not query results or mutable project identity. Tests restore readiness
-fences before another case executes.
+`abc3b091-4a69-4b57-90d7-6b946307a125`. All 24 C8 database cases also passed using the shared
+schema fixture and added routing/row assertions through `0b946ba`; each case still has its own
+project/data and all existing assertions. The fixture shares initialization, not query results
+or mutable project identity. Tests restore readiness fences before another case executes.
 
 CI [41628828094](https://github.com/neavents/nealytics/actions/runs/41628828094) passed build,
 unit, integration, pure helper correctness and published smoke at `747b348`. Image publication
-was skipped on the feature branch. No benchmark workloads were invoked.
+was skipped on the feature branch. The latest code/test source `0b946ba` also passed all these
+jobs in [41632675874](https://github.com/neavents/nealytics/actions/runs/41632675874).
+No benchmark workloads were invoked.
 
 An earlier full integration run at `63eddfe` had 295 passing cases and one Docker container
 cleanup error, without a product assertion failure. The isolated same-source retry passed, and
-the fresh 296-case run above passed without that infrastructure failure.
+the fresh 296- and 297-case runs above passed without that infrastructure failure.
 
 ## Coverage
 
-Final `db1bd02` unit and `747b348` integration OpenCover collectors over the identical maintained
-production source tree are combined by maintained engine file,
-method and sequence/branch identity. Generated sources under `obj` are excluded; maintained
+Final `db1bd02` unit and `0b946ba` integration OpenCover collectors over the identical maintained
+production source tree are combined by maintained engine file, method and sequence/branch identity. Generated sources under `obj` are excluded; maintained
 production code is not excluded. Against the C3 prerequisite `ad2d943`, every changed maintained
 sequence point and recorded branch outcome is covered. This is a changed-code claim, not a
 repository-wide 100% claim. The changed audit contains 1,748/1,748 covered sequence
@@ -80,6 +84,7 @@ No passing run has surviving or uncovered executable mutants.
 | C7 managed / `23166e3` | 244 | 6 | 235 | 991 | 100% |
 | C7 storage / `c61a3f3` | 5 | 0 | 5 | 300 | 100% |
 | C8 managed / `747b348` | 478 | 0 | 50 | 664 | 100% |
+| C8 storage / `0b946ba` | 268 | 0 | 88 | 284 | 100% |
 
 C6 timeouts remove cycle/depth protection and cause nontermination. C7 timeouts mutate batch
 loop bounds/progress or remove failure propagation, causing nontermination in the durable
@@ -88,9 +93,17 @@ additional assertions and refactoring of redundant/equivalent expressions; no th
 maintained-source scope was reduced to obtain a pass.
 
 Storage test filters retain relevant unit SQL/contract assertions plus real dependency cases.
-C8 uses all 23 planning integration cases with one shared class schema fixture and isolated
+C8 uses all 24 planning integration cases with one shared class schema fixture and isolated
 per-case project data; it no longer repeatedly runs 87 unrelated legacy named-metric database
 cases for every mutant. Those legacy cases still run in the full integration milestone.
+The completed C8 storage diagnostic at `9770a42` killed 262 mutants and left six survivors:
+two could falsely route selected state plans through raw SQL, and four could skip/erase grouped
+rows or group metadata while weak parity assertions still agreed. Added checks verify populated
+row/group/field metadata and reference aggregate totals. A routing failure-path case temporarily
+renames the raw table, verifies fully summarized metric/report reads, then restores it in a
+finally block. All 24 C8 cases pass these assertions, and the final unchanged Complete storage
+scope kills all 268 executable mutants. Earlier response-shape survivors similarly
+drove explicit scalar/table/time-series assertions. No product behavior was weakened to fit tests.
 Interrupted diagnostic runs are retained as interrupted and are not qualification evidence.
 
 Stryker compiles the full engine before filtering. Its inherited Safe Mode rollbacks in

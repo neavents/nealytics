@@ -27,6 +27,13 @@ being assessed. The supplied guide and engine code have not been changed by this
 Terminology: "custom injections" is interpreted here as a custom ingestion execution path behind
 the existing API, rather than arbitrary user-loaded code or dependency-injection plugins.
 
+Implementation checkpoint, 2026-11-03: the A/B functional milestone and selected C1–C8 scope are
+qualified on feature branches, with main untouched. See the [current implementation ledger](implementation-status.md),
+[C qualification](packages/c-verification.md) and [analytics operator guide](analytics-customization.md).
+Broader proposals below remain separate future work. All benchmarks, profiling and performance
+measurements have been stopped by the owner since 2026-10-30; no default-backend change or
+comparative speed claim follows from functional qualification.
+
 ## 1. Product direction
 
 **Make Nealytics a highly customizable, resource-efficient analytics engine for multi-tenant

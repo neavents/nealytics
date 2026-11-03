@@ -194,8 +194,10 @@ conservative whole-second TTL boundary. Nonpositive/unreconciled retention preve
 
 Named metrics support `p50`, `p75`, `p90`, `p95`, `p99` with a permitted measure aggregation and
 `Accuracy: exact` (default) or `approximate`. Approximate definitions require callers to explicitly
-send `accuracy=approximate`; omitted/`exact` requests return 400. Exact formulas cannot contain
-approximate dependencies. Approximate accuracy is limited to quantiles/formulas; ordinary counts,
+send `accuracy=approximate`; omitted/`exact` requests return 400. This request option permits
+approximate definitions; it does not change an exact definition to an approximate algorithm.
+Exact formulas cannot contain approximate dependencies. Approximate accuracy is limited to
+quantiles/formulas; ordinary counts,
 sums, averages, minima and maxima retain their existing algorithms. Quantiles currently use raw
 data, with a plan explanation. `accuracy` describes algorithm choice, not a guarantee of arbitrary
 precision floating-point arithmetic, identity deduplication or transactional snapshots across

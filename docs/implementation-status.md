@@ -1,12 +1,12 @@
 # Implementation evidence
 
-Category C runtime implementation now covers the selected C1–C8 contract. C4–C7 scoped
-mutation gates pass; C8 final mutation qualification is closing. See the
+Category C's selected C1–C8 contract is implemented and functionally qualified. All C4–C8
+managed/storage mutation gates pass at 100%. See the
 [category ledger](packages/c-verification.md) and [operator guide](analytics-customization.md).
-The final milestone has a warning-free build, 2,874 passing unit cases, 296 passing integration
+The final milestone has a warning-free build, 2,874 passing unit cases, 297 passing integration
 cases and full coverage of changed maintained lines/recorded branch outcomes. The fresh packaged
 Linux ARM64 executable passed C1–C8 functional checks using io_uring and custom ingestion.
-Main remains untouched; category integration waits for the remaining C8 mutation gate.
+The qualified work is integrated on `feat/analytics-customization`; main remains untouched.
 The A/B counts below describe their historical qualified snapshot.
 
 Objective: complete correctness/resource safety and ingestion performance, including native Linux
