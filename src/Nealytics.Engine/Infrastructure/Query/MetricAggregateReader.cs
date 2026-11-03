@@ -47,7 +47,7 @@ internal sealed class MetricAggregateReader
             command.Parameters.Add(bound);
         }
         await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-        List<MetricAggregateRow> rows = new(Math.Min(limit, 64));
+        List<MetricAggregateRow> rows = [];
         int offset = groupCount + (hasBucket ? 1 : 0);
         while (rows.Count < limit && await reader.ReadAsync(cancellationToken))
         {

@@ -125,6 +125,14 @@ public sealed class SavedReportShapeTests
         report.Limit++;
         Assert.Contains("16384-cell", Assert.Throws<InvalidOperationException>(() => SavedReportRegistryTests.Build(options)).Message);
         report.GroupBy.Clear();
+        report.Limit = 10_000;
+        Assert.False(SavedReportRegistryTests.Build(options).Find("overview")!.IsGrouped);
+        report.Interval = "hour";
+        report.Limit = 1024;
+        Assert.True(SavedReportRegistryTests.Build(options).Find("overview")!.IsGrouped);
+        report.Limit++;
+        Assert.Throws<InvalidOperationException>(() => SavedReportRegistryTests.Build(options));
+        report.Interval = "";
         report.Limit = -1;
         Assert.Throws<InvalidOperationException>(() => SavedReportRegistryTests.Build(options));
         report.Limit = 100;
@@ -253,6 +261,8 @@ public sealed class SavedReportShapeTests
                 new Dictionary<string, string[]> { ["threshold"] = values! }).Error);
         }
         Assert.Equal(400, Request(options, new Dictionary<string, string[]> { ["threshold"] = ["1"], ["location"] = [new string('x', 257)] }).StatusCode);
+        Assert.Equal("Report parameter 'threshold' requires a nonblank value of at most 256 characters matching its type.",
+            Request(options, new Dictionary<string, string[]> { ["threshold"] = ["nan"] }).Error);
         Assert.Equal(404, Request(options, name: "missing").StatusCode);
         options.SavedReports[0].Parameters.Clear();
         Assert.Equal(200, Request(options).StatusCode);
@@ -275,6 +285,8 @@ public sealed class SavedReportShapeTests
         Assert.Contains(query.Parameters, pair => Equals(pair.Value, "x' OR 1=1"));
         Assert.Null(SavedReportRequestFactory.UnsupportedParameter(["param.location", "from"], request.Definition.Parameters));
         Assert.NotNull(SavedReportRequestFactory.UnsupportedParameter(["param.missing"], request.Definition.Parameters));
+        Assert.NotNull(SavedReportRequestFactory.UnsupportedParameter(["xxxxxxlocation"], request.Definition.Parameters));
+        Assert.NotNull(SavedReportRequestFactory.UnsupportedParameter(["x"], request.Definition.Parameters));
         Assert.NotNull(SavedReportRequestFactory.UnsupportedParameter(["param.location"]));
     }
 
@@ -310,7 +322,7 @@ public sealed class SavedReportShapeTests
             : " GROUP BY 1, 2, 3 ORDER BY 1 ASC NULLS FIRST, 2 ASC NULLS FIRST, 3 ASC NULLS FIRST LIMIT 2", query.Sql);
         Assert.Contains("SETTINGS enable_positional_arguments=1", query.Sql);
         Assert.Equal(interval is not null, query.Sql.Contains("enable_extended_results_for_datetime_functions=1"));
-        Assert.Throws<InvalidOperationException>(() => ReportShapeSql.Bucket("bad"));
+        Assert.Equal("Unknown compiled report interval.", Assert.Throws<InvalidOperationException>(() => ReportShapeSql.Bucket("bad")).Message);
     }
 
     [Fact]

@@ -386,6 +386,8 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var root = document.RootElement;
         Assert.Equal(name, root.GetProperty("name").GetString());
+        Assert.Equal("scalar", root.GetProperty("shape").GetString());
+        Assert.Empty(root.GetProperty("rows").EnumerateArray());
         Assert.Equal(1, root.GetProperty("version").GetInt32());
         Assert.Equal("raw", root.GetProperty("source").GetString());
         Assert.Equal("string", root.GetProperty("numericEncoding").GetString());
@@ -583,6 +585,7 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         var rows = document.RootElement.GetProperty("rows");
         Assert.Equal(expectedRows, rows.GetArrayLength());
         Assert.Equal(new DateTime(2090, 1, 1, 0, 0, 0, DateTimeKind.Utc), rows[0].GetProperty("bucket").GetDateTime());
+        Assert.Equal(DateTimeKind.Utc, rows[0].GetProperty("bucket").GetDateTime().Kind);
         Assert.Equal(firstCount, rows[0].GetProperty("fields")[0].GetProperty("value").GetString());
         Assert.Equal(firstShare, rows[0].GetProperty("fields")[2].GetProperty("value").GetString());
         Assert.Equal("1", rows[expectedRows - 1].GetProperty("fields")[0].GetProperty("value").GetString());

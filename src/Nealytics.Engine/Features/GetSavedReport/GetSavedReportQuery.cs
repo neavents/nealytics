@@ -36,7 +36,7 @@ public sealed class GetSavedReportQuery
         SavedReport definition = request.Definition;
         IReadOnlyList<MetricAggregateRow> selected = await _reader.ReadRowsAsync(
             sql, parameters, projection.Components, definition.GroupBy.Count, definition.Interval is not null,
-            definition.IsGrouped ? definition.Limit : 1, cancellationToken);
+            definition.Limit, cancellationToken);
         SavedReportRow[] rows = definition.IsGrouped ? new SavedReportRow[selected.Count] : Array.Empty<SavedReportRow>();
         for (int index = 0; index < rows.Length; index++)
         {

@@ -47,8 +47,12 @@ internal static class ReportParameterCompiler
             {
                 throw new InvalidOperationException("Report parameter names must be unique and match [a-z][a-z0-9_]{0,62}.");
             }
+            if (column is null)
+            {
+                throw new InvalidOperationException("Report parameter type must match an active string dimension or numeric measure.");
+            }
             bool numeric = type == "number";
-            string resolved = column ?? string.Empty;
+            string resolved = column;
             if (numeric ? measures.Find(resolved) is null && !columns.TryResolveNumeric(column, out resolved)
                 : type != "string" || !columns.TryResolve(column, out resolved))
             {

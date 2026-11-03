@@ -1,6 +1,7 @@
 namespace Nealytics.Engine.Infrastructure.Query;
 
 using System.Text;
+using System.Linq;
 using Nealytics.Engine.Infrastructure.Configuration;
 
 internal static class ReportShapeSql
@@ -46,7 +47,7 @@ internal static class ReportShapeSql
 
     private static void AppendOrdinals(StringBuilder sql, int count, bool ordering)
     {
-        for (int index = 1; index <= count; index++)
+        foreach (int index in Enumerable.Range(1, count))
         {
             if (index > 1)
             {
