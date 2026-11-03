@@ -29,8 +29,11 @@ public sealed class AnalyticsPlanner
         _dimensions = dimensions;
         _enabled = options.Value.EnableAnalyticsRollupPlanning;
         _appendOnly = options.Value.AnalyticsRollupSourceIsAppendOnly;
-        _retentionDays = (options.Value.EventTypeRetention ?? []).Select(rule => rule.Days)
-            .Append(options.Value.RetentionDays).Min();
+        _retentionDays = options.Value.RetentionDays;
+        foreach (EventTypeRetentionOptions rule in options.Value.EventTypeRetention ?? [])
+        {
+            _retentionDays = Math.Min(_retentionDays, rule.Days);
+        }
         _clock = clock ?? TimeProvider.System;
     }
 
@@ -112,14 +115,12 @@ public sealed class AnalyticsPlanner
             return "The raw retention policy is not reconciled for analytics planning.";
         }
         DateTime now = _clock.GetUtcNow().UtcDateTime;
-        if (_retentionDays <= now.Ticks / TimeSpan.TicksPerDay)
+        long days = Math.Min(_retentionDays, now.Ticks / TimeSpan.TicksPerDay);
+        DateTime cutoff = now.AddDays(-days);
+        cutoff = new DateTime(cutoff.Ticks - cutoff.Ticks % TimeSpan.TicksPerSecond, DateTimeKind.Utc).AddSeconds(1);
+        if (scope.From < cutoff)
         {
-            DateTime cutoff = now.AddDays(-_retentionDays);
-            cutoff = new DateTime(cutoff.Ticks - cutoff.Ticks % TimeSpan.TicksPerSecond, DateTimeKind.Utc).AddSeconds(1);
-            if (scope.From < cutoff)
-            {
-                return "The range may include raw rows removed by retention.";
-            }
+            return "The range may include raw rows removed by retention.";
         }
         if (report?.Interval == "hour" && rollup.Grain != RollupGrain.Hour)
         {

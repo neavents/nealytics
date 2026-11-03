@@ -5,7 +5,7 @@
       "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj",
       "../../tests/Nealytics.Engine.Tests.Integration/Nealytics.Engine.Tests.Integration.csproj"
     ],
-    "test-case-filter": "FullyQualifiedName~AnalyticsPlan|FullyQualifiedName~MetricAccuracy|FullyQualifiedName~NamedMetric|FullyQualifiedName~SavedReport",
+    "test-case-filter": "(FullyQualifiedName~Nealytics.Engine.Tests.Unit&(FullyQualifiedName~AnalyticsPlan|FullyQualifiedName~MetricAccuracy|FullyQualifiedName~NamedMetric|FullyQualifiedName~SavedReport))|FullyQualifiedName~AnalyticsPlanningIntegrationTests",
     "mutation-level": "Complete",
     "concurrency": 1,
     "break-on-initial-test-failure": true,

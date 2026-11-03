@@ -25,6 +25,12 @@ public sealed class MetricAccuracyTests
         Assert.Equal("exact", new SavedReportResponse().Accuracy);
         Assert.False(new TelemetryEngineOptions().EnableAnalyticsRollupPlanning);
         Assert.False(new TelemetryEngineOptions().AnalyticsRollupSourceIsAppendOnly);
+        Assert.Equal("exact", AnalyticsExecution.Accuracy([]));
+        var metric = new NamedMetric("m", 1, "count", null, null, null, null);
+        Assert.Equal("exact", metric.Accuracy);
+        Assert.Equal("exact", new NamedMetricOptions().Accuracy);
+        Assert.Equal("auto", new NamedMetricRequest(metric, default).Execution);
+        Assert.Equal("auto", new SavedReportRequest(new SavedReport("r", 1, null, []), default).Execution);
     }
 
     private static NamedMetricRegistry Build(TelemetryEngineOptions options) =>
@@ -109,6 +115,7 @@ public sealed class MetricAccuracyTests
         var measures = new MeasureRegistry(options, dimensions);
         var columns = new QueryColumns(dimensions);
         var metrics = Build(options);
+        Assert.Equal("approximate", AnalyticsExecution.Accuracy([metrics.Find("events")!, metrics.Find("q")!]));
         var segments = new EventSegmentRegistry(options, columns, measures);
         var reports = new SavedReportRegistry(options, metrics, segments);
         var identity = new ReadIdentity { ProjectId = "p", TenantId = "t" };

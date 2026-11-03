@@ -5,6 +5,8 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.IdentityModel.Tokens;
 using Nealytics.Engine.Infrastructure.Configuration;
 
@@ -36,6 +38,61 @@ public sealed class AnalyticsPlanHttpTests
     }
 
     private const string Range = "?from=2090-01-01T00:00:00.001Z&to=2090-01-01T03:00:00.001Z";
+
+    [Fact]
+    public async Task ExplainBindsDeclaredReportParametersWithoutExecutingStorage()
+    {
+        await using var factory = new ProjectContextHttpTests.Factory(customize: options =>
+            options.ProjectSchemas[0].SavedReports[0].Parameters = [new() { Name = "region", Column = "region", Required = true }]);
+        using var client = factory.CreateClient();
+        var endpoints = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>();
+        Assert.Equal("ExplainNamedMetric", Assert.Single(endpoints, endpoint => endpoint.RoutePattern.RawText == "/api/v1/analytics/metrics/{name}/explain").Metadata.GetMetadata<IEndpointNameMetadata>()!.EndpointName);
+        Assert.Equal("ExplainSavedReport", Assert.Single(endpoints, endpoint => endpoint.RoutePattern.RawText == "/api/v1/analytics/reports/{name}/explain").Metadata.GetMetadata<IEndpointNameMetadata>()!.EndpointName);
+        using var request = Request("/api/v1/analytics/reports/overview/explain" + Range + "&param.region=west&execution=raw");
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("overview", document.RootElement.GetProperty("name").GetString());
+        Assert.Equal("raw", document.RootElement.GetProperty("source").GetString());
+    }
+
+    [Theory]
+    [InlineData("metrics/activity?execution=invalid")]
+    [InlineData("metrics/activity?accuracy=invalid")]
+    [InlineData("reports/overview?execution=invalid")]
+    [InlineData("reports/overview?accuracy=invalid")]
+    public async Task ExecutionEndpointsValidateTheirForwardedOptionsBeforeStorage(string path)
+    {
+        await using var factory = new ProjectContextHttpTests.Factory();
+        using var client = factory.CreateClient();
+        using var request = Request("/api/v1/analytics/" + path);
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains(path.Contains("execution", StringComparison.Ordinal) ? "Execution must be" : "Accuracy must be",
+            await response.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData("metrics/q")]
+    [InlineData("reports/approx")]
+    public async Task ExecutionEndpointsRequireApproximateOptInAndForwardItWhenPresent(string path)
+    {
+        await using var factory = new ProjectContextHttpTests.Factory(customize: options =>
+        {
+            options.ProjectSchemas[0].Measures[0].Aggregations = "sum,avg,p95";
+            options.ProjectSchemas[0].NamedMetrics.Add(new() { Name = "q", Measure = "amount", Aggregation = "p95", Accuracy = "approximate" });
+            options.ProjectSchemas[0].SavedReports.Add(new() { Name = "approx", GroupBy = ["unit"], Fields = [new() { Name = "q", Metric = "q" }] });
+        });
+        using var client = factory.CreateClient();
+        string selection = path.StartsWith("metrics", StringComparison.Ordinal) ? "?filter=unit:u" : "?traffic=normal";
+        using var denied = Request("/api/v1/analytics/" + path + selection);
+        using var rejected = await client.SendAsync(denied);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        Assert.Contains("explicitly request accuracy=approximate", await rejected.Content.ReadAsStringAsync());
+        using var allowed = Request("/api/v1/analytics/" + path + selection + "&accuracy=approximate");
+        using var response = await client.SendAsync(allowed);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+    }
 
     [Theory]
     [InlineData("metrics/activity", "metrics")]
@@ -111,7 +168,13 @@ public sealed class AnalyticsPlanHttpTests
     [InlineData("metrics/activity", "alpha", null, "", 403)]
     [InlineData("reports/overview", "alpha", null, "", 403)]
     [InlineData("metrics/activity", "alpha", "t", "&execution=unknown", 400)]
+    [InlineData("metrics/activity", "alpha", "t", "&accuracy=unknown", 400)]
+    [InlineData("metrics/activity", "alpha", "t", "&traffic=unknown", 400)]
+    [InlineData("metrics/activity", "alpha", "t", "&segment=missing", 404)]
     [InlineData("reports/overview", "alpha", "t", "&accuracy=unknown", 400)]
+    [InlineData("reports/overview", "alpha", "t", "&execution=unknown", 400)]
+    [InlineData("reports/overview", "alpha", "t", "&traffic=unknown", 400)]
+    [InlineData("reports/overview", "alpha", "t", "&filter=category:x", 400)]
     [InlineData("reports/overview", "alpha", "t", "&groupBy=country", 400)]
     [InlineData("reports/overview", "alpha", "t", "&param.missing=x", 400)]
     [InlineData("metrics/activity", "alpha", "t", "&filter=category:x", 400)]

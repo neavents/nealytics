@@ -8,11 +8,11 @@ internal static class AnalyticsExecution
 {
     internal static string? Violation(string? execution, string? accuracy, IEnumerable<NamedMetric> metrics)
     {
-        if (execution is not (null or "" or "auto" or "raw"))
+        if (!string.IsNullOrEmpty(execution) && execution != "auto" && execution != "raw")
         {
             return "Execution must be auto or raw.";
         }
-        if (accuracy is not (null or "" or "exact" or "approximate"))
+        if (!string.IsNullOrEmpty(accuracy) && accuracy != "exact" && accuracy != "approximate")
         {
             return "Accuracy must be exact or approximate.";
         }

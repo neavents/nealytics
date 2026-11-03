@@ -51,6 +51,7 @@ public sealed class AnalyticsPlanningTests
     [InlineData(0, 181, "hybrid", 2)]
     [InlineData(1, 181, "hybrid", 3)]
     [InlineData(1, 59, "raw", 1)]
+    [InlineData(1, 61, "raw", 1)]
     public void BucketInteriorsAndRawEdgesAreDisjointAndCoverTheWholeRange(int fromMinutes, int toMinutes, string source, int count)
     {
         var configured = Build(Options());
@@ -65,6 +66,7 @@ public sealed class AnalyticsPlanningTests
             Assert.Equal(plan.Slices[index - 1].To, plan.Slices[index].From);
         }
         Assert.All(plan.Slices, slice => Assert.True(slice.From < slice.To));
+        Assert.All(plan.Slices, slice => Assert.Contains(slice.Source, new[] { "raw", "rollup" }));
         if (source != "raw")
         {
             var interior = Assert.Single(plan.Slices, slice => slice.Source == "rollup");
@@ -72,6 +74,7 @@ public sealed class AnalyticsPlanningTests
             Assert.Equal(0, interior.To.Ticks % TimeSpan.TicksPerHour);
             Assert.Equal("hourly", plan.Rollup!.Name);
             Assert.True(Assert.Single(plan.Candidates).Eligible);
+            Assert.Equal("Compatible aggregate states and verified coverage.", Assert.Single(plan.Candidates).Reason);
         }
         else
         {
@@ -189,6 +192,7 @@ public sealed class AnalyticsPlanningTests
         Assert.Contains("delivery identity is ambiguous", plan.Candidates[0].Reason);
         options.Rollups.Clear();
         Assert.Empty(Build(options).Planner.Select([metric], Scope(), null, "auto").Candidates);
+        Assert.Equal("rollup", configured.Planner.Select([metric], Scope() with { Filters = null! }, null, "auto").Source);
     }
 
     [Theory]
@@ -231,6 +235,55 @@ public sealed class AnalyticsPlanningTests
     private sealed class FixedTime(DateTime now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => new(now);
+    }
+
+    [Theory]
+    [InlineData("count")]
+    [InlineData("sum")]
+    [InlineData("avg")]
+    [InlineData("min")]
+    [InlineData("max")]
+    public void EverySupportedMeasureStateCanServeAnHourlyReport(string aggregation)
+    {
+        var options = Options();
+        options.NamedMetrics = [new() { Name = "m", Measure = "amount", Aggregation = aggregation }];
+        var configured = Build(options);
+        var plan = configured.Planner.Select(configured.Metrics.Declared, Scope(), Shape("hour", "tag"), "auto");
+        Assert.Equal("rollup", plan.Source);
+        Assert.True(Assert.Single(plan.Candidates).Eligible);
+    }
+
+    [Fact]
+    public void DailyGrainsUseWholeDaysAndBothDateTimeCalendarEndpointsAreAdmitted()
+    {
+        var options = Options();
+        options.Rollups[0].Grain = "day";
+        var configured = Build(options);
+        var plan = configured.Planner.Select([configured.Metrics.Find("events")!],
+            Scope(Start.AddMinutes(1), Start.AddDays(2).AddMinutes(1)), Shape("day"), "auto");
+        Assert.Equal("hybrid", plan.Source);
+        Assert.Equal(Start.AddDays(1), plan.Slices[1].From);
+        Assert.Equal(Start.AddDays(2), plan.Slices[1].To);
+        var planner = new AnalyticsPlanner(configured.Rollups, configured.Dimensions,
+            Microsoft.Extensions.Options.Options.Create(options), new FixedTime(DateTime.UnixEpoch));
+        Assert.Equal("rollup", planner.Select([configured.Metrics.Find("events")!],
+            Scope(DateTime.UnixEpoch, DateTime.UnixEpoch.AddDays(1)), null, "auto").Source);
+        Assert.Equal("hybrid", planner.Select([configured.Metrics.Find("events")!],
+            Scope(Start, DateTime.UnixEpoch.AddSeconds(uint.MaxValue)), null, "auto").Source);
+    }
+
+    [Theory]
+    [InlineData("selected", "other", "rollup")]
+    [InlineData(null, "selected", "rollup")]
+    [InlineData("missing", "selected", "raw")]
+    public void EventCoverageUsesTheSharedSelectionBeforeComponentConditions(string? selected, string component, string source)
+    {
+        var options = Options();
+        options.Rollups[0].EventTypes = "selected";
+        options.NamedMetrics = [new() { Name = "m", EventType = component }];
+        var configured = Build(options);
+        var plan = configured.Planner.Select(configured.Metrics.Declared, Scope() with { EventType = selected }, null, "auto");
+        Assert.Equal(source, plan.Source);
     }
 
     [Fact]
