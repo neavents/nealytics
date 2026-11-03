@@ -165,6 +165,7 @@ def main():
         run(['docker', 'stop', '--time', '30', engine])
         produce([event(2)])
         run(['docker', 'start', engine])
+        port = int(run(['docker', 'port', engine, '5000/tcp']).split(':')[-1])
         wait_for(lambda: request('/ready')[0] == 200, 'restart readiness')
         wait_for(lambda: offset() == 2, 'restart resumes from committed offset')
         wait_for(lambda: sql("SELECT count() FROM nealytics_core.global_events WHERE project_id='p'") == '2', 'stored restart count')

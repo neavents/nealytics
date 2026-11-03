@@ -27,6 +27,30 @@ public sealed class KafkaConnectorRegistrationTests
         Assert.Empty(services);
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void RollupPlanningCannotAssertReplayUniquenessForKafka(bool planning, bool appendOnly)
+    {
+        var options = KafkaTestSupport.Options();
+        options.EnableAnalyticsRollupPlanning = planning;
+        options.AnalyticsRollupSourceIsAppendOnly = appendOnly;
+        var services = new ServiceCollection();
+        var catalog = new ProjectCatalog(options, ProjectContext.Compile("baseline", options));
+        if (planning && appendOnly)
+        {
+            var error = Assert.Throws<InvalidOperationException>(() => services.AddKafkaConnector(options, catalog));
+            Assert.Equal("Kafka at-least-once ingestion cannot qualify the append-only analytics rollup assertion.", error.Message);
+        }
+        else
+        {
+            services.AddKafkaConnector(options, catalog);
+            Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(KafkaConnectorSettings));
+        }
+    }
+
     [Fact]
     public async Task RealHostRegistersTheOptedInWorkerWhileExistingHttpRemainsAvailable()
     {

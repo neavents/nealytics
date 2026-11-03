@@ -17,6 +17,10 @@ internal static class KafkaConnectorRegistration
         {
             return;
         }
+        if (options.EnableAnalyticsRollupPlanning && options.AnalyticsRollupSourceIsAppendOnly)
+        {
+            throw new InvalidOperationException("Kafka at-least-once ingestion cannot qualify the append-only analytics rollup assertion.");
+        }
         services.AddSingleton(provider => KafkaConnectorSettings.Create(
             kafka, provider.GetRequiredService<ApiKeyValidator>(), projects));
         services.AddSingleton(provider => new KafkaRecordParser(

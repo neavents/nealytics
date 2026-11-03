@@ -26,8 +26,8 @@ WAL owns recovery after that point. Kafka retention and source availability rema
 
 This is at-least-once ingestion. A crash, commit failure or rebalance after persistence can cause
 reprocessing and duplicate aggregates; a stable eventId does not deduplicate a fresh WAL append.
-Do not enable the append-only rollup-planning assertion for this source without a separately
-qualified deduplication strategy. Exactly-once ingestion is explicitly outside E1.
+Startup rejects enabled Kafka together with both analytics rollup planning and its append-only
+source assertion. A separately qualified deduplication design is required before relaxing this guard. Exactly-once ingestion is explicitly outside E1.
 
 On malformed/oversized/tombstone input, authorization, persistence, dispatch or commit failure,
 stop the connector and host through BackgroundService failure policy. Do not skip or commit the

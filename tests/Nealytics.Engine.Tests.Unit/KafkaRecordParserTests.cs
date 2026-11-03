@@ -45,6 +45,14 @@ public sealed class KafkaRecordParserTests
         yield return [KafkaTestSupport.Event(",\"metadataJson\":\"" + new string('x', 65_536) + "\"")];
     }
 
+    [Fact]
+    public void MalformedJsonHasADistinctSafeFormatDiagnostic()
+    {
+        var error = Assert.Throws<InvalidDataException>(() => Parser().Parse(Encoding.UTF8.GetBytes("{secret"), DateTime.UtcNow));
+        Assert.Equal("Kafka record is not a valid telemetry JSON object.", error.Message);
+        Assert.Null(error.InnerException);
+    }
+
     [Theory]
     [MemberData(nameof(InvalidRecords))]
     public void RejectsInvalidInputBeforeAnyPersistence(string? json)
