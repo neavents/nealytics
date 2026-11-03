@@ -2,7 +2,8 @@
 
 Selected by the owner on 2026-11-04. Branch: `feat/integrations-e1-kafka-connector`, based on
 `feat/integrations` with the qualified A/B/C foundation through `91a6a57`. Main remains untouched.
-Status: implementation in progress; no completion or performance claim.
+Status: bounded functional implementation qualified; see the [evidence ledger](e1-kafka-verification.md)
+and [operator guide](../kafka-connector.md). No performance claim.
 
 ## Delivery contract
 
