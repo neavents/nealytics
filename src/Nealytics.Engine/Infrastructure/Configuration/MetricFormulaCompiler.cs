@@ -111,7 +111,8 @@ internal sealed class MetricFormulaCompiler
         }
         if (operation == "metric")
         {
-            if (reference is null || !_indices.TryGetValue(reference, out int dependency))
+            int dependency = default;
+            if (reference is null || !_indices.TryGetValue(reference, out dependency))
             {
                 throw Invalid(index, "formula metric reference is not declared");
             }
