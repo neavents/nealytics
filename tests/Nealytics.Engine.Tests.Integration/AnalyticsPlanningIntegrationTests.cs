@@ -16,59 +16,27 @@ using Nealytics.Engine.Infrastructure.Storage.Delivery;
 namespace Nealytics.Engine.Tests.Integration;
 
 [Collection("ClickHouse")]
-public sealed class AnalyticsPlanningIntegrationTests : IAsyncLifetime
+public sealed class AnalyticsPlanningIntegrationTests : IAsyncLifetime, IClassFixture<AnalyticsPlanningIntegrationTests.Fixture>
 {
     private readonly string _suffix = Guid.NewGuid().ToString("N")[..10];
     private string Project => "c8_" + _suffix;
-    private string Amount => "c8_amount_" + _suffix;
-    private string Integer => "c8_int_" + _suffix;
-    private string Tag => "c8_tag_" + _suffix;
-    private string Nullable => "c8_nullable_" + _suffix;
-    private string Rollup => "c8_hour_" + _suffix;
-    private Factory _factory = null!;
-    private HttpClient _client = null!;
+    private readonly Fixture _fixture;
+    private string Amount => _fixture.Amount;
+    private string Integer => _fixture.Integer;
+    private string Tag => _fixture.Tag;
+    private string Nullable => _fixture.Nullable;
+    private readonly Factory _factory;
+    private readonly HttpClient _client;
+
+    public AnalyticsPlanningIntegrationTests(Fixture fixture)
+    {
+        _fixture = fixture;
+        _factory = fixture.Host;
+        _client = fixture.Client;
+    }
 
     public async Task InitializeAsync()
     {
-        var options = new TelemetryEngineOptions
-        {
-            EnableAnalyticsRollupPlanning = true,
-            AnalyticsRollupSourceIsAppendOnly = true,
-            Dimensions = [new() { Name = Tag, Type = "LowCardinality" }, new() { Name = Nullable }],
-            Measures = [new() { Name = Amount, Type = "Float64", Aggregations = "sum,avg,min,max,count,p50,p75,p90,p95,p99" }, new() { Name = Integer, Type = "Int64" }],
-            TenantAttributes = [new() { Name = "cohort" }],
-            NamedMetrics = [new() { Name = "events" }, new() { Name = "actions", EventType = "action" }],
-            ComputedDimensions = [new() { Name = "normalized", Source = Tag, Operation = "lower" }],
-            Rollups = [new() { Name = Rollup, Grain = "hour", Dimensions = Tag + "," + Nullable, Measures = $"{Amount}:sum,{Amount}:avg,{Amount}:min,{Amount}:max,{Amount}:count" }]
-        };
-        foreach (string aggregation in new[] { "sum", "avg", "min", "max", "count" })
-        {
-            options.NamedMetrics.Add(new() { Name = aggregation, Measure = Amount, Aggregation = aggregation, EventType = "action" });
-        }
-        options.NamedMetrics.Add(new() { Name = "wide", Measure = Integer, Aggregation = "sum" });
-        options.NamedMetrics.Add(new() { Name = "exact_quantile", Measure = Amount, Aggregation = "p95" });
-        options.NamedMetrics.Add(new() { Name = "approx_quantile", Measure = Amount, Aggregation = "p95", Accuracy = "approximate" });
-        options.NamedMetrics.Add(new()
-        {
-            Name = "ratio", Aggregation = "formula", Expression = new()
-            {
-                Operator = "divide", Arguments = [new() { Operator = "metric", Metric = "actions" }, new() { Operator = "metric", Metric = "events" }]
-            }
-        });
-        foreach (string name in new[] { "scalar", "grouped", "hourly", "daily", "nullable", "computed" })
-        {
-            options.SavedReports.Add(new()
-            {
-                Name = name,
-                Interval = name == "hourly" ? "hour" : name == "daily" ? "day" : "",
-                GroupBy = name == "nullable" ? [Nullable] : name == "computed" ? ["normalized"] : name is "grouped" or "hourly" or "daily" ? [Tag, "event_type"] : [],
-                Fields = new[] { "events", "actions", "sum", "avg", "min", "max", "count", "ratio" }
-                    .Select(metric => new SavedReportFieldOptions { Name = metric, Metric = metric }).ToList()
-            });
-        }
-        options.SavedReports.Add(new() { Name = "approx_report", Fields = [new() { Name = "q", Metric = "approx_quantile" }] });
-        _factory = new Factory(options);
-        _client = _factory.CreateClient();
         await ClickHouseTestSupport.ExecuteAsync(TenantAttributeRegistry.BuildTableDdl(""));
         await ClickHouseTestSupport.ExecuteAsync($"INSERT INTO nealytics_core.tenant_attributes VALUES ('{Project}','cohort','t','group',now64(3)), ('{Project}','cohort','other','away',now64(3))");
         string Row(string project, string tenant, string type, string traffic, string time, string amount, string tag, string nullable) =>
@@ -97,16 +65,8 @@ public sealed class AnalyticsPlanningIntegrationTests : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        _client?.Dispose();
-        if (_factory is not null)
-        {
-            await _factory.DisposeAsync();
-        }
-        await ClickHouseTestSupport.ExecuteAsync($"DROP VIEW IF EXISTS nealytics_core.rollup_{Rollup}_mv");
-        await ClickHouseTestSupport.ExecuteAsync($"DROP TABLE IF EXISTS nealytics_core.rollup_{Rollup}");
         await ClickHouseTestSupport.DeleteProjectsAsync(Project, Project + "_other");
         await ClickHouseTestSupport.ExecuteAsync($"ALTER TABLE nealytics_core.tenant_attributes DELETE WHERE project_id = '{Project}' SETTINGS mutations_sync = 2");
-        await ClickHouseTestSupport.ExecuteAsync($"ALTER TABLE nealytics_core.global_events DROP COLUMN IF EXISTS {Amount}, DROP COLUMN IF EXISTS {Integer}, DROP COLUMN IF EXISTS {Tag}, DROP COLUMN IF EXISTS {Nullable}");
     }
 
     private async Task<JsonDocument> Read(string path, string from, string to, string execution = "auto", string extra = "", bool tenantSet = false)
@@ -214,10 +174,18 @@ public sealed class AnalyticsPlanningIntegrationTests : IAsyncLifetime
         Assert.Equal("115", automatic.RootElement.GetProperty("value").GetString());
         Assert.Equal(Values(raw), Values(automatic));
         var registry = _factory.Services.GetRequiredService<RollupRegistry>();
-        registry.MarkUnroutable(Assert.Single(registry.Declared), "ambiguous replay identity");
-        using var fenced = await Read("metrics/sum", "00:00:00.001", "03:00:00.001");
-        Assert.Equal("raw", fenced.RootElement.GetProperty("source").GetString());
-        Assert.Equal(Values(raw), Values(fenced));
+        var rollup = Assert.Single(registry.Declared);
+        registry.MarkUnroutable(rollup, "ambiguous replay identity");
+        try
+        {
+            using var fenced = await Read("metrics/sum", "00:00:00.001", "03:00:00.001");
+            Assert.Equal("raw", fenced.RootElement.GetProperty("source").GetString());
+            Assert.Equal(Values(raw), Values(fenced));
+        }
+        finally
+        {
+            registry.MarkRoutable(rollup);
+        }
     }
 
     [Fact]
@@ -233,7 +201,75 @@ public sealed class AnalyticsPlanningIntegrationTests : IAsyncLifetime
         Assert.Equal(JsonValueKind.Null, fields[3].GetProperty("value").ValueKind);
     }
 
-    private sealed class Factory : TestWebApplicationFactory
+    public sealed class Fixture : IAsyncLifetime
+    {
+        private readonly string _suffix = Guid.NewGuid().ToString("N")[..10];
+        internal string Amount => "c8_amount_" + _suffix;
+        internal string Integer => "c8_int_" + _suffix;
+        internal string Tag => "c8_tag_" + _suffix;
+        internal string Nullable => "c8_nullable_" + _suffix;
+        private string Rollup => "c8_hour_" + _suffix;
+        internal Factory Host { get; private set; } = null!;
+        internal HttpClient Client { get; private set; } = null!;
+
+        public Task InitializeAsync()
+        {
+            var options = new TelemetryEngineOptions
+            {
+                EnableAnalyticsRollupPlanning = true,
+                AnalyticsRollupSourceIsAppendOnly = true,
+                Dimensions = [new() { Name = Tag, Type = "LowCardinality" }, new() { Name = Nullable }],
+                Measures = [new() { Name = Amount, Type = "Float64", Aggregations = "sum,avg,min,max,count,p50,p75,p90,p95,p99" }, new() { Name = Integer, Type = "Int64" }],
+                TenantAttributes = [new() { Name = "cohort" }],
+                NamedMetrics = [new() { Name = "events" }, new() { Name = "actions", EventType = "action" }],
+                ComputedDimensions = [new() { Name = "normalized", Source = Tag, Operation = "lower" }],
+                Rollups = [new() { Name = Rollup, Grain = "hour", Dimensions = Tag + "," + Nullable, Measures = $"{Amount}:sum,{Amount}:avg,{Amount}:min,{Amount}:max,{Amount}:count" }]
+            };
+            foreach (string aggregation in new[] { "sum", "avg", "min", "max", "count" })
+            {
+                options.NamedMetrics.Add(new() { Name = aggregation, Measure = Amount, Aggregation = aggregation, EventType = "action" });
+            }
+            options.NamedMetrics.Add(new() { Name = "wide", Measure = Integer, Aggregation = "sum" });
+            options.NamedMetrics.Add(new() { Name = "exact_quantile", Measure = Amount, Aggregation = "p95" });
+            options.NamedMetrics.Add(new() { Name = "approx_quantile", Measure = Amount, Aggregation = "p95", Accuracy = "approximate" });
+            options.NamedMetrics.Add(new()
+            {
+                Name = "ratio", Aggregation = "formula", Expression = new()
+                {
+                    Operator = "divide", Arguments = [new() { Operator = "metric", Metric = "actions" }, new() { Operator = "metric", Metric = "events" }]
+                }
+            });
+            foreach (string name in new[] { "scalar", "grouped", "hourly", "daily", "nullable", "computed" })
+            {
+                options.SavedReports.Add(new()
+                {
+                    Name = name,
+                    Interval = name == "hourly" ? "hour" : name == "daily" ? "day" : "",
+                    GroupBy = name == "nullable" ? [Nullable] : name == "computed" ? ["normalized"] : name is "grouped" or "hourly" or "daily" ? [Tag, "event_type"] : [],
+                    Fields = new[] { "events", "actions", "sum", "avg", "min", "max", "count", "ratio" }
+                        .Select(metric => new SavedReportFieldOptions { Name = metric, Metric = metric }).ToList()
+                });
+            }
+            options.SavedReports.Add(new() { Name = "approx_report", Fields = [new() { Name = "q", Metric = "approx_quantile" }] });
+            Host = new Factory(options);
+            Client = Host.CreateClient();
+            return Task.CompletedTask;
+        }
+
+        public async Task DisposeAsync()
+        {
+            Client?.Dispose();
+            if (Host is not null)
+            {
+                await Host.DisposeAsync();
+            }
+            await ClickHouseTestSupport.ExecuteAsync($"DROP VIEW IF EXISTS nealytics_core.rollup_{Rollup}_mv");
+            await ClickHouseTestSupport.ExecuteAsync($"DROP TABLE IF EXISTS nealytics_core.rollup_{Rollup}");
+            await ClickHouseTestSupport.ExecuteAsync($"ALTER TABLE nealytics_core.global_events DROP COLUMN IF EXISTS {Amount}, DROP COLUMN IF EXISTS {Integer}, DROP COLUMN IF EXISTS {Tag}, DROP COLUMN IF EXISTS {Nullable}");
+        }
+    }
+
+    internal sealed class Factory : TestWebApplicationFactory
     {
         private readonly string _schema;
         private readonly string? _previous;
