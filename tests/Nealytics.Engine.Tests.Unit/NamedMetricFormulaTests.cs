@@ -247,6 +247,27 @@ public sealed class NamedMetricFormulaTests
     }
 
     [Fact]
+    public void ConstantPrecisionCountsZeroDigitsAndExcludesSignsAndDecimalPoints()
+    {
+        foreach (string value in new[] { "-" + new string('9', 38), new string('9', 19) + "." + new string('9', 19), new string('0', 38) })
+        {
+            Assert.NotNull(NamedMetricRegistryTests.Build(Options(Constant(value))).Find("computed"));
+        }
+        Assert.Contains("38 digits", Assert.Throws<InvalidOperationException>(() =>
+            NamedMetricRegistryTests.Build(Options(Constant(new string('0', 39))))).Message);
+    }
+
+    [Fact]
+    public void NegationPreservesDimensionlessDisplayAnnotationsFromReferencedFormulas()
+    {
+        var options = Options(Operation("negate", Reference("labeled")));
+        options.NamedMetrics.Add(new() { Name = "labeled", Aggregation = "formula", Unit = "percent", Expression = Constant("1") });
+        var metric = NamedMetricRegistryTests.Build(options).Find("computed")!;
+        Assert.Equal("percent", metric.Unit);
+        Assert.Equal("-1", MetricProjection.Evaluate(metric, new Dictionary<string, string?>()));
+    }
+
+    [Fact]
     public void CyclesAreRejectedIncludingDirectSelfReferences()
     {
         var options = Options(Reference("computed"));
