@@ -1,7 +1,7 @@
 # Named metrics
 
 Named metric queries also accept an optional [reusable event segment](event-segments.md).
-Combine several metrics through [saved scalar reports](saved-reports.md).
+Combine several metrics through [saved reports](saved-reports.md).
 
 Named metrics are operator declarations in the existing `TelemetryEngine` configuration.
 They activate at restart and run through the existing self-hosted executable and ClickHouse.
@@ -46,14 +46,18 @@ apply. `Version` identifies the declaration format; only version 1 is supported.
 definition revision or a cache key. There is no live reload or result cache in this release.
 
 Names match `[a-z][a-z0-9_]{0,62}` and must be unique. A metric without a measure supports `count`.
-With a measure, `count`, `sum`, `avg`, `min` and `max` must also be permitted by that active measure.
+With a measure, `count`, `sum`, `avg`, `min`, `max`, `p50`, `p75`, `p90`, `p95` and `p99`
+must also be permitted by that active measure. Typed formulas reference other metrics and
+constants; see [analytics customization](analytics-customization.md) for their declaration,
+bounded arithmetic and unit contracts.
 Missing/retired measures, unsupported aggregations or versions, duplicate names and exceeded
 limits fail before activation. The default declaration limit is 128; the supported maximum is
 1024. Event types and unit annotations are limited to 256 characters.
 
 An omitted event type includes all event types. A configured event type always constrains the
-metric; callers may add typed filters. Declarations are global to the deployment; query data is
-scoped to the authenticated project and tenant. Project-specific definition catalogs come later.
+metric; callers may add typed filters. Declarations use the global schema by default. Optional `ProjectSchemas` provide complete
+project-specific logical catalogs selected by authenticated identity. Query data remains scoped
+to the authenticated project and tenant; see [project contexts](analytics-customization.md#project-specific-logical-schemas).
 
 ## Discover and execute
 
@@ -92,7 +96,8 @@ reversed normalized bounds are rejected. Legacy endpoint time semantics remain u
   "value": "9007199254740995",
   "unit": "ms",
   "numericEncoding": "string",
-  "source": "raw"
+  "source": "raw",
+  "accuracy": "exact"
 }
 ```
 
@@ -104,7 +109,11 @@ null. Empty counts/sums return `"0"`; empty averages/minima/maxima return null.
 
 Counts represent stored rows, or nonnull measure values when a measure is named. They do not
 introduce UUID deduplication, stitched identities or distinct-user semantics. Execution uses raw
-events; it does not silently select an aggregate rollup.
+events by default. Operators can explicitly enable verified compatible rollup/hybrid planning;
+`execution=raw` preserves the reference path. Read the [source-policy preconditions and accuracy
+contracts](analytics-customization.md#planning-source-policy-and-accuracy) before enabling it.
+Quantiles are exact by default; approximate declarations require caller `accuracy=approximate`
+opt-in. Responses report the actual source and declared accuracy.
 
 ## Units and changes
 
@@ -114,4 +123,5 @@ adding unlike units. Unit annotations describe values; the engine does not conve
 
 Remove a declaration to disable its name at the next restart. Definitions themselves introduce
 no physical schema migration or rewrite. Existing measure/dimension changes retain their
-ordinary migration requirements. Formulas and live deployment APIs remain separate packages.
+ordinary migration requirements. Formula declarations activate at restart; live deployment APIs
+remain separate work.

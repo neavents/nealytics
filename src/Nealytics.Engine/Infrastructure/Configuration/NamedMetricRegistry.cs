@@ -16,6 +16,7 @@ public sealed class NamedMetricOptions
     public string EventType { get; set; } = string.Empty;
     public string Unit { get; set; } = string.Empty;
     public MetricExpressionOptions? Expression { get; set; }
+    public string Accuracy { get; set; } = "exact";
 }
 
 public sealed record NamedMetric(
@@ -28,6 +29,7 @@ public sealed record NamedMetric(
     string? UnitDimension)
 {
     public MetricExpression? Expression { get; init; }
+    public string Accuracy { get; init; } = "exact";
     internal bool WidenSum { get; init; }
     internal FormulaNode? CompiledExpression { get; init; }
     internal IReadOnlyList<NamedMetric> Dependencies { get; init; } = Array.Empty<NamedMetric>();
@@ -35,6 +37,10 @@ public sealed record NamedMetric(
 
 public sealed class NamedMetricRegistry
 {
+    private static readonly FrozenSet<string> Aggregations =
+        new[] { "count", "sum", "avg", "min", "max", "formula", "p50", "p75", "p90", "p95", "p99" }
+            .ToFrozenSet(StringComparer.Ordinal);
+
     private static readonly Regex NamePattern = new(
         "^[a-z][a-z0-9_]{0,62}$", RegexOptions.Compiled);
 
@@ -74,9 +80,15 @@ public sealed class NamedMetricRegistry
                 throw Invalid(index, "only version 1 is supported");
             }
             string? aggregation = declaration.Aggregation?.Trim().ToLowerInvariant();
-            if (aggregation is not ("count" or "sum" or "avg" or "min" or "max" or "formula"))
+            if (aggregation is null || !Aggregations.Contains(aggregation))
             {
-                throw Invalid(index, "aggregation must be count, sum, avg, min, max or formula");
+                throw Invalid(index, "aggregation must be count, sum, avg, min, max, formula, p50, p75, p90, p95 or p99");
+            }
+            string? accuracy = declaration.Accuracy?.Trim().ToLowerInvariant();
+            if (accuracy is not ("exact" or "approximate")
+                || (accuracy == "approximate" && aggregation != "formula" && !RollupRegistry.IsQuantile(aggregation)))
+            {
+                throw Invalid(index, "accuracy must be exact, or approximate for quantiles and formulas");
             }
             string? column = Normalize(declaration.Measure);
             string? eventType = Normalize(declaration.EventType);
@@ -91,7 +103,7 @@ public sealed class NamedMetricRegistry
                 {
                     throw Invalid(index, "formula requires an expression and cannot declare a measure or event type");
                 }
-                definitions.Add(new NamedMetric(name, 1, aggregation, null, null, unit, null));
+                definitions.Add(new NamedMetric(name, 1, aggregation, null, null, unit, null) { Accuracy = accuracy });
                 continue;
             }
             if (declaration.Expression is not null)
@@ -114,6 +126,7 @@ public sealed class NamedMetricRegistry
             definitions.Add(new NamedMetric(name, 1, aggregation, column, eventType, unit,
                 aggregation == "count" ? null : quantity!.UnitDimension)
             {
+                Accuracy = accuracy,
                 WidenSum = aggregation == "sum" && quantity!.Kind is not
                     (MeasureValueKind.Float32 or MeasureValueKind.Float64 or MeasureValueKind.Decimal)
             });

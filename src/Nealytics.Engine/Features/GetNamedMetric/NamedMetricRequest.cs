@@ -8,6 +8,7 @@ using Nealytics.Engine.Infrastructure.Query;
 public sealed record NamedMetricRequest(NamedMetric Definition, QueryScope Scope)
 {
     public string? Segment { get; init; }
+    public string Execution { get; init; } = "auto";
 }
 
 public readonly record struct NamedMetricRequestResult(
@@ -25,4 +26,5 @@ public sealed class NamedMetricResponse
     public string? Segment { get; init; }
     public string NumericEncoding { get; init; } = "string";
     public string Source { get; init; } = "raw";
+    public string Accuracy { get; init; } = "exact";
 }

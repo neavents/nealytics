@@ -1,8 +1,7 @@
 # C6 deterministic computed dimensions
 
 Branch: `feat/analytics-customization-c6-computed-dimensions`. Selected 2026-11-03 after C5's
-focused unit and real-server contracts passed. Mutation qualification continues from isolated
-package snapshots; neither C4 nor C5 is declared fully qualified yet.
+focused unit and real-server contracts passed.
 
 Declare version-1 read-time dimensions with a strict name, one source and a deterministic
 operation: map, lower, upper, trim, bounded UTF-8 substring, or numeric bucket. Compile forward
@@ -31,3 +30,7 @@ Acceptance: operation/type/bounds/default/null/cycle/forward-reference/immutabil
 injection-shaped mapping data, filter and group reference results on real ClickHouse, source
 discovery, legacy allowlist isolation, unit safety, changed-code coverage and mutation, followed
 by consolidated category suites and single-executable checks. Benchmarks remain stopped.
+
+Qualification: the selected contract is implemented and its scoped Complete-level mutation gate
+passes. See the source-specific [category qualification ledger](c-verification.md) and
+[operator guide](../analytics-customization.md) for evidence, deployment preconditions and limits.

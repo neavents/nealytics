@@ -1,0 +1,47 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~AnalyticsPlan|FullyQualifiedName~MetricAccuracy|FullyQualifiedName~NamedMetric|FullyQualifiedName~SavedReport|FullyQualifiedName~ComputedDimension|FullyQualifiedName~EventSegment",
+    "mutation-level": "Complete",
+    "concurrency": 2,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    },
+    "mutate": [
+      "Infrastructure/Query/AnalyticsPlanner.cs",
+      "Infrastructure/Query/AnalyticsExecution.cs",
+      "Features/GetAnalyticsPlan/GetAnalyticsPlanEndpoint.cs",
+      "Features/GetAnalyticsPlan/AnalyticsPlanResponse.cs",
+      "Features/GetNamedMetric/NamedMetricRequestFactory.cs",
+      "Features/GetSavedReport/SavedReportRequestFactory.cs",
+      "Features/GetNamedMetric/GetNamedMetricEndpoint.cs",
+      "Features/GetSavedReport/GetSavedReportEndpoint.cs",
+      "Infrastructure/Configuration/NamedMetricRegistry.cs{1252..1464}",
+      "Infrastructure/Configuration/NamedMetricRegistry.cs{661..712}",
+      "Infrastructure/Configuration/NamedMetricRegistry.cs{954..1006}",
+      "Infrastructure/Configuration/NamedMetricRegistry.cs{3092..3798}",
+      "Infrastructure/Configuration/NamedMetricRegistry.cs{4570..4592}",
+      "Infrastructure/Configuration/NamedMetricRegistry.cs{5585..5622}",
+      "Infrastructure/Configuration/MetricFormulaCompiler.cs{2235..2469}",
+      "Features/GetNamedMetric/NamedMetricRequest.cs{330..382}",
+      "Features/GetNamedMetric/NamedMetricRequest.cs{1007..1059}",
+      "Features/GetSavedReport/SavedReportRequest.cs{322..374}",
+      "Features/GetSavedReport/SavedReportRequest.cs{1871..1923}",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{6420..6479}",
+      "Program.cs{13150..13197}",
+      "Program.cs{15977..16003}",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{6480..6543}"
+    ]
+  }
+}

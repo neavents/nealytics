@@ -1,16 +1,16 @@
 # Nealytics delivery categories and work packages
 
-Status: Implementation index 0.2
+Status: Implementation index 0.3
 
 Owner update, 2026-10-30: all benchmarking and performance measurement are stopped. Continue
-the A/B implementation and functional qualification using the engineering rules. Measurement
+implementation and functional qualification using the engineering rules. Measurement
 requirements in the original package descriptions are deferred by this instruction. Do not
 resume them or switch defaults automatically.
 
-Date: 2026-10-29
+Date: 2026-11-03
 
 Purpose: A short execution index for the [detailed roadmap](product-strategy-and-roadmap.md).
-The A/B functional milestone is complete and C is the current feature track; consult the
+The A/B functional milestone and selected C1–C8 scope are qualified; consult the
 [evidence ledger](implementation-status.md) for passed and remaining gates. Categories organize scope; they are not single
 implementation tasks, delivery estimates, or a commitment to implement every possible integration.
 
@@ -25,7 +25,7 @@ category/step branches with no integration into main. Creating branches does not
 | --- | --- | --- | --- |
 | A. Correctness and resource safety | HTTP/WAL contracts, replay and rollup correctness, bounded queues/recovery, read/write capacity | Establish guarantees and contain failures; no new product APIs in the same change | Required foundation, with targeted fixes alongside B |
 | B. Ingestion performance | Native Linux io_uring WAL, managed fallback, custom ingestion dispatcher, microbatching, body-reader/tracing tuning | Existing producers send the same requests and receive the same durable acknowledgment contract | Immediate product priority |
-| C. Analytics customization | Named metrics, event segments, saved reports, typed transforms, project schemas, query planning, rollup accuracy modes | Define and execute analytics; separate definition changes from physical data migrations | Next product area after the ingestion foundation |
+| C. Analytics customization | Named metrics, event segments, saved reports, typed transforms, project schemas, query planning, rollup accuracy modes | Define and execute analytics; separate definition changes from physical data migrations | Selected C1–C8 scope qualified; extensions remain separate |
 | D. Developer and operator tools | Schema/deployment APIs, jobs/progress, SDKs, local workflows, quarantine, scoped deletion, usage/audit information, RBAC/token lifecycle, optional admin UI/SSO | Management and background work use explicit budgets outside the hot path | Incremental; build only the piece needed by the next capability |
 | E. Optional integrations | File/URL imports, Kafka, S3/GCS, database/DynamoDB adapters, exports/sinks, MCP, BI adapters | One adapter per package; optional runtime components and separately tested delivery semantics | Select from concrete customer needs |
 | F. Future hosted platform | Provisioning, billing, organization/seat management, managed regions, coordinated multi-region operations | No mandatory hosted dependency in the engine | Outside current implementation scope |
@@ -85,30 +85,39 @@ handoff in custom mode. Broad qualification is consolidated at implementation mi
 
 ## 3. How to split the later work
 
-The owner selected [C completion](packages/c-completion-plan.md) on 2026-11-03. C4 typed
-formulas are active on `feat/analytics-customization-c4-formulas`; see the
-[package brief](packages/c4-formulas.md). C5–C8 follow sequentially after their prerequisites.
+The owner selected [C completion](packages/c-completion-plan.md) on 2026-11-03. C4–C8 are
+implemented on separate step branches: [formulas](packages/c4-formulas.md),
+[report shapes/parameters](packages/c5-report-shapes.md),
+[computed dimensions](packages/c6-computed-dimensions.md),
+[project contexts](packages/c7-project-contexts.md) and
+[planning/accuracy](packages/c8-query-planning.md). All C4–C8 mutation gates pass at 100%; the
+qualified steps are integrated on `feat/analytics-customization`, with main untouched. See the [category evidence](packages/c-verification.md) and
+[operator guide](analytics-customization.md).
 
 C1 is functionally qualified on `feat/analytics-customization-c1-named-metrics`; see the
 [named metrics brief](packages/c1-named-metrics.md) and
 [verification evidence](packages/c1-verification.md). The category branch includes the qualified
 A/B prerequisites through a normal feature merge. The owner authorized continuing beyond A/B;
-C remains the current implementation track, with D/E following bounded customer workflows.
+The selected C1–C8 track is qualified, with D/E following bounded customer workflows.
 
 C2 is functionally qualified on `feat/analytics-customization-c2-event-segments`; see the
 [reusable event-segment brief](packages/c2-event-segments.md) and
 [verification evidence](packages/c2-verification.md). It adds one bounded AND selection
 to named metrics without changing ingestion or introducing user/session cohort semantics.
 
-C remains partially implemented: named metrics, event segments and saved scalar reports are
-complete bounded slices. Formulas, grouped reports, transforms, project overrides and hybrid
-planning remain separate work.
+The selected C implementation includes named metrics/formulas, event segments, scalar/grouped/
+time-series reports, typed parameters, deterministic read-time transforms, logical project
+schemas and opt-in hybrid planning. Qualification includes 2,874 unit cases, 297 integration
+cases, changed-code coverage, scoped mutation and a published native/custom executable check.
+Broader scripts, historical cohorts, external enrichment, automatic rollups,
+result caching and live definition deployment are deferred in the completion contract.
 New D/E packages have not started, and hosted-platform work remains outside current scope.
 
 C3 is functionally qualified on `feat/analytics-customization-c3-saved-reports`; see the
 [saved scalar-report brief](packages/c3-saved-reports.md) and
 [verification evidence](packages/c3-verification.md). It combines up to 16 named metrics
-and one shared optional segment in one scoped query. Formulas and grouped reports stay separate.
+and one shared optional segment in one scoped query. C4 and C5 deliver formulas and grouped
+reports as separate bounded packages.
 
 The [C1 timestamp review](packages/c1-time-boundary-review.md) records an inherited DateTime
 parameter-inference limitation in legacy reads. The new metric slice binds timestamps explicitly;

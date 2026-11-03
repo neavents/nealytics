@@ -180,6 +180,8 @@ public sealed class TelemetryEngineOptions
     public List<ProjectSchemaOptions> ProjectSchemas { get; set; } = [];
     public int MaxProjectSchemas { get; set; } = 128;
     public bool AllowLegacyProjectSchema { get; set; }
+    public bool EnableAnalyticsRollupPlanning { get; set; }
+    public bool AnalyticsRollupSourceIsAppendOnly { get; set; }
 
     public List<ComputedDimensionOptions> ComputedDimensions { get; set; } = [];
     public int MaxComputedDimensions { get; set; } = 32;

@@ -31,3 +31,8 @@ their ordinary migration/rollback requirements.
 Completion means each selected row is implemented and functionally qualified, operator contracts
 and limitations are documented, branch/evidence identities are recorded, and remaining deferred
 measurement/hosting work is reported accurately. Do not equate selecting this plan with completion.
+
+Completion recorded 2026-11-03: all selected C1–C8 rows are implemented and functionally
+qualified on the feature category/step branches. See the [qualification ledger](c-verification.md)
+and [operator contracts](../analytics-customization.md). The explicit deferred boundaries above
+remain unchanged; no merge into main or measurement/default-enablement decision is included.

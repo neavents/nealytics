@@ -1,7 +1,7 @@
 # C5 parameterized grouped and time-series reports
 
 Branch: `feat/analytics-customization-c5-report-shapes`. Selected 2026-11-03 after C4's focused
-unit and real-server checks passed; C4 mutation qualification continues from its immutable source.
+unit and real-server checks passed.
 
 Extend saved report declarations with up to two groupable event columns, an optional UTC hour/day
 interval, a declared row limit, and up to 16 named typed filter parameters. Parameters reference
@@ -29,3 +29,7 @@ Acceptance: definition and parameter bounds/defaults/types; input precedence and
 I/O; unit filtering/grouping; deterministic SQL ordering and bound values; scalar regression;
 real grouped/time-bucket/null/empty/formula/tenant/segment results; cancellation and ownership;
 scoped coverage/mutation and consolidated milestone suites/published executable checks.
+
+Qualification: the selected contract is implemented and its scoped Complete-level mutation gate
+passes. See the source-specific [category qualification ledger](c-verification.md) and
+[operator guide](../analytics-customization.md) for evidence, deployment preconditions and limits.

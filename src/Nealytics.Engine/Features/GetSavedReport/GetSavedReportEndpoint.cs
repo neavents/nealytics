@@ -36,7 +36,8 @@ public static class GetSavedReportEndpoint
                 context.Request.Query["filter"].Select(value => value!).ToArray(),
                 reports, metrics, segments, columns.Value, measures, options.Value.DefaultSessionQueryRangeHours, DateTime.UtcNow,
                 context.Request.Query.Where(pair => pair.Key.StartsWith("param.", StringComparison.Ordinal))
-                    .ToDictionary(pair => pair.Key[6..], pair => pair.Value.Select(value => value!).ToArray(), StringComparer.Ordinal));
+                    .ToDictionary(pair => pair.Key[6..], pair => pair.Value.Select(value => value!).ToArray(), StringComparer.Ordinal),
+                context.Request.Query["execution"].ToString(), context.Request.Query["accuracy"].ToString());
             if (parsed.Request is null)
             {
                 return parsed.StatusCode == 403 ? Results.Forbid() : Results.Json(parsed.Error, statusCode: parsed.StatusCode);

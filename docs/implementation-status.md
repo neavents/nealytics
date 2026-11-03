@@ -1,13 +1,13 @@
-# Categories A and B implementation evidence
+# Implementation evidence
 
-Next-track status: C1 named metrics, C2 reusable event segments and C3 saved scalar reports
-are functionally complete; see [C1 qualification](packages/c1-verification.md),
-[C2 qualification](packages/c2-verification.md) and [C3 qualification](packages/c3-verification.md).
-Current production and test source is `a540b92`, followed by documentation/mutation-filter updates.
-The latest suites pass 2,386 unit and 237 integration cases; all 227 C3 scoped managed/storage
-mutants are assertion-killed. Every changed maintained line and recorded branch outcome is covered.
-Category C remains partial: formulas, transforms, project overrides and hybrid planning are future
-packages. The A/B counts below describe their historical qualified snapshot.
+Category C's selected C1–C8 contract is implemented and functionally qualified. All C4–C8
+managed/storage mutation gates pass at 100%. See the
+[category ledger](packages/c-verification.md) and [operator guide](analytics-customization.md).
+The final milestone has a warning-free build, 2,874 passing unit cases, 297 passing integration
+cases and full coverage of changed maintained lines/recorded branch outcomes. The fresh packaged
+Linux ARM64 executable passed C1–C8 functional checks using io_uring and custom ingestion.
+The qualified work is integrated on `feat/analytics-customization`; main remains untouched.
+The A/B counts below describe their historical qualified snapshot.
 
 Objective: complete correctness/resource safety and ingestion performance, including native Linux
 io_uring and custom ingestion, with existing callers unchanged. Main remains untouched.

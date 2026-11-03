@@ -1,7 +1,7 @@
 # C7 authenticated project schemas
 
 Branch: `feat/analytics-customization-c7-project-contexts`. Selected 2026-11-03 after C6 focused
-contracts passed. Package mutation gates still run from their own immutable snapshots.
+contracts passed.
 
 Compile version-1 ProjectSchemas into bounded immutable contexts. Each context owns logical
 dimensions, measures, computed dimensions, named metrics, segments, reports, tenant attributes
@@ -38,3 +38,7 @@ cross-project discovery/query/ingestion/tenant-attribute isolation; pinned/unpin
 compatible union and conflict rejection before DDL; contextual sanitizers/server-only measures;
 shared readiness; unchanged legacy mode; real-server and published executable checks; changed
 coverage and Complete-level mutation, followed by category milestone suites. No measurements.
+
+Qualification: the selected contract is implemented and its scoped Complete-level mutation gate
+passes. See the source-specific [category qualification ledger](c-verification.md) and
+[operator guide](../analytics-customization.md) for evidence, deployment preconditions and limits.

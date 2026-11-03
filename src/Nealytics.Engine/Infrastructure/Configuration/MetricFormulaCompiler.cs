@@ -58,6 +58,10 @@ internal sealed class MetricFormulaCompiler
         }
         Dictionary<string, NamedMetric> dependencies = new(StringComparer.Ordinal);
         node.Collect(dependencies);
+        if (metric.Accuracy == "exact" && dependencies.Values.Any(dependency => dependency.Accuracy == "approximate"))
+        {
+            throw Invalid(index, "an exact formula cannot contain an approximate dependency");
+        }
         string[] unitDimensions = dependencies.Values.Select(dependency => dependency.UnitDimension)
             .OfType<string>().Distinct(StringComparer.Ordinal).ToArray();
         NamedMetric compiled = metric with

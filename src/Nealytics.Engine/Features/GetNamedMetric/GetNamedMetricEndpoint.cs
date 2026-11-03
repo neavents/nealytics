@@ -33,7 +33,8 @@ public static class GetNamedMetricEndpoint
                 context.Request.Query["traffic"].ToString(),
                 context.Request.Query["filter"].Select(value => value!).ToArray(),
                 metrics, columns.Value, measures, options.Value.DefaultSessionQueryRangeHours, DateTime.UtcNow,
-                segments, context.Request.Query["segment"].ToString());
+                segments, context.Request.Query["segment"].ToString(), execution: context.Request.Query["execution"].ToString(),
+                accuracy: context.Request.Query["accuracy"].ToString());
             if (parsed.Request is null)
             {
                 return parsed.StatusCode == 403 ? Results.Forbid() : Results.Json(parsed.Error, statusCode: parsed.StatusCode);
