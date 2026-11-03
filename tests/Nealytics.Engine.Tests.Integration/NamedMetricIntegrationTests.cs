@@ -750,8 +750,12 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
                 services.AddSingleton(measures);
                 services.AddSingleton(attributes);
                 services.AddSingleton(new QueryColumns(dimensions, attributes));
+                var computed = new ComputedDimensionRegistry(_declared, dimensions, measures);
+                var analytics = new QueryColumns(dimensions, attributes, computed);
+                services.AddSingleton(computed);
+                services.AddSingleton(new AnalyticsColumns(analytics));
                 var metrics = new NamedMetricRegistry(_declared, measures);
-                var segments = new EventSegmentRegistry(_declared, new QueryColumns(dimensions, attributes), measures);
+                var segments = new EventSegmentRegistry(_declared, analytics, measures);
                 services.AddSingleton(metrics);
                 services.AddSingleton(segments);
                 services.AddSingleton(new SavedReportRegistry(_declared, metrics, segments));

@@ -177,6 +177,9 @@ public sealed class TelemetryEngineOptions
     public bool EnableRequestDecompression { get; set; } = true;
     public bool EnablePrometheusScrape { get; set; } = false;
 
+    public List<ComputedDimensionOptions> ComputedDimensions { get; set; } = [];
+    public int MaxComputedDimensions { get; set; } = 32;
+
     public List<NamedMetricOptions> NamedMetrics { get; set; } = [];
     public int MaxNamedMetrics { get; set; } = 128;
 

@@ -19,6 +19,7 @@ public sealed record ReportParameter(
     string Name, string Column, string Type, string Comparison, bool Required, string? Default)
 {
     internal FilterComparison Predicate { get; init; }
+    internal string ResolvedColumn { get; init; } = string.Empty;
 }
 
 internal static class ReportParameterCompiler
@@ -47,8 +48,9 @@ internal static class ReportParameterCompiler
                 throw new InvalidOperationException("Report parameter names must be unique and match [a-z][a-z0-9_]{0,62}.");
             }
             bool numeric = type == "number";
-            if (numeric ? measures.Find(column ?? string.Empty) is null
-                : type != "string" || !columns.TryResolve(column, out _))
+            string resolved = column ?? string.Empty;
+            if (numeric ? measures.Find(resolved) is null && !columns.TryResolveNumeric(column, out resolved)
+                : type != "string" || !columns.TryResolve(column, out resolved))
             {
                 throw new InvalidOperationException("Report parameter type must match an active string dimension or numeric measure.");
             }
@@ -68,7 +70,8 @@ internal static class ReportParameterCompiler
             }
             parameters[index] = new ReportParameter(name, column!, type!, comparison!, declaration.Required, declaration.Default)
             {
-                Predicate = predicate
+                Predicate = predicate,
+                ResolvedColumn = resolved
             };
         }
         return Array.AsReadOnly(parameters);

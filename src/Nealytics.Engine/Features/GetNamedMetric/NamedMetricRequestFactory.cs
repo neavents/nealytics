@@ -3,6 +3,7 @@ namespace Nealytics.Engine.Features.GetNamedMetric;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Security;
@@ -107,6 +108,11 @@ public static class NamedMetricRequestFactory
             EventType = definition.EventType,
             Filters = combined
         };
+        string? budget = AnalyticsQueryBudget.Violation(scope.Filters, groupBy?.Select(columns.ExpressionFor));
+        if (budget is not null)
+        {
+            return new(null, 400, budget);
+        }
         return new(new NamedMetricRequest(definition, scope) { Segment = selection?.Name }, 200, null);
     }
 

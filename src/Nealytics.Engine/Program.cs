@@ -75,8 +75,12 @@ builder.Services.AddSingleton(namedMetricRegistry);
 TenantAttributeRegistry tenantAttributeRegistry = new(engineOpts);
 builder.Services.AddSingleton(tenantAttributeRegistry);
 
-QueryColumns queryColumns = new(dimensionRegistry, tenantAttributeRegistry);
-builder.Services.AddSingleton(queryColumns);
+ComputedDimensionRegistry computedDimensionRegistry = new(engineOpts, dimensionRegistry, measureRegistry);
+builder.Services.AddSingleton(computedDimensionRegistry);
+QueryColumns legacyColumns = new(dimensionRegistry, tenantAttributeRegistry);
+builder.Services.AddSingleton(legacyColumns);
+QueryColumns queryColumns = new(dimensionRegistry, tenantAttributeRegistry, computedDimensionRegistry);
+builder.Services.AddSingleton(new AnalyticsColumns(queryColumns));
 
 EventSegmentRegistry eventSegmentRegistry = new(engineOpts, queryColumns, measureRegistry);
 builder.Services.AddSingleton(eventSegmentRegistry);

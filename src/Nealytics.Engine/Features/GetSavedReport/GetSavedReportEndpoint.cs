@@ -22,7 +22,7 @@ public static class GetSavedReportEndpoint
             SavedReportRegistry reports,
             NamedMetricRegistry metrics,
             EventSegmentRegistry segments,
-            QueryColumns columns,
+            AnalyticsColumns columns,
             MeasureRegistry measures,
             TenantAttributeRegistry tenantAttributes,
             IOptions<TelemetryEngineOptions> options,
@@ -34,7 +34,7 @@ public static class GetSavedReportEndpoint
                 context.Request.Query["from"].ToString(), context.Request.Query["to"].ToString(),
                 context.Request.Query["traffic"].ToString(),
                 context.Request.Query["filter"].Select(value => value!).ToArray(),
-                reports, metrics, segments, columns, measures, options.Value.DefaultSessionQueryRangeHours, DateTime.UtcNow,
+                reports, metrics, segments, columns.Value, measures, options.Value.DefaultSessionQueryRangeHours, DateTime.UtcNow,
                 context.Request.Query.Where(pair => pair.Key.StartsWith("param.", StringComparison.Ordinal))
                     .ToDictionary(pair => pair.Key[6..], pair => pair.Value.Select(value => value!).ToArray(), StringComparer.Ordinal));
             if (parsed.Request is null)

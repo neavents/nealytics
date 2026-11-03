@@ -92,7 +92,8 @@ public static class FilterParser
             string number = entry[(operatorAt + token.Length)..];
             Measure? measure = measures.Find(measureName);
 
-            if (measure is null)
+            string measureColumn = measure?.Name ?? string.Empty;
+            if (measure is null && !columns.TryResolveNumeric(measureName, out measureColumn))
             {
                 return Fail(Outcome.UnknownColumn, entry, measureName);
             }
@@ -106,7 +107,7 @@ public static class FilterParser
 
             filters.Add(new QueryFilter
             {
-                Column = measure.Name,
+                Column = measureColumn,
                 Value = parsed.ToString("R", CultureInfo.InvariantCulture),
                 Comparison = comparison,
                 IsMeasure = true,

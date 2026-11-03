@@ -9,7 +9,7 @@
     "mutate": [
       "Features/GetSavedReport/GetSavedReportQuery.cs",
       "Features/GetNamedMetric/GetNamedMetricQuery.cs",
-      "Features/GetSchema/GetSchemaEndpoint.cs{5436..5473}",
+      "Features/GetSchema/GetSchemaEndpoint.cs{5494..5531}",
       "Infrastructure/Query/MetricAggregateReader.cs"
     ],
     "mutation-level": "Complete",
