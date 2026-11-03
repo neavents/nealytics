@@ -1,12 +1,21 @@
 # Implementation evidence
 
+E2 NDJSON import is implemented and functionally qualified. It adds an optional streamed,
+project-pinned file route with durable accepted-prefix receipts and bounded pooled framing.
+The milestone has 3,111 passing unit and 301 passing integration cases, 202/202 changed executable
+lines, 112/112 branch outcomes and 149/149 killed executable mutants. Published actual Linux
+x64/ARM64 checks pass with io_uring/custom ingestion, including Kafka regression. See the
+[E2 evidence ledger](packages/e2-ndjson-verification.md) and [operator guide](ndjson-import.md).
+E1 and E2 are delivered on integration feature branches. Further adapters are separate selections;
+D and hosted F remain unstarted. Benchmarks remain stopped and main remains untouched.
+
 E1 Kafka is implemented and functionally qualified on its feature branch. It adds one opt-in,
 project-pinned Kafka source with manual offsets after durable handoff and explicit at-least-once
 replay semantics. The milestone has 2,988 passing unit and 299 passing integration cases,
 226/226 changed executable lines, 124/124 branch outcomes and 179/179 killed executable mutants.
 Published actual Linux x64/ARM64 checks pass with io_uring/custom ingestion. See the
 [E1 evidence ledger](packages/e1-kafka-verification.md) and [operator guide](kafka-connector.md).
-Other E adapters remain unselected/deferred; D and hosted F work have not started. Benchmarks
+Adapters beyond E2 remain unselected/deferred; D and hosted F work have not started. Benchmarks
 remain stopped and main remains untouched.
 
 Category C's selected C1–C8 contract is implemented and functionally qualified. All C4–C8

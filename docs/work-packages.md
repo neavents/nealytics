@@ -172,3 +172,7 @@ On the owner's continuation, proceed with the [bounded NDJSON import](packages/e
 from the roadmap and the preserved unfinished implementation. Keep Kafka qualified and optional.
 One streamed request returns the accepted-prefix receipt; URL fetching, automatic retry, durable
 jobs, additional formats and other connectors remain separate packages.
+
+E2 is now functionally qualified; see the [evidence ledger](packages/e2-ndjson-verification.md)
+and [operator guide](ndjson-import.md). E1 Kafka and E2 file import are the delivered integration
+baselines. No next connector, general job service or hosted platform is selected by this milestone.

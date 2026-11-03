@@ -4,7 +4,8 @@ Selected as the next bounded integration on 2026-11-04 after the owner asked to 
 Branch: `feat/integrations-e2-ndjson-import`, based on `5ee510d` and the qualified A/B/C/E1 foundation.
 Category: `feat/integrations`. Main remains untouched. The historical unfinished E1 NDJSON branch
 is preserved; its code and tests are carried forward explicitly without its stale mutation ranges.
-Status: implementation and qualification in progress. No benchmarks or performance claims.
+Status: bounded functional implementation qualified; see the [evidence ledger](e2-ndjson-verification.md)
+and [operator guide](../ndjson-import.md). No benchmarks or performance claims.
 
 ## Outcome and boundaries
 
