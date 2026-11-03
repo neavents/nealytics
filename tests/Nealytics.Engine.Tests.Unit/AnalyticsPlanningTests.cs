@@ -66,7 +66,7 @@ public sealed class AnalyticsPlanningTests
         Assert.All(plan.Slices, slice => Assert.True(slice.From < slice.To));
         if (source != "raw")
         {
-            var interior = Assert.Single(plan.Slices.Where(slice => slice.Source == "rollup"));
+            var interior = Assert.Single(plan.Slices, slice => slice.Source == "rollup");
             Assert.Equal(0, interior.From.Ticks % TimeSpan.TicksPerHour);
             Assert.Equal(0, interior.To.Ticks % TimeSpan.TicksPerHour);
             Assert.Equal("hourly", plan.Rollup!.Name);
@@ -150,7 +150,7 @@ public sealed class AnalyticsPlanningTests
             TenantId = "", TenantSet = new TenantSet { Attribute = "cohort", Value = "g" },
             Filters = [QueryFilter.Equals("tenant.cohort", "g"), QueryFilter.Equals("tag", "x")]
         };
-        var report = Shape("day", "tenant_id", "tag", "event_type");
+        var report = Shape("day", "tenant_id", "tag");
         var components = new[] { configured.Metrics.Find("events")!, configured.Metrics.Find("total")! };
         var plan = configured.Planner.Select(components, scope, report, "auto");
         Assert.Equal("rollup", plan.Source);
@@ -160,7 +160,7 @@ public sealed class AnalyticsPlanningTests
         Assert.Contains("sumMergeState(amount_sum) AS __c1", query.Sql);
         Assert.Contains("toString(coalesce(sumMerge(__c1), 0))", query.Sql);
         Assert.Contains("toStartOfDay(toTimeZone(bucket, 'UTC')) AS __k0", query.Sql);
-        Assert.Contains("ORDER BY 1 ASC NULLS FIRST, 2 ASC NULLS FIRST, 3 ASC NULLS FIRST, 4 ASC NULLS FIRST LIMIT 100", query.Sql);
+        Assert.Contains("ORDER BY 1 ASC NULLS FIRST, 2 ASC NULLS FIRST, 3 ASC NULLS FIRST LIMIT 100", query.Sql);
         Assert.Equal(query.Parameters.Count, query.Parameters.Select(parameter => parameter.Key).Distinct().Count());
         Assert.DoesNotContain(query.Parameters, parameter => parameter.Key is "fromTimestamp" or "toTimestamp");
         Assert.Contains(query.Parameters, parameter => parameter.Key == "slice0From" && Equals(parameter.Value, scope.From));
