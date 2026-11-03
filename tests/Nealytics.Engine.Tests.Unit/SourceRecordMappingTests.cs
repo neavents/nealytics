@@ -82,6 +82,21 @@ public sealed class SourceRecordMappingTests
     }
 
     [Theory]
+    [InlineData("projectId")]
+    [InlineData("tenantId")]
+    [InlineData("eventType")]
+    public void MissingMappedEnvelopeTextStaysEmptyForNormalIngestionPolicyValidation(string target)
+    {
+        var options = Options();
+        options.Fields[target] = new() { Path = ["absent"] };
+        using var document = JsonDocument.Parse(Event());
+        var payload = SourceRecordMapping.Compile(options).Read(document.RootElement, 4096);
+        Assert.Equal(target == "projectId" ? "" : "p", payload.ProjectId);
+        Assert.Equal(target == "tenantId" ? "" : "t", payload.TenantId);
+        Assert.Equal(target == "eventType" ? "" : "action", payload.EventType);
+    }
+
+    [Theory]
     [InlineData("1.25", "1.25")]
     [InlineData("-42", "-42")]
     [InlineData("1e2", "1e2")]
