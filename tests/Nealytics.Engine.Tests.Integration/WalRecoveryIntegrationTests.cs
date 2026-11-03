@@ -42,7 +42,8 @@ public class WalRecoveryIntegrationTests : IAsyncLifetime
             DatabaseBatchCommitSize = 100,
             ForceFlushIntervalSeconds = 1,
             MemoryChannelCapacity = 10_000,
-            MaxInsertRetries = 3
+            MaxInsertRetries = 3,
+            WalIoBackend = Environment.GetEnvironmentVariable("NEALYTICS_TEST_WAL_BACKEND") ?? "managed"
         };
         IOptions<TelemetryEngineOptions> wrapped = Substitute.For<IOptions<TelemetryEngineOptions>>();
         wrapped.Value.Returns(options);
@@ -55,10 +56,12 @@ public class WalRecoveryIntegrationTests : IAsyncLifetime
         await using TestProject project = TestProject.New("p-recovery");
         string projectId = project.Id;
         IOptions<TelemetryEngineOptions> options = BuildOptions();
+        options.Value.DatabaseBatchCommitSize = 3;
 
         // ── Simulate a crashed process that left 25 uncommitted events in the WAL ──
         await using (WriteAheadLogger crashedWal = new WriteAheadLogger(options))
         {
+            crashedWal.Selection.Backend.Should().Be(options.Value.WalIoBackend);
             for (int i = 0; i < 25; i++)
             {
                 await crashedWal.AppendAsync(new GlobalTelemetryPayload
@@ -74,6 +77,7 @@ public class WalRecoveryIntegrationTests : IAsyncLifetime
 
         // ── A fresh process boots: WAL seals the prior log, batch processor replays it ──
         await using WriteAheadLogger wal = new WriteAheadLogger(options);
+        wal.Selection.Backend.Should().Be(options.Value.WalIoBackend);
         wal.HasSealedSegment.Should().BeTrue("the crashed process's WAL must be sealed for recovery");
 
         await using ClickHouseConnectionFactory factory = new ClickHouseConnectionFactory(options);
@@ -89,7 +93,11 @@ public class WalRecoveryIntegrationTests : IAsyncLifetime
             NullLogger<TelemetryBatchProcessor>.Instance);
 
         await processor.StartAsync(CancellationToken.None);
-        await Task.Delay(3000);
+        using CancellationTokenSource recoveryTimeout = new(TimeSpan.FromSeconds(15));
+        while (wal.HasSealedSegment)
+        {
+            await Task.Delay(10, recoveryTimeout.Token);
+        }
         await processor.StopAsync(CancellationToken.None);
 
         // ── All recovered events must be durably in ClickHouse ──

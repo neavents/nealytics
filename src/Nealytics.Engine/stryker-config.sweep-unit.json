@@ -1,0 +1,37 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~DeliveryJournalTests|FullyQualifiedName~IngestionCapacityTests|FullyQualifiedName~IngestionRequestAdmissionTests|FullyQualifiedName~IngestionAdmissionHttpTests|FullyQualifiedName~ClickHouseCapacityOptionsTests|FullyQualifiedName~ClickHouseWorkloadCapacityTests|FullyQualifiedName~ClickHousePoolTests|FullyQualifiedName~ReplayDeliveryIntegrationTests|FullyQualifiedName~TelemetryBatchProcessorTests|FullyQualifiedName~StreamingRecoveryTests|FullyQualifiedName~TelemetryColumnBuffersTests|FullyQualifiedName~ClickHouseBatchWriterTests|FullyQualifiedName~BatchWriterRejectionDiagnosticsTests|FullyQualifiedName~WalDirectoryTests|FullyQualifiedName~WalSegmentRecoveryTests|FullyQualifiedName~WalMetadataStartupTests|FullyQualifiedName~BoundedWalTests|FullyQualifiedName~ConnectionIdleRecycleTests",
+    "mutate": [
+      "Infrastructure/Storage/Delivery/*.cs",
+      "Infrastructure/Storage/Wal/WalBacklogBudget.cs",
+      "Infrastructure/Serialization/TelemetryPayloadMemory.cs",
+      "Features/BatchProcessor/JournaledTelemetryBatchWriter.cs",
+      "Features/BatchProcessor/TelemetryBatchProcessor.cs",
+      "Features/BatchProcessor/TelemetryBatchProcessor.Recovery.cs",
+      "Features/IngestTelemetry/IngestionRequestAdmission.cs",
+      "Features/IngestTelemetry/TelemetryChannelBroker.cs",
+      "Features/BatchProcessor/TelemetryColumnBuffers.cs{3171..3366}",
+      "Features/BatchProcessor/TelemetryDeliverySchema.cs",
+      "Features/BatchProcessor/ClickHouseBatchWriter.cs{1437..1503}",
+      "Infrastructure/Storage/Wal/WalDirectory.cs{570..684}",
+      "Infrastructure/Storage/Wal/WalDirectory.cs{5362..5950}"
+    ],
+    "mutation-level": "Complete",
+    "concurrency": 2,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    }
+  }
+}

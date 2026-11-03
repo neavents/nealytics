@@ -378,3 +378,51 @@ session wins without any bookkeeping.
 
 **Sessionless server events store `''`.** Session metrics count it as one session. Filtering it out
 would change the definition of every rollup view and so mark every existing rollup as drifted.
+## Named metric execution
+
+Named metric declarations compile at startup into a bounded immutable registry. The query slice
+resolves only those definitions, uses existing authenticated scope and typed filter contracts,
+and reads raw data. Its exclusive end boundary is explicit; legacy callers retain the previous
+inclusive boundary. Numeric strings preserve large integer/decimal results, integer sums widen
+before aggregation, and empty sums explicitly coalesce to zero after nullable widening.
+Timestamp parameters explicitly use the driver's DateTime2 representation to retain fractional
+seconds and the full supported calendar range. See [the operator guide](named-metrics.md),
+[C1 scope](packages/c1-named-metrics.md) and [the boundary review](packages/c1-time-boundary-review.md).
+
+## C2 event selection declarations
+
+Event segments compile existing typed filters once at startup, with a bounded immutable catalog.
+They select rows for C1 metrics through one optional query parameter; they neither change
+ingestion nor persist a materialization. AND composition retains every authorization and metric
+scope, and unit safety runs after composition. Tenant-attribute membership declarations are
+excluded because they depend on mutable tenant state rather than event fields. Existing numeric
+filter comparisons remain Float64; exact integer/decimal predicates require a separate contract.
+Schema discovery exposes the original declarations, and the generated response records the
+selected segment name. Live editing, OR trees and cross-event cohorts are separate capabilities.
+
+Mutation qualification separates pure managed logic from storage execution. Schema-changing
+fixtures run with one worker and early abort disabled: parallel add/drop and cleanup operations
+on the shared test table can invalidate fixture cleanup. The two scopes retain the complete
+original executable-mutant set and 100% thresholds; ordinary suites and artifact smoke remain
+independent checks. Failed/partial reports retain their original source identity.
+
+## C3 saved scalar reports
+
+Reports resolve metric/segment references into an immutable bounded catalog at startup. A
+request validates common scope once and checks every field's unit requirements before leasing
+a connection. Report field aliases are response metadata; SQL reads values by ordinal and never
+uses aliases as physical identifiers. Fixed shared segments combine with caller filters using
+the existing AND contract. Tenant and project restrictions stay in the common WHERE clause.
+
+Metrics can declare different event types. Applying the first metric's type to the common scope
+would silently remove rows needed by later fields. Reports therefore clear that one-field scope
+and bind per-field event-type conditions inside conditional aggregates. The shared expression
+builder preserves C1's unconditioned expressions exactly. Count-of-measure uses an explicit
+nonnull condition; nullable extrema/averages use OrNullIf and integer sums widen before SumIf.
+ClickHouse documents the combinator semantics in its
+[aggregate function reference](https://clickhouse.com/docs/reference/functions/aggregate-functions/combinators).
+
+The 16-field ceiling bounds plan and response shape, not scan work. All fields share a raw event
+source, one query and one read lease; separate segments, formulas and rollup planning would need
+their own contracts. No speed claim follows from query shape. See the
+[operator guide](saved-reports.md) for the supported configuration and numeric semantics.

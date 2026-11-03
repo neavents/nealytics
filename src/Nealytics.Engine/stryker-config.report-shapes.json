@@ -1,0 +1,33 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~SavedReport|FullyQualifiedName~NamedMetric|FullyQualifiedName~EventSegment|FullyQualifiedName~ComputedDimension",
+    "mutate": [
+      "Infrastructure/Configuration/ReportParameter.cs",
+      "Infrastructure/Query/ReportParameterBinding.cs",
+      "Infrastructure/Query/ReportShapeSql.cs",
+      "Infrastructure/Configuration/SavedReportRegistry.cs",
+      "Infrastructure/Query/MetricProjection.cs",
+      "Features/GetSavedReport/SavedReportRequest.cs",
+      "Features/GetSavedReport/SavedReportRequestFactory.cs",
+      "Features/GetSavedReport/GetSavedReportEndpoint.cs",
+      "Features/GetNamedMetric/NamedMetricRequestFactory.cs"
+    ],
+    "mutation-level": "Complete",
+    "concurrency": 2,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj",
+      "../../tests/Nealytics.Engine.Tests.Integration/Nealytics.Engine.Tests.Integration.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~ClickHousePoolLifecycle|FullyQualifiedName~ClickHousePoolTests|FullyQualifiedName~ClickHouseWorkloadCapacityTests|FullyQualifiedName~ClickHouseCapacityOptionsTests|FullyQualifiedName~ConnectionIdleRecycleTests",
+    "mutate": [
+      "Infrastructure/Storage/ClickHouseConnectionPool.cs",
+      "Infrastructure/Storage/ClickHouseConnectionFactory.cs",
+      "Infrastructure/Storage/PooledClickHouseConnection.cs"
+    ],
+    "mutation-level": "Complete",
+    "concurrency": 2,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    }
+  }
+}

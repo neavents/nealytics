@@ -23,7 +23,7 @@ public sealed partial class StorageUnavailableMiddleware
     }
 
     [LoggerMessage(EventId = 9301, Level = LogLevel.Warning,
-        Message = "Answered {Path} with 503: storage refused or dropped the read.")]
+        Message = "Answered {Path} with 503: storage refused or dropped the operation.")]
     private static partial void LogStorageUnavailable(ILogger logger, string path, Exception exception);
 
     public async Task InvokeAsync(HttpContext context, ClickHouseConnectionFactory connections)
@@ -40,10 +40,15 @@ public sealed partial class StorageUnavailableMiddleware
                                           && ClickHouseFault.IsTransient(exception))
         {
             LogStorageUnavailable(_logger, context.Request.Path.Value ?? string.Empty, exception);
-            TelemetryDiagnostics.ReadsRefusedStorageUnavailable.Add(1);
+            ClickHouseWorkload workload = context.GetEndpoint()?.Metadata.GetMetadata<ClickHouseWorkloadMetadata>()?.Workload
+                ?? ClickHouseWorkload.Read;
+            if (workload == ClickHouseWorkload.Read)
+            {
+                TelemetryDiagnostics.ReadsRefusedStorageUnavailable.Add(1);
+            }
             if (ClickHouseFault.IsConnectionFault(exception))
             {
-                connections.EvictIdle();
+                connections.EvictIdle(workload);
             }
 
             context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;

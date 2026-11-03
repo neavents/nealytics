@@ -77,6 +77,28 @@ TelemetryEngine__Rollups__0__Grain=day \
 TelemetryEngine__Rollups__0__EventTypes=smoke \
 TelemetryEngine__Rollups__0__Dimensions=d_lowcard,d_string \
 TelemetryEngine__Rollups__0__Measures=m_uint32:sum,m_decimal:sum \
+TelemetryEngine__NamedMetrics__0__Name=smoke_count \
+TelemetryEngine__NamedMetrics__0__EventType=smoke \
+TelemetryEngine__NamedMetrics__1__Name=smoke_total \
+TelemetryEngine__NamedMetrics__1__Aggregation=sum \
+TelemetryEngine__NamedMetrics__1__Measure=m_uint32 \
+TelemetryEngine__NamedMetrics__1__EventType=smoke \
+TelemetryEngine__EventSegments__0__Name=positive \
+TelemetryEngine__EventSegments__0__Filters__0='m_uint32>0' \
+TelemetryEngine__EventSegments__1__Name=empty_selection \
+TelemetryEngine__EventSegments__1__Filters__0='event_type:missing' \
+TelemetryEngine__SavedReports__0__Name=overview \
+TelemetryEngine__SavedReports__0__Segment=positive \
+TelemetryEngine__SavedReports__0__Fields__0__Name=events \
+TelemetryEngine__SavedReports__0__Fields__0__Metric=smoke_count \
+TelemetryEngine__SavedReports__0__Fields__1__Name=total \
+TelemetryEngine__SavedReports__0__Fields__1__Metric=smoke_total \
+TelemetryEngine__SavedReports__1__Name=empty_report \
+TelemetryEngine__SavedReports__1__Segment=empty_selection \
+TelemetryEngine__SavedReports__1__Fields__0__Name=events \
+TelemetryEngine__SavedReports__1__Fields__0__Metric=smoke_count \
+TelemetryEngine__SavedReports__1__Fields__1__Name=total \
+TelemetryEngine__SavedReports__1__Fields__1__Metric=smoke_total \
 OTEL_SDK_DISABLED=true \
 "$OUT/Nealytics.Engine" > "$LOG" 2>&1 &
 ENGINE_PID=$!
@@ -211,6 +233,60 @@ check "breakdown/traffic-all" "/api/v1/analytics/breakdown?from=$FROM&to=$TO&gro
 check "breakdown/d_uint"     "/api/v1/analytics/breakdown?from=$FROM&to=$TO&groupBy=d_uint&metric=sessions"
 check "breakdown/d_datetime" "/api/v1/analytics/breakdown?from=$FROM&to=$TO&groupBy=d_datetime&metric=events"
 check "schema"               "/api/v1/schema"
+python3 - <<'PY'
+import json
+from pathlib import Path
+schema = json.loads(Path('/tmp/smoke-read.out').read_text())
+assert {metric['name'] for metric in schema['namedMetrics']} == {'smoke_count', 'smoke_total'}
+assert {segment['name'] for segment in schema['eventSegments']} == {'positive', 'empty_selection'}
+assert {report['name'] for report in schema['savedReports']} == {'overview', 'empty_report'}
+PY
+check "named/count" "/api/v1/analytics/metrics/smoke_count?from=$FROM&to=$TO"
+python3 - <<'PY'
+import json
+from pathlib import Path
+metric = json.loads(Path('/tmp/smoke-read.out').read_text())
+assert metric['name'] == 'smoke_count' and metric['version'] == 1
+assert metric['value'] == '1' and metric['numericEncoding'] == 'string' and metric['source'] == 'raw'
+PY
+check "named/sum" "/api/v1/analytics/metrics/smoke_total?from=$FROM&to=$TO"
+python3 - <<'PY'
+import json
+from pathlib import Path
+metric = json.loads(Path('/tmp/smoke-read.out').read_text())
+assert metric['name'] == 'smoke_total' and metric['value'] == '11200'
+PY
+check "named/segment" "/api/v1/analytics/metrics/smoke_total?from=$FROM&to=$TO&segment=positive"
+python3 - <<'PY'
+import json
+from pathlib import Path
+metric = json.loads(Path('/tmp/smoke-read.out').read_text())
+assert metric['value'] == '11200' and metric['segment'] == 'positive'
+PY
+check "named/empty-segment" "/api/v1/analytics/metrics/smoke_count?from=$FROM&to=$TO&segment=empty_selection"
+python3 - <<'PY'
+import json
+from pathlib import Path
+metric = json.loads(Path('/tmp/smoke-read.out').read_text())
+assert metric['value'] == '0' and metric['segment'] == 'empty_selection'
+PY
+check "report/overview" "/api/v1/analytics/reports/overview?from=$FROM&to=$TO"
+python3 - <<'PYREPORT'
+import json
+from pathlib import Path
+report = json.loads(Path('/tmp/smoke-read.out').read_text())
+assert report['name'] == 'overview' and report['version'] == 1 and report['segment'] == 'positive'
+assert report['numericEncoding'] == 'string' and report['source'] == 'raw'
+assert [(field['name'], field['metric'], field['value']) for field in report['fields']] == [
+    ('events', 'smoke_count', '1'), ('total', 'smoke_total', '11200')]
+PYREPORT
+check "report/empty" "/api/v1/analytics/reports/empty_report?from=$FROM&to=$TO"
+python3 - <<'PYREPORT'
+import json
+from pathlib import Path
+report = json.loads(Path('/tmp/smoke-read.out').read_text())
+assert [field['value'] for field in report['fields']] == ['0', '0']
+PYREPORT
 check "funnel"               "/api/v1/analytics/funnel?from=$FROM&to=$TO&step=smoke&step=smoke"
 check "funnel/segmented"     "/api/v1/analytics/funnel?from=$FROM&to=$TO&step=smoke&step=smoke&breakdownBy=d_lowcard"
 check "breakdown/avg-measure"  "/api/v1/analytics/breakdown?from=$FROM&to=$TO&groupBy=event_type&metric=avg(m_uint32)"

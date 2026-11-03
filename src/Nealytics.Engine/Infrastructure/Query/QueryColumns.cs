@@ -25,6 +25,7 @@ public sealed class QueryColumns
 
     private readonly Dictionary<string, string> _byName;
     private readonly TenantAttributeRegistry? _tenantAttributes;
+    private readonly HashSet<string> _numeric = new(StringComparer.Ordinal);
 
     public QueryColumns(DimensionRegistry registry)
         : this(registry, null)
@@ -32,6 +33,11 @@ public sealed class QueryColumns
     }
 
     public QueryColumns(DimensionRegistry registry, TenantAttributeRegistry? tenantAttributes)
+        : this(registry, tenantAttributes, null)
+    {
+    }
+
+    public QueryColumns(DimensionRegistry registry, TenantAttributeRegistry? tenantAttributes, ComputedDimensionRegistry? computed)
     {
         ArgumentNullException.ThrowIfNull(registry);
         _tenantAttributes = tenantAttributes;
@@ -48,6 +54,17 @@ public sealed class QueryColumns
             _byName[dimension.Name] = dimension.Name;
         }
 
+        if (computed is not null)
+        {
+            foreach (ComputedDimension dimension in computed.Declared)
+            {
+                _byName.Add(dimension.Name, dimension.Expression);
+                if (dimension.Numeric)
+                {
+                    _numeric.Add(dimension.Name);
+                }
+            }
+        }
         Allowed = [.. _byName.Keys.OrderBy(name => name, StringComparer.Ordinal)];
         TenantGroupColumns = tenantAttributes is null
             ? []
@@ -89,6 +106,19 @@ public sealed class QueryColumns
             return true;
         }
 
+        column = string.Empty;
+        return false;
+    }
+
+    internal string ExpressionFor(string name) => _byName[name];
+
+    internal bool TryResolveNumeric(string? name, out string column)
+    {
+        if (name is not null && _numeric.Contains(name))
+        {
+            column = _byName[name];
+            return true;
+        }
         column = string.Empty;
         return false;
     }

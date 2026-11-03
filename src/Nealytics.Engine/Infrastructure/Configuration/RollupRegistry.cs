@@ -340,7 +340,29 @@ public sealed class RollupRegistry
         }
 
         Declared = declared;
+        foreach (Rollup rollup in declared)
+        {
+            MarkUnroutable(rollup, "completion has not been verified");
+        }
     }
+
+    private RollupRegistry(IReadOnlyList<Rollup> definitions, ConcurrentDictionary<string, string> readiness)
+    {
+        Declared = Array.AsReadOnly(definitions.ToArray());
+        _unroutable = readiness;
+    }
+
+    internal static RollupRegistry FromDefinitions(IReadOnlyList<Rollup> definitions)
+    {
+        RollupRegistry registry = new(definitions, new ConcurrentDictionary<string, string>(StringComparer.Ordinal));
+        foreach (Rollup rollup in definitions)
+        {
+            registry.MarkUnroutable(rollup, "completion has not been verified");
+        }
+        return registry;
+    }
+
+    internal RollupRegistry ShareReadiness(RollupRegistry logical) => new(logical.Declared, _unroutable);
 
     public IReadOnlyList<Rollup> Declared { get; }
 
@@ -373,6 +395,9 @@ public sealed class RollupRegistry
     public bool IsRoutable(Rollup rollup) =>
         rollup is not null && !_unroutable.ContainsKey(rollup.Name);
 
+    internal string? UnroutableReason(Rollup rollup) =>
+        _unroutable.GetValueOrDefault(rollup.Name);
+
     private static string[] Split(string? value) =>
         (value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
@@ -382,7 +407,8 @@ public sealed class RollupRegistry
     {
         ArgumentNullException.ThrowIfNull(rollup);
 
-        return IsSessionGrain(rollup) ? BuildSessionTableDdl(rollup, onCluster) : BuildBucketTableDdl(rollup, onCluster);
+        string table = IsSessionGrain(rollup) ? BuildSessionTableDdl(rollup, onCluster) : BuildBucketTableDdl(rollup, onCluster);
+        return table + " SETTINGS non_replicated_deduplication_window = 100000";
     }
 
     private static IEnumerable<RollupMeasure> StoredMeasures(Rollup rollup)

@@ -50,6 +50,23 @@ public class TelemetryColumnBuffersTests
     }
 
     [Fact]
+    public void Fill_UsesTheFrozenIngestionTimestampForEveryRow()
+    {
+        List<GlobalTelemetryPayload> batch =
+        [
+            new GlobalTelemetryPayload { ProjectId = "p", TenantId = "t", EventType = "first" },
+            new GlobalTelemetryPayload { ProjectId = "p", TenantId = "t", EventType = "second" }
+        ];
+        DateTimeOffset frozen = new(2026, 1, 2, 3, 4, 5, TimeSpan.Zero);
+        using TelemetryColumnBuffers buffers = new(2, Layout());
+
+        buffers.Fill(batch, frozen);
+
+        buffers.IngestedAts[0].Should().Be(frozen);
+        buffers.IngestedAts[1].Should().Be(frozen);
+    }
+
+    [Fact]
     public void Fill_MapsEveryColumn_IncludingNullObjectIdAndUtcTimestamp()
     {
         Guid id0 = Guid.NewGuid();

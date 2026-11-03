@@ -1,0 +1,44 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~SavedReport|FullyQualifiedName~NamedMetric|FullyQualifiedName~EventSegment|FullyQualifiedName~ComputedDimension",
+    "mutate": [
+      "Infrastructure/Configuration/SavedReportRegistry.cs",
+      "Infrastructure/Query/MetricAggregateSql.cs",
+      "Features/GetSavedReport/GetSavedReportEndpoint.cs",
+      "Features/GetSavedReport/SavedReportRequest.cs",
+      "Features/GetSavedReport/SavedReportRequestFactory.cs",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{6935..7051}",
+      "Features/GetSchema/SchemaResponse.cs{3569..3764}",
+      "Program.cs{3794..3947}",
+      "Program.cs{13099..13149}",
+      "Program.cs{15952..15976}",
+      "Infrastructure/Configuration/MetricExpression.cs",
+      "Infrastructure/Configuration/MetricFormulaCompiler.cs",
+      "Infrastructure/Query/FormulaNode.cs",
+      "Infrastructure/Query/FormulaNumber.cs",
+      "Infrastructure/Query/MetricProjection.cs",
+      "Infrastructure/Query/MetricProjectionSql.cs",
+      "Infrastructure/Query/FormulaUnit.cs",
+      "Infrastructure/Configuration/ReportParameter.cs",
+      "Infrastructure/Query/ReportParameterBinding.cs",
+      "Infrastructure/Query/ReportShapeSql.cs"
+    ],
+    "mutation-level": "Complete",
+    "concurrency": 1,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    }
+  }
+}

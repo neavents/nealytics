@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO.Pipelines;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -26,94 +28,81 @@ public static partial class BeaconTelemetryEndpoint
 
     public static void MapBeaconIngestion(this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapPost("/api/v1/telemetry/beacon", async (
-            HttpContext context,
-            TelemetryChannelBroker broker,
-            WriteAheadLogger wal,
-            ApiKeyValidator keyValidator,
-            DimensionSanitizer dimensionSanitizer,
-            MeasureSanitizer measureSanitizer,
-            ILoggerFactory loggerFactory,
-            IngestGate gate,
-            IOptions<TelemetryEngineOptions> options) =>
+        endpoints.MapPost("/api/v1/telemetry/beacon", HandleAsync)
+            .WithMetadata(new ClickHouseWorkloadMetadata(ClickHouseWorkload.Write))
+            .RequireRateLimiting("ingestion")
+            .RequireCors("beacon");
+    }
+
+    private static async Task HandleAsync(
+        HttpContext context,
+        BeaconBatchIngestor ingestor,
+        IngestionRequestReader reader,
+        ApiKeyValidator keyValidator,
+        ILoggerFactory loggerFactory,
+        IOptions<TelemetryEngineOptions> options)
+    {
+        using Activity? activity = TelemetryDiagnostics.Source.StartActivity("BeaconIngest");
+
+        string clientProjectKey = IngestValidation.ResolveProjectKey(
+            null,
+            context.Request.Query["k"].ToString());
+
+        IngestionKeyPolicy? policy = null;
+        if (clientProjectKey.Length == 0 || !keyValidator.TryResolve(clientProjectKey, out policy))
         {
-            using Activity? activity = TelemetryDiagnostics.Source.StartActivity("BeaconIngest");
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
 
-            string clientProjectKey = IngestValidation.ResolveProjectKey(
-                null,
-                context.Request.Query["k"].ToString());
+        if (IngestValidation.ExceedsBodyLimit(context.Request.ContentLength, options.Value.MaxRequestBodyBytes))
+        {
+            context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+            return;
+        }
 
-            if (clientProjectKey.Length == 0 || !keyValidator.TryResolve(clientProjectKey, out IngestionKeyPolicy? policy))
+        IngestValidation.ApplyBodyLimit(context, options.Value.MaxRequestBodyBytes);
+
+        try
+        {
+            PipeReader bodyReader = reader.Open(context);
+            BeaconIngestResult result = await IngestBodyAsync(bodyReader, ingestor, policy!, context.RequestAborted);
+
+            activity?.SetTag("nealytics.beacon_events", result.Accepted);
+            activity?.SetTag("nealytics.beacon_rejected", result.Rejected);
+
+            if (result.Rejected > 0)
             {
-                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                return;
+                LogRejectedBeaconElements(
+                    loggerFactory.CreateLogger(typeof(BeaconTelemetryEndpoint)),
+                    result.Rejected,
+                    result.Accepted + result.Rejected);
             }
 
-            if (IngestValidation.ExceedsBodyLimit(context.Request.ContentLength, options.Value.MaxRequestBodyBytes))
-            {
-                context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
-                return;
-            }
+            context.Response.StatusCode = StatusCodes.Status204NoContent;
+        }
+        catch (BadHttpRequestException)
+        {
+            context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+        }
+        catch (JsonException)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        }
+    }
 
-            IngestValidation.ApplyBodyLimit(context, options.Value.MaxRequestBodyBytes);
-
-            try
-            {
-                PipeReader bodyReader = PipeReader.Create(
-                    new LengthLimitedStream(context.Request.Body, options.Value.MaxRequestBodyBytes));
-                int accepted = 0;
-                int rejected = 0;
-                DateTime receivedAt = DateTime.UtcNow;
-
-                await foreach (GlobalTelemetryPayload? payload in
-                    JsonSerializer.DeserializeAsyncEnumerable(
-                        bodyReader,
-                        TelemetryAotContext.Default.GlobalTelemetryPayload,
-                        context.RequestAborted))
-                {
-                    IngestRejection rejection = gate.Check(policy, payload, receivedAt, out _);
-
-                    if (rejection != IngestRejection.None)
-                    {
-                        rejected++;
-                        TelemetryDiagnostics.EventsRejected.Add(
-                            1,
-                            new KeyValuePair<string, object?>("reason", IngestValidation.Tag(rejection)),
-                            new KeyValuePair<string, object?>("transport", "beacon"));
-                        continue;
-                    }
-
-                    dimensionSanitizer.Sanitize(payload!);
-                    measureSanitizer.Sanitize(payload!);
-
-                    await wal.AppendAsync(payload!, context.RequestAborted);
-                    await broker.PublishAsync(payload!, context.RequestAborted);
-                    accepted++;
-                }
-
-                activity?.SetTag("nealytics.beacon_events", accepted);
-                activity?.SetTag("nealytics.beacon_rejected", rejected);
-
-                if (rejected > 0)
-                {
-                    LogRejectedBeaconElements(
-                        loggerFactory.CreateLogger(typeof(BeaconTelemetryEndpoint)),
-                        rejected,
-                        accepted + rejected);
-                }
-
-                context.Response.StatusCode = StatusCodes.Status204NoContent;
-            }
-            catch (BadHttpRequestException)
-            {
-                context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
-            }
-            catch (JsonException)
-            {
-                context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            }
-        })
-        .RequireRateLimiting("ingestion")
-        .RequireCors("beacon");
+    internal static async Task<BeaconIngestResult> IngestBodyAsync(
+        PipeReader bodyReader, BeaconBatchIngestor ingestor, IngestionKeyPolicy policy, CancellationToken cancellationToken)
+    {
+        try
+        {
+            IAsyncEnumerable<GlobalTelemetryPayload?> payloads = JsonSerializer.DeserializeAsyncEnumerable(
+                bodyReader, TelemetryRequestJson.Payload, cancellationToken);
+            return await ingestor.IngestAsync(payloads, policy, DateTime.UtcNow, cancellationToken);
+        }
+        finally
+        {
+            await bodyReader.CompleteAsync();
+        }
     }
 }

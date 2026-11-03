@@ -26,4 +26,4 @@ ENGINE = ReplacingMergeTree()
 PARTITION BY toYYYYMM(timestamp)
 ORDER BY (project_id, tenant_id, event_type, timestamp, event_id)
 TTL toDateTime(timestamp) + INTERVAL 90 DAY DELETE
-SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
+SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1, non_replicated_deduplication_window = 100000;

@@ -126,7 +126,7 @@ public class WriteAheadLoggerTests : UnitTestBase, IAsyncDisposable
     }
 
     [Fact]
-    public async Task ReplayUncommittedAsync_SkipsCorruptLines()
+    public async Task ReplayUncommittedAsync_RejectsCorruptFramesAndRetainsTheSealedFile()
     {
         var payload = new GlobalTelemetryPayload { ProjectId = "good", TenantId = "t", SessionId = "s", EventType = "e" };
         await WriteAndCloseAsync(payload);
@@ -134,10 +134,9 @@ public class WriteAheadLoggerTests : UnitTestBase, IAsyncDisposable
         await File.AppendAllTextAsync(WalPath, "not-valid-json\n");
 
         await using var wal2 = new WriteAheadLogger(_options);
-        var recovered = await wal2.ReplayUncommittedAsync();
-
-        recovered.Should().HaveCount(1);
-        recovered[0].ProjectId.Should().Be("good");
+        InvalidDataException error = await Assert.ThrowsAsync<InvalidDataException>(() => wal2.ReplayUncommittedAsync());
+        Assert.Contains("Malformed WAL frame at byte", error.Message);
+        Assert.True(wal2.HasSealedSegment);
     }
 
     private static GlobalTelemetryPayload Event(string projectId = "p") =>
@@ -269,6 +268,16 @@ public class WriteAheadLoggerTests : UnitTestBase, IAsyncDisposable
         await wal.DeleteSealedSegmentAsync();
 
         wal.HasSealedSegment.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task AnExistingEmptyReplayFileDoesNotReportUncommittedData()
+    {
+        Directory.CreateDirectory(_tempDir);
+        await File.WriteAllBytesAsync(Path.Combine(_tempDir, "telemetry_wal.replay"), []);
+        await using var wal = new WriteAheadLogger(_options);
+        Assert.False(wal.HasSealedSegment);
+        Assert.Empty(await wal.ReplayUncommittedAsync());
     }
 
     [Fact]

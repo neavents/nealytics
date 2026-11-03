@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using System.Collections.Generic;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Exporter;
@@ -12,6 +13,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using Nealytics.Engine.Features.BatchProcessor;
 using Nealytics.Engine.Features.GetActiveUsers;
@@ -22,6 +24,9 @@ using Nealytics.Engine.Features.GetFunnel;
 using Nealytics.Engine.Features.GetSchema;
 using Nealytics.Engine.Features.ValidateTelemetry;
 using Nealytics.Engine.Features.GetEventTimeSeries;
+using Nealytics.Engine.Features.GetNamedMetric;
+using Nealytics.Engine.Features.GetSavedReport;
+using Nealytics.Engine.Features.GetAnalyticsPlan;
 using Nealytics.Engine.Features.GetProjectTimeline;
 using Nealytics.Engine.Features.GetRetention;
 using Nealytics.Engine.Features.GetSessionAnalytics;
@@ -34,6 +39,7 @@ using Nealytics.Engine.Infrastructure.Diagnostics;
 using Nealytics.Engine.Infrastructure.Security;
 using Nealytics.Engine.Infrastructure.Serialization;
 using Nealytics.Engine.Infrastructure.Storage;
+using Nealytics.Engine.Infrastructure.Storage.Delivery;
 using Octonica.ClickHouseClient;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -65,11 +71,49 @@ builder.Services.AddSingleton(dimensionRegistry);
 MeasureRegistry measureRegistry = new(engineOpts, dimensionRegistry);
 builder.Services.AddSingleton(measureRegistry);
 
+NamedMetricRegistry namedMetricRegistry = new(engineOpts, measureRegistry);
+builder.Services.AddSingleton(namedMetricRegistry);
+
 TenantAttributeRegistry tenantAttributeRegistry = new(engineOpts);
 builder.Services.AddSingleton(tenantAttributeRegistry);
 
+ComputedDimensionRegistry computedDimensionRegistry = new(engineOpts, dimensionRegistry, measureRegistry);
+builder.Services.AddSingleton(computedDimensionRegistry);
+QueryColumns legacyColumns = new(dimensionRegistry, tenantAttributeRegistry);
+builder.Services.AddSingleton(legacyColumns);
+QueryColumns queryColumns = new(dimensionRegistry, tenantAttributeRegistry, computedDimensionRegistry);
+builder.Services.AddSingleton(new AnalyticsColumns(queryColumns));
+
+EventSegmentRegistry eventSegmentRegistry = new(engineOpts, queryColumns, measureRegistry);
+builder.Services.AddSingleton(eventSegmentRegistry);
+
+SavedReportRegistry savedReportRegistry = new(engineOpts, namedMetricRegistry, eventSegmentRegistry);
+builder.Services.AddSingleton(savedReportRegistry);
+
 RollupRegistry rollupRegistry = new(engineOpts, dimensionRegistry, measureRegistry, tenantAttributeRegistry);
 builder.Services.AddSingleton(rollupRegistry);
+
+ProjectContext defaultProject = new(null, dimensionRegistry, measureRegistry, tenantAttributeRegistry,
+    computedDimensionRegistry, legacyColumns, new AnalyticsColumns(queryColumns), namedMetricRegistry,
+    eventSegmentRegistry, savedReportRegistry, rollupRegistry);
+ProjectCatalog projectCatalog = new(engineOpts, defaultProject);
+builder.Services.AddSingleton(projectCatalog);
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ProjectRequestContext>();
+if (projectCatalog.Enabled)
+{
+    builder.Services.AddScoped(services => services.GetRequiredService<ProjectRequestContext>().Current.Dimensions);
+    builder.Services.AddScoped(services => services.GetRequiredService<ProjectRequestContext>().Current.Measures);
+    builder.Services.AddScoped(services => services.GetRequiredService<ProjectRequestContext>().Current.TenantAttributes);
+    builder.Services.AddScoped(services => services.GetRequiredService<ProjectRequestContext>().Current.ComputedDimensions);
+    builder.Services.AddScoped(services => services.GetRequiredService<ProjectRequestContext>().Current.Columns);
+    builder.Services.AddScoped(services => services.GetRequiredService<ProjectRequestContext>().Current.Analytics);
+    builder.Services.AddScoped(services => services.GetRequiredService<ProjectRequestContext>().Current.NamedMetrics);
+    builder.Services.AddScoped(services => services.GetRequiredService<ProjectRequestContext>().Current.EventSegments);
+    builder.Services.AddScoped(services => services.GetRequiredService<ProjectRequestContext>().Current.SavedReports);
+    builder.Services.AddScoped(services => services.GetRequiredService<ProjectRequestContext>().Current.Rollups);
+}
+
 
 builder.WebHost.ConfigureKestrel(serverOptions =>
 {
@@ -178,15 +222,18 @@ if (engineOpts.EnableRequestDecompression)
     builder.Services.AddRequestDecompression();
 }
 
-builder.Services.AddRateLimiter(limiter =>
+builder.Services.AddRateLimiter();
+builder.Services.AddOptions<RateLimiterOptions>().Configure<IOptions<TelemetryEngineOptions>>((limiter, configured) =>
 {
+    TelemetryEngineOptions capacityOptions = configured.Value;
     limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    limiter.GlobalLimiter = IngestionRequestAdmission.Create(capacityOptions);
     limiter.AddFixedWindowLimiter("ingestion", window =>
     {
-        window.PermitLimit = engineOpts.RateLimitPermitCount;
-        window.Window = TimeSpan.FromSeconds(engineOpts.RateLimitWindowSeconds);
+        window.PermitLimit = capacityOptions.RateLimitPermitCount;
+        window.Window = TimeSpan.FromSeconds(capacityOptions.RateLimitWindowSeconds);
         window.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-        window.QueueLimit = engineOpts.RateLimitQueueSize;
+        window.QueueLimit = capacityOptions.RateLimitQueueSize;
     });
 });
 
@@ -194,17 +241,60 @@ builder.Services.AddSingleton<ClickHouseConnectionFactory>();
 builder.Services.AddSingleton<WriteAheadLogger>();
 builder.Services.AddSingleton<TelemetryChannelBroker>();
 builder.Services.AddSingleton<ApiKeyValidator>();
-builder.Services.AddSingleton<IngestGate>();
 builder.Services.AddSingleton<ITenantAttributeWriter, ClickHouseTenantAttributeWriter>();
-builder.Services.AddSingleton<DimensionSanitizer>();
-builder.Services.AddSingleton<MeasureSanitizer>();
-builder.Services.AddHostedService<ClickHouseSchemaMigrator>();
-builder.Services.AddSingleton<ITelemetryBatchWriter, ClickHouseBatchWriter>();
+if (projectCatalog.Enabled)
+{
+    builder.Services.AddScoped<IngestGate>();
+    builder.Services.AddScoped<DimensionSanitizer>();
+    builder.Services.AddScoped<MeasureSanitizer>();
+    builder.Services.AddScoped<BeaconBatchIngestor>();
+}
+else
+{
+    builder.Services.AddSingleton<IngestGate>();
+    builder.Services.AddSingleton<DimensionSanitizer>();
+    builder.Services.AddSingleton<MeasureSanitizer>();
+    builder.Services.AddSingleton<BeaconBatchIngestor>();
+}
+builder.Services.AddSingleton<IngestionRequestReader>();
+builder.Services.AddSingleton<DurableIngestDispatcher>();
+if (projectCatalog.Enabled)
+{
+    StorageSchema storage = projectCatalog.Storage;
+    builder.Services.AddHostedService(services => new ClickHouseSchemaMigrator(
+        services.GetRequiredService<ClickHouseConnectionFactory>(), storage.Dimensions, storage.Measures, storage.Rollups,
+        services.GetRequiredService<IOptions<TelemetryEngineOptions>>(), services.GetRequiredService<ILogger<ClickHouseSchemaMigrator>>(),
+        storage.TenantAttributes));
+    builder.Services.AddSingleton(services => new ClickHouseBatchWriter(
+        services.GetRequiredService<ClickHouseConnectionFactory>(), storage.Dimensions, storage.Measures,
+        services.GetRequiredService<IOptions<TelemetryEngineOptions>>(), services.GetRequiredService<ILogger<ClickHouseBatchWriter>>()));
+}
+else
+{
+    builder.Services.AddHostedService<ClickHouseSchemaMigrator>();
+    builder.Services.AddSingleton<ClickHouseBatchWriter>();
+}
+builder.Services.AddSingleton<IDeliveryBatchWriter>(services => services.GetRequiredService<ClickHouseBatchWriter>());
+builder.Services.AddSingleton<TelemetryDeliveryJournal>();
+if (projectCatalog.Enabled)
+{
+    builder.Services.AddSingleton<ITelemetryBatchWriter>(services => new JournaledTelemetryBatchWriter(
+        services.GetRequiredService<IDeliveryBatchWriter>(), services.GetRequiredService<TelemetryDeliveryJournal>(),
+        services.GetRequiredService<WriteAheadLogger>(), services.GetRequiredService<IOptions<TelemetryEngineOptions>>(),
+        projectCatalog.Storage.Rollups));
+}
+else
+{
+    builder.Services.AddSingleton<ITelemetryBatchWriter, JournaledTelemetryBatchWriter>();
+}
 builder.Services.AddHostedService<TelemetryBatchProcessor>();
 
 builder.Services.AddScoped<GetProjectTimelineQuery>();
 builder.Services.AddScoped<GetSessionAnalyticsQuery>();
 builder.Services.AddScoped<GetEventTimeSeriesQuery>();
+builder.Services.AddScoped<GetNamedMetricQuery>();
+builder.Services.AddScoped<GetSavedReportQuery>();
+builder.Services.AddScoped<AnalyticsPlanner>();
 builder.Services.AddScoped<GetActiveUsersQuery>();
 builder.Services.AddScoped<GetTopEventsQuery>();
 builder.Services.AddScoped<GetBreakdownQuery>();
@@ -213,8 +303,14 @@ builder.Services.AddScoped<GetPivotQuery>();
 builder.Services.AddScoped<GetDistributionQuery>();
 builder.Services.AddScoped<GetRetentionQuery>();
 builder.Services.AddSingleton<GetEventTypesQuery>();
-builder.Services.AddSingleton<GetColumnPopulationQuery>();
-builder.Services.AddSingleton(new QueryColumns(dimensionRegistry, tenantAttributeRegistry));
+if (projectCatalog.Enabled)
+{
+    builder.Services.AddScoped<GetColumnPopulationQuery>();
+}
+else
+{
+    builder.Services.AddSingleton<GetColumnPopulationQuery>();
+}
 
 static void ConfigureOtlp(OtlpExporterOptions options)
 {
@@ -278,6 +374,7 @@ app.UseCors();
 app.UseMiddleware<StorageUnavailableMiddleware>();
 app.UseRateLimiter();
 app.UseAuthentication();
+app.UseProjectSchemas();
 app.UseAuthorization();
 
 app.MapTelemetryIngestion();
@@ -285,6 +382,9 @@ app.MapBeaconIngestion();
 app.MapGetProjectTimeline();
 app.MapGetSessionAnalytics();
 app.MapGetEventTimeSeries();
+app.MapGetNamedMetric();
+app.MapGetSavedReport();
+app.MapGetAnalyticsPlan();
 app.MapGetActiveUsers();
 app.MapGetTopEvents();
 app.MapGetBreakdown();
@@ -302,15 +402,17 @@ if (engineOpts.EnablePrometheusScrape)
 
 app.MapGet("/health", () => Results.Ok());
 
-app.MapGet("/ready", async (ClickHouseConnectionFactory connectionFactory) =>
+app.MapGet("/ready", async (HttpContext context, ClickHouseConnectionFactory connectionFactory) =>
 {
+    using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+    timeout.CancelAfter(connectionFactory.ProbeTimeout);
     try
     {
         await using PooledClickHouseConnection lease =
-            await connectionFactory.AcquireAsync(CancellationToken.None);
+            await connectionFactory.AcquireAsync(ClickHouseWorkload.Probe, timeout.Token);
         await using ClickHouseCommand cmd = lease.Connection.CreateCommand();
         cmd.CommandText = "SELECT 1";
-        await cmd.ExecuteScalarAsync(CancellationToken.None);
+        await cmd.ExecuteScalarAsync(timeout.Token);
         return Results.Ok();
     }
     catch (Exception)

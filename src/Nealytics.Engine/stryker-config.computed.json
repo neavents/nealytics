@@ -1,0 +1,39 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~SavedReport|FullyQualifiedName~NamedMetric|FullyQualifiedName~EventSegment|FullyQualifiedName~ComputedDimension|FullyQualifiedName~FilterParser",
+    "mutate": [
+      "Infrastructure/Configuration/ComputedDimension.cs",
+      "Infrastructure/Configuration/ComputedDimensionRegistry.cs",
+      "Infrastructure/Query/ComputedDimensionSql.cs",
+      "Infrastructure/Query/AnalyticsColumns.cs",
+      "Infrastructure/Query/AnalyticsQueryBudget.cs",
+      "Infrastructure/Query/QueryColumns.cs",
+      "Infrastructure/Query/FilterParser.cs",
+      "Infrastructure/Configuration/ReportParameter.cs",
+      "Infrastructure/Configuration/SavedReportRegistry.cs",
+      "Features/GetNamedMetric/NamedMetricRequestFactory.cs",
+      "Features/GetNamedMetric/GetNamedMetricEndpoint.cs",
+      "Features/GetSavedReport/GetSavedReportEndpoint.cs",
+      "Program.cs{3187..3646}",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{6549..6682}",
+      "Features/GetSchema/SchemaResponse.cs{3766..3979}"
+    ],
+    "mutation-level": "Complete",
+    "concurrency": 2,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    }
+  }
+}

@@ -3,6 +3,7 @@
     <Project Path="src/Nealytics.Engine/Nealytics.Engine.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Nealytics.Engine.Bench.Tests/Nealytics.Engine.Bench.Tests.csproj" />
     <Project Path="tests/Nealytics.Engine.Tests.Integration/Nealytics.Engine.Tests.Integration.csproj" />
     <Project Path="tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj" />
   </Folder>

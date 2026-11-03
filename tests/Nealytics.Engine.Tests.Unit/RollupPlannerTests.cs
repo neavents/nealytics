@@ -10,7 +10,7 @@ public class RollupPlannerTests
     private static readonly DateTime Midnight = new(2026, 8, 10, 0, 0, 0, DateTimeKind.Utc);
     private static readonly DateTime NextMidnight = new(2026, 8, 13, 0, 0, 0, DateTimeKind.Utc);
 
-    private static RollupRegistry Registry(params RollupOptions[] rollups)
+    private static RollupRegistry VerifiedRegistry(params RollupOptions[] rollups)
     {
         TelemetryEngineOptions options = new()
         {
@@ -27,7 +27,12 @@ public class RollupPlannerTests
         };
 
         DimensionRegistry dimensions = new(options);
-        return new RollupRegistry(options, dimensions, new MeasureRegistry(options, dimensions));
+        RollupRegistry registry = new(options, dimensions, new MeasureRegistry(options, dimensions));
+        foreach (Rollup rollup in registry.Declared)
+        {
+            registry.MarkRoutable(rollup);
+        }
+        return registry;
     }
 
     private static RollupOptions Daily(string name = "daily", string dims = "widget_id", string types = "view") =>
@@ -68,13 +73,13 @@ public class RollupPlannerTests
     [Fact]
     public void NoRollups_MeansRaw()
     {
-        RollupPlanner.Select(Request(), Registry()).Should().BeNull();
+        RollupPlanner.Select(Request(), VerifiedRegistry()).Should().BeNull();
     }
 
     [Fact]
     public void AMatchingRollup_IsSelected()
     {
-        RollupPlan? plan = RollupPlanner.Select(Request(), Registry(Daily()));
+        RollupPlan? plan = RollupPlanner.Select(Request(), VerifiedRegistry(Daily()));
 
         plan.Should().NotBeNull();
         plan!.Value.Rollup.Name.Should().Be("daily");
@@ -91,7 +96,7 @@ public class RollupPlannerTests
             Request(
                 from: DateTime.Parse(from, null, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal),
                 to: DateTime.Parse(to, null, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal)),
-            Registry(Daily()));
+            VerifiedRegistry(Daily()));
 
         plan.Should().BeNull(
             "a rollup row is one whole bucket, so answering 12:00-18:00 from a daily rollup would "
@@ -101,7 +106,7 @@ public class RollupPlannerTests
     [Fact]
     public void AnEmptyRange_FallsBackToRaw()
     {
-        RollupPlanner.Select(Request(from: Midnight, to: Midnight), Registry(Daily())).Should().BeNull();
+        RollupPlanner.Select(Request(from: Midnight, to: Midnight), VerifiedRegistry(Daily())).Should().BeNull();
     }
 
     [Fact]
@@ -113,7 +118,7 @@ public class RollupPlannerTests
         DateTime from = new(2026, 8, 10, 9, 0, 0, DateTimeKind.Utc);
         DateTime to = new(2026, 8, 10, 17, 0, 0, DateTimeKind.Utc);
 
-        RollupPlanner.Select(Request(from: from, to: to), Registry(hourly)).Should().NotBeNull();
+        RollupPlanner.Select(Request(from: from, to: to), VerifiedRegistry(hourly)).Should().NotBeNull();
     }
 
     [Fact]
@@ -125,19 +130,19 @@ public class RollupPlannerTests
         DateTime from = new(2026, 8, 10, 9, 30, 0, DateTimeKind.Utc);
         DateTime to = new(2026, 8, 10, 17, 0, 0, DateTimeKind.Utc);
 
-        RollupPlanner.Select(Request(from: from, to: to), Registry(hourly)).Should().BeNull();
+        RollupPlanner.Select(Request(from: from, to: to), VerifiedRegistry(hourly)).Should().BeNull();
     }
 
     [Fact]
     public void AGroupByTheRollupDoesNotCarry_FallsBackToRaw()
     {
-        RollupPlanner.Select(Request(groupBy: "shelf"), Registry(Daily())).Should().BeNull();
+        RollupPlanner.Select(Request(groupBy: "shelf"), VerifiedRegistry(Daily())).Should().BeNull();
     }
 
     [Fact]
     public void GroupingByEventType_IsAlwaysCovered()
     {
-        RollupPlanner.Select(Request(groupBy: "event_type"), Registry(Daily())).Should().NotBeNull(
+        RollupPlanner.Select(Request(groupBy: "event_type"), VerifiedRegistry(Daily())).Should().NotBeNull(
             "every rollup keys on event_type");
     }
 
@@ -146,7 +151,7 @@ public class RollupPlannerTests
     {
         RollupPlan? plan = RollupPlanner.Select(
             Request(filters: [new QueryFilter { Column = "shelf", Value = "top" }]),
-            Registry(Daily()));
+            VerifiedRegistry(Daily()));
 
         plan.Should().BeNull();
     }
@@ -154,20 +159,20 @@ public class RollupPlannerTests
     [Fact]
     public void ARequestWithNoEventType_CannotUseARestrictedRollup()
     {
-        RollupPlanner.Select(Request(eventType: null), Registry(Daily())).Should().BeNull(
+        RollupPlanner.Select(Request(eventType: null), VerifiedRegistry(Daily())).Should().BeNull(
             "the rollup only aggregated 'view', so it would undercount a request spanning everything");
     }
 
     [Fact]
     public void ARequestWithNoEventType_CanUseAnUnrestrictedRollup()
     {
-        RollupPlanner.Select(Request(eventType: null), Registry(Daily(types: ""))).Should().NotBeNull();
+        RollupPlanner.Select(Request(eventType: null), VerifiedRegistry(Daily(types: ""))).Should().NotBeNull();
     }
 
     [Fact]
     public void AnEventTypeOutsideTheRollup_FallsBackToRaw()
     {
-        RollupPlanner.Select(Request(eventType: "purchase"), Registry(Daily())).Should().BeNull();
+        RollupPlanner.Select(Request(eventType: "purchase"), VerifiedRegistry(Daily())).Should().BeNull();
     }
 
     [Theory]
@@ -176,7 +181,7 @@ public class RollupPlannerTests
     [InlineData(BreakdownMetric.Users, "uniqExactMerge(users)")]
     public void CountMetrics_MapToTheirMergeExpression(BreakdownMetric metric, string expected)
     {
-        RollupPlan? plan = RollupPlanner.Select(Request(metric: metric), Registry(Daily()));
+        RollupPlan? plan = RollupPlanner.Select(Request(metric: metric), VerifiedRegistry(Daily()));
 
         plan!.Value.ValueExpression.Should().Be(expected);
     }
@@ -185,7 +190,7 @@ public class RollupPlannerTests
     public void TheUserMetric_DropsZeroGroups_ToMatchRaw()
     {
         RollupPlan? plan = RollupPlanner.Select(
-            Request(metric: BreakdownMetric.Users), Registry(Daily()));
+            Request(metric: BreakdownMetric.Users), VerifiedRegistry(Daily()));
 
         plan!.Value.DropZeroGroups.Should().BeTrue(
             "raw filters user_id IS NOT NULL in the WHERE, so a group with no known user has no rows "
@@ -197,7 +202,7 @@ public class RollupPlannerTests
     {
         RollupPlan? plan = RollupPlanner.Select(
             Request(metric: BreakdownMetric.Measure, measureColumn: "dwell_ms", measureFunction: "sum"),
-            Registry(Daily()));
+            VerifiedRegistry(Daily()));
 
         plan!.Value.ValueExpression.Should().Be("sumMerge(dwell_ms_sum)");
     }
@@ -207,7 +212,7 @@ public class RollupPlannerTests
     {
         RollupPlanner.Select(
             Request(metric: BreakdownMetric.Measure, measureColumn: "dwell_ms", measureFunction: "avg"),
-            Registry(Daily())).Should().BeNull("the rollup stores sum only");
+            VerifiedRegistry(Daily())).Should().BeNull("the rollup stores sum only");
     }
 
     [Fact]
@@ -215,13 +220,13 @@ public class RollupPlannerTests
     {
         RollupPlanner.Select(
             Request(metric: BreakdownMetric.Measure, measureColumn: "dwell_ms", measureFunction: "quantile(0.95)"),
-            Registry(Daily())).Should().BeNull("a rollup cannot store a quantile state for later merging");
+            VerifiedRegistry(Daily())).Should().BeNull("a rollup cannot store a quantile state for later merging");
     }
 
     [Fact]
     public void TheNarrowestMatchingRollupWins()
     {
-        RollupRegistry registry = Registry(
+        RollupRegistry registry = VerifiedRegistry(
             Daily("wide", dims: "widget_id,shelf"),
             Daily("narrow", dims: "widget_id"));
 
@@ -234,7 +239,7 @@ public class RollupPlannerTests
     [Fact]
     public void TheRoutedQueryUsesAHalfOpenRangeOnTheBucket()
     {
-        RollupPlan? plan = RollupPlanner.Select(Request(), Registry(Daily()));
+        RollupPlan? plan = RollupPlanner.Select(Request(), VerifiedRegistry(Daily()));
 
         (string sql, _) = GetBreakdownQuery.BuildQuery(Request(), plan);
 
@@ -247,7 +252,7 @@ public class RollupPlannerTests
     [Fact]
     public void TheRoutedQueryKeepsTheSameTotalsShapeAsRaw()
     {
-        RollupPlan? plan = RollupPlanner.Select(Request(), Registry(Daily()));
+        RollupPlan? plan = RollupPlanner.Select(Request(), VerifiedRegistry(Daily()));
 
         (string sql, _) = GetBreakdownQuery.BuildQuery(Request(), plan);
 
@@ -259,7 +264,7 @@ public class RollupPlannerTests
     [Fact]
     public void TheRoutedQueryDoesNotReNormaliseTheKey()
     {
-        RollupPlan? plan = RollupPlanner.Select(Request(), Registry(Daily()));
+        RollupPlan? plan = RollupPlanner.Select(Request(), VerifiedRegistry(Daily()));
 
         (string sql, _) = GetBreakdownQuery.BuildQuery(Request(), plan);
 
@@ -272,7 +277,7 @@ public class RollupPlannerTests
     [Fact]
     public void TheRoutedFilterComparesTheStoredColumnDirectly()
     {
-        RollupRegistry registry = Registry(Daily(dims: "widget_id,shelf"));
+        RollupRegistry registry = VerifiedRegistry(Daily(dims: "widget_id,shelf"));
         BreakdownRequest request = Request(filters: [new QueryFilter { Column = "shelf", Value = "top" }]);
 
         (string sql, var parameters) = GetBreakdownQuery.BuildQuery(request, RollupPlanner.Select(request, registry));

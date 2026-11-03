@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Globalization;
+using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Linq;
@@ -12,6 +13,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Storage.Rollups;
 using Octonica.ClickHouseClient;
 using Octonica.ClickHouseClient.Exceptions;
 
@@ -31,6 +33,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
 
     internal static IReadOnlyList<string> CoreStatementsFor(string onCluster) =>
     [
+        $"ALTER TABLE {Database}.{Table}{onCluster} MODIFY SETTING non_replicated_deduplication_window = 100000",
         $"ALTER TABLE {Database}.{Table}{onCluster} ADD COLUMN IF NOT EXISTS user_id Nullable(String)",
         $"ALTER TABLE {Database}.{Table}{onCluster} ADD COLUMN IF NOT EXISTS object_id Nullable(String)",
         $"ALTER TABLE {Database}.{Table}{onCluster} ADD COLUMN IF NOT EXISTS device_class LowCardinality(String) DEFAULT ''",
@@ -69,6 +72,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
     private readonly ILogger<ClickHouseSchemaMigrator> _logger;
     private readonly TenantAttributeRegistry? _tenantAttributes;
     private readonly string _onCluster;
+    private readonly string _deliveryDirectory;
 
     public ClickHouseSchemaMigrator(
         ClickHouseConnectionFactory connectionFactory,
@@ -79,6 +83,7 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         ILogger<ClickHouseSchemaMigrator> logger,
         TenantAttributeRegistry? tenantAttributes = null)
     {
+        _deliveryDirectory = Path.Combine(options.Value.WriteAheadLogDirectory, "delivery");
         _tenantAttributes = tenantAttributes;
         _onCluster = ClusterDdl.Clause(options.Value.ClusterName);
         _connectionFactory = connectionFactory;
@@ -135,11 +140,9 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
         ILogger logger, string column, string database, string table);
 
     [LoggerMessage(EventId = 8007, Level = LogLevel.Error,
-        Message = "ClickHouse schema reconciliation could not run — the database was unreachable. "
-            + "Declared dimensions have NOT been verified and any missing column has NOT been "
-            + "created; ingest will reject batches naming one until this succeeds. Query endpoints "
-            + "stay up deliberately: a database blip must not take analytics reads down with it.")]
-    private static partial void LogReconciliationUnreachable(ILogger logger, Exception exception);
+        Message = "ClickHouse schema reconciliation did not complete. Declared columns remain unverified; "
+            + "unverified rollups use raw data.")]
+    private static partial void LogReconciliationIncomplete(ILogger logger, Exception exception);
 
     [LoggerMessage(EventId = 8101, Level = LogLevel.Information,
         Message = "Measure '{Measure}' is declared but missing from {Database}.{Table}. "
@@ -191,30 +194,38 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
             + "is off. It aggregates from this point forward only.")]
     private static partial void LogRollupNotBackfilled(ILogger logger, string rollup);
 
-    [LoggerMessage(EventId = 8123, Level = LogLevel.Information,
-        Message = "Rollup '{Rollup}' view was created by another instance; leaving the backfill to it.")]
-    private static partial void LogRollupCreatedElsewhere(ILogger logger, string rollup);
+    [LoggerMessage(EventId = 8124, Level = LogLevel.Warning,
+        Message = "Rollup '{Rollup}' has no verified completion for its current storage and definition. Queries use raw data: {Reason}.")]
+    private static partial void LogRollupIncomplete(ILogger logger, string rollup, string? reason);
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        foreach (Rollup rollup in _rollups.Declared)
+        {
+            _rollups.MarkUnroutable(rollup, "completion has not been verified");
+        }
         try
         {
-            await ReconcileAsync(cancellationToken).ConfigureAwait(false);
+            await ReconcileAsync(cancellationToken);
         }
         catch (SchemaReconciliationException)
         {
             throw;
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            LogReconciliationUnreachable(_logger, ex);
+            LogReconciliationIncomplete(_logger, ex);
         }
     }
 
     private async Task ReconcileAsync(CancellationToken cancellationToken)
     {
         await using PooledClickHouseConnection pooled =
-            await _connectionFactory.AcquireAsync(cancellationToken).ConfigureAwait(false);
+            await _connectionFactory.AcquireAsync(ClickHouseWorkload.Maintenance, cancellationToken).ConfigureAwait(false);
 
         foreach (string statement in CoreStatementsFor(_onCluster))
         {
@@ -372,46 +383,86 @@ public sealed partial class ClickHouseSchemaMigrator : IHostedService
     private async Task ReconcileRollupsAsync(
         PooledClickHouseConnection pooled, CancellationToken cancellationToken)
     {
+        if (_rollups.Declared.Count == 0)
+        {
+            return;
+        }
+        if (Directory.Exists(_deliveryDirectory)
+            && Directory.EnumerateFiles(_deliveryDirectory, "*.json").Any(path =>
+                !File.Exists(Path.ChangeExtension(path, ".committed"))))
+        {
+            foreach (Rollup rollup in _rollups.Declared)
+            {
+                _rollups.MarkUnroutable(rollup, "pending delivery must finish before rollup reconciliation");
+            }
+            return;
+        }
+        ClickHouseRollupReadiness readiness = new ClickHouseRollupReadiness(pooled);
+        await readiness.EnsureCreatedAsync(_onCluster, cancellationToken);
         foreach (Rollup rollup in _rollups.Declared)
         {
-            string desiredView = RollupRegistry.BuildViewDdl(rollup, _onCluster);
+            await ReconcileRollupAsync(pooled, readiness, rollup, cancellationToken);
+        }
+    }
 
-            string? existing = await ReadCreateQueryAsync(
-                pooled, rollup.ViewName, cancellationToken).ConfigureAwait(false);
-
-            if (existing is null)
+    private async Task ReconcileRollupAsync(
+        PooledClickHouseConnection pooled,
+        ClickHouseRollupReadiness readiness,
+        Rollup rollup,
+        CancellationToken cancellationToken)
+    {
+        string? existing = await ReadCreateQueryAsync(pooled, rollup.ViewName, cancellationToken);
+        if (existing is null)
+        {
+            if (await ReadCreateQueryAsync(pooled, rollup.TableName, cancellationToken) is not null)
             {
-                await ExecuteAsync(
-                    pooled, RollupRegistry.BuildTableDdl(rollup, _onCluster), cancellationToken).ConfigureAwait(false);
-
-                if (!await TryCreateViewAsync(pooled, desiredView, cancellationToken).ConfigureAwait(false))
+                LogRollupIncomplete(_logger, rollup.Name, _rollups.UnroutableReason(rollup));
+                return;
+            }
+            await ExecuteAsync(pooled, RollupRegistry.BuildTableDdl(rollup, _onCluster), cancellationToken);
+            bool created = await TryCreateViewAsync(pooled, RollupRegistry.BuildViewDdl(rollup, _onCluster), cancellationToken);
+            if (created)
+            {
+                RollupStorageIdentity identity = await readiness.CaptureAsync(rollup, cancellationToken);
+                if (_backfillRollups)
                 {
-                    LogRollupCreatedElsewhere(_logger, rollup.Name);
-                    _rollups.MarkRoutable(rollup);
-                    continue;
+                    int partitions = await BackfillRollupAsync(pooled, rollup, _backfillSessionsPerSlice, cancellationToken);
+                    await readiness.CompleteAsync(identity, true, cancellationToken);
+                    LogRollupCreated(_logger, rollup.Name, Database, rollup.TableName, partitions);
                 }
-
-                if (!_backfillRollups)
+                else
                 {
+                    await readiness.CompleteAsync(identity, false, cancellationToken);
                     LogRollupNotBackfilled(_logger, rollup.Name);
-                    _rollups.MarkRoutable(rollup);
-                    continue;
                 }
-
-                int partitions = await BackfillRollupAsync(pooled, rollup, _backfillSessionsPerSlice, cancellationToken).ConfigureAwait(false);
-                LogRollupCreated(_logger, rollup.Name, Database, rollup.TableName, partitions);
-                _rollups.MarkRoutable(rollup);
-                continue;
             }
+            await VerifyRollupCompletionAsync(readiness, rollup, cancellationToken);
+        }
+        else if (!DefinitionsAgree(existing, rollup))
+        {
+            _rollups.MarkUnroutable(rollup, "stored definition differs from the declared one");
+            LogRollupDrift(_logger, rollup.Name, Database, rollup.ViewName, rollup.TableName);
+        }
+        else
+        {
+            await ExecuteAsync(pooled,
+                $"ALTER TABLE {Database}.{rollup.TableName}{_onCluster} MODIFY SETTING non_replicated_deduplication_window = 100000",
+                cancellationToken);
+            await VerifyRollupCompletionAsync(readiness, rollup, cancellationToken);
+        }
+    }
 
-            if (!DefinitionsAgree(existing, rollup))
-            {
-                _rollups.MarkUnroutable(rollup, "stored definition differs from the declared one");
-                LogRollupDrift(_logger, rollup.Name, Database, rollup.ViewName, rollup.TableName);
-                continue;
-            }
-
+    private async Task VerifyRollupCompletionAsync(
+        ClickHouseRollupReadiness readiness, Rollup rollup, CancellationToken cancellationToken)
+    {
+        RollupStorageIdentity identity = await readiness.CaptureAsync(rollup, cancellationToken);
+        if (await readiness.IsCompleteAsync(identity, _backfillRollups, cancellationToken))
+        {
             _rollups.MarkRoutable(rollup);
+        }
+        else
+        {
+            LogRollupIncomplete(_logger, rollup.Name, _rollups.UnroutableReason(rollup));
         }
     }
 

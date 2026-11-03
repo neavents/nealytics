@@ -73,9 +73,9 @@ internal sealed class TelemetryColumnBuffers : IDisposable
 
     internal IReadOnlyList<MeasureColumnBuffer> MeasureBuffers => _measureBuffers;
 
-    internal void Fill(IReadOnlyList<GlobalTelemetryPayload> batch)
+    internal void Fill(IReadOnlyList<GlobalTelemetryPayload> batch, DateTimeOffset? frozenIngestedAt = null)
     {
-        DateTimeOffset ingestedAt = DateTimeOffset.UtcNow;
+        DateTimeOffset ingestedAt = frozenIngestedAt ?? DateTimeOffset.UtcNow;
 
         for (int i = 0; i < _count; i++)
         {

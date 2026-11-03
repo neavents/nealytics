@@ -10,6 +10,13 @@ Built this because I wanna use collected data to show my tenants their analytics
 
 This service is so fast and very easy to configure. Nealytics is one binary, one config file, one ClickHouse instance.
 
+Use [named metrics](docs/named-metrics.md) for reusable aggregates and typed formulas. Apply
+[event segments](docs/event-segments.md), then combine metrics in parameterized
+[saved reports](docs/saved-reports.md) with grouping and UTC time buckets.
+[Analytics customization](docs/analytics-customization.md) covers read-time computed dimensions,
+authenticated project catalogs, opt-in rollup planning and explicit accuracy contracts.
+Discover declarations through the schema API and query within an authenticated tenant scope.
+
 ---
 
 ## Get it running

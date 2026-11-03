@@ -55,4 +55,4 @@ export TelemetryEngine__JwtSymmetricKey="local-integration-test-key-at-least-32-
 export TelemetryEngine__AllowedProjectKeys="test-key-1,test-key-2"
 
 echo "Running integration tests..."
-dotnet test tests/Nealytics.Engine.Tests.Integration "$@"
+dotnet test tests/Nealytics.Engine.Tests.Integration --filter 'Category!=PerformanceMeasurement' "$@"

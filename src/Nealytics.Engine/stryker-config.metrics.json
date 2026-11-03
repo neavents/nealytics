@@ -1,0 +1,47 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj",
+      "../../tests/Nealytics.Engine.Tests.Integration/Nealytics.Engine.Tests.Integration.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~NamedMetric|FullyQualifiedName~SavedReport|FullyQualifiedName~ComputedDimension",
+    "mutate": [
+      "Infrastructure/Configuration/NamedMetricRegistry.cs",
+      "Features/GetNamedMetric/*.cs",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{6688..6752}",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{6757..6804}",
+      "Infrastructure/Query/ScopeClause.cs{4308..4333}",
+      "Program.cs{2934..3061}",
+      "Program.cs{13048..13098}",
+      "Program.cs{15927..15951}",
+      "Features/GetSchema/GetSchemaEndpoint.cs{5496..5533}",
+      "Features/GetSchema/SchemaResponse.cs{3176..3367}",
+      "Infrastructure/Query/MetricAggregateSql.cs",
+      "Infrastructure/Configuration/MetricExpression.cs",
+      "Infrastructure/Configuration/MetricFormulaCompiler.cs",
+      "Infrastructure/Query/FormulaNode.cs",
+      "Infrastructure/Query/FormulaNumber.cs",
+      "Infrastructure/Query/MetricProjection.cs",
+      "Infrastructure/Query/MetricProjectionSql.cs",
+      "Infrastructure/Query/MetricAggregateReader.cs",
+      "Infrastructure/Query/FormulaUnit.cs",
+      "Infrastructure/Configuration/ReportParameter.cs",
+      "Infrastructure/Query/ReportParameterBinding.cs",
+      "Infrastructure/Query/ReportShapeSql.cs"
+    ],
+    "mutation-level": "Complete",
+    "concurrency": 1,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    }
+  }
+}

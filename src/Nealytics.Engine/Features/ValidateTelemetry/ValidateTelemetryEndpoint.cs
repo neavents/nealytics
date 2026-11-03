@@ -41,7 +41,7 @@ public static class ValidateTelemetryEndpoint
             {
                 payload = await JsonSerializer.DeserializeAsync(
                     context.Request.Body,
-                    TelemetryAotContext.Default.GlobalTelemetryPayload,
+                    TelemetryRequestJson.Payload,
                     cancellationToken);
             }
             catch (JsonException exception)

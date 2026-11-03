@@ -1,11 +1,14 @@
 namespace Nealytics.Engine.Infrastructure.Serialization;
 
 using System;
+using Nealytics.Engine.Infrastructure.Storage.Delivery;
 using System.Text.Json.Serialization;
 using System.Collections.Generic;
 using Nealytics.Engine.Features.GetProjectTimeline;
 using Nealytics.Engine.Features.GetSessionAnalytics;
 using Nealytics.Engine.Features.GetEventTimeSeries;
+using Nealytics.Engine.Features.GetNamedMetric;
+using Nealytics.Engine.Features.GetSavedReport;
 using Nealytics.Engine.Features.GetActiveUsers;
 using Nealytics.Engine.Features.GetTopEvents;
 using Nealytics.Engine.Features.GetBreakdown;
@@ -20,6 +23,10 @@ using Nealytics.Engine.Features.ValidateTelemetry;
 public sealed class GlobalTelemetryPayload
 {
     public Guid EventId { get; set; } = Guid.NewGuid();
+
+    [JsonInclude]
+    [JsonPropertyName("_walRecordId")]
+    internal Guid WalRecordId { get; set; }
     public string ProjectId { get; init; } = string.Empty;
     public string TenantId { get; init; } = string.Empty;
     public string SessionId { get; init; } = string.Empty;
@@ -54,6 +61,7 @@ public sealed class GlobalTelemetryPayload
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(GlobalTelemetryPayload))]
+[JsonSerializable(typeof(TelemetryDeliveryUnit))]
 [JsonSerializable(typeof(List<GlobalTelemetryPayload>))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 [JsonSerializable(typeof(ProjectTimelineResponse))]
@@ -63,6 +71,9 @@ public sealed class GlobalTelemetryPayload
 [JsonSerializable(typeof(SessionSummaryItem))]
 [JsonSerializable(typeof(List<SessionSummaryItem>))]
 [JsonSerializable(typeof(EventTimeSeriesResponse))]
+[JsonSerializable(typeof(NamedMetricResponse))]
+[JsonSerializable(typeof(SavedReportResponse))]
+[JsonSerializable(typeof(Nealytics.Engine.Features.GetAnalyticsPlan.AnalyticsPlanResponse))]
 [JsonSerializable(typeof(EventTimeSeriesPoint))]
 [JsonSerializable(typeof(List<EventTimeSeriesPoint>))]
 [JsonSerializable(typeof(ActiveUsersResponse))]
