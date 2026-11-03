@@ -16,16 +16,21 @@ namespace Nealytics.Engine.Tests.Integration;
 public sealed class NdjsonImportIntegrationTests
 {
     [Theory]
-    [InlineData("managed")]
-    [InlineData("custom")]
-    public async Task AFileImportsItsDurablePrefixIntoThePinnedSchemaAndBecomesQueryable(string path)
+    [InlineData("managed", false)]
+    [InlineData("custom", false)]
+    [InlineData("managed", true)]
+    [InlineData("custom", true)]
+    public async Task AFileImportsItsDurablePrefixIntoThePinnedSchemaAndBecomesQueryable(string path, bool mapped)
     {
         string suffix = Guid.NewGuid().ToString("N")[..12];
         string project = "e2_" + suffix;
         string measure = "e2_amount_" + suffix;
-        await using var factory = new Factory(project, measure, path);
+        await using var factory = new Factory(project, measure, path, mapped);
         using var client = factory.CreateClient();
-        string Event(int value) => JsonSerializer.Serialize(new
+        string Event(int value) => mapped ? JsonSerializer.Serialize(new
+        {
+            source = new { id = Guid.NewGuid(), time = DateTime.UtcNow.AddHours(-1), tenant = "t", amount = value }
+        }) : JsonSerializer.Serialize(new
         {
             eventId = Guid.NewGuid(), timestamp = DateTime.UtcNow.AddHours(-1), projectId = project,
             tenantId = "t", eventType = "action", measures = new Dictionary<string, string> { [measure] = value.ToString() }
@@ -68,7 +73,7 @@ public sealed class NdjsonImportIntegrationTests
         private readonly string? _previous;
         private readonly string _directory;
         private bool _disposed;
-        internal Factory(string project, string measure, string path)
+        internal Factory(string project, string measure, string path, bool mapped)
         {
             _directory = Environment.GetEnvironmentVariable("TelemetryEngine__WriteAheadLogDirectory")!;
             _schema = _directory + ".json";
@@ -83,6 +88,21 @@ public sealed class NdjsonImportIntegrationTests
                     NamedMetrics = [new() { Name = "total", Aggregation = "sum", Measure = measure }]
                 }]
             };
+            if (mapped)
+            {
+                options.NdjsonSourceMappings[project] = new()
+                {
+                    Fields = new()
+                    {
+                        ["eventId"] = new() { Path = ["source", "id"] },
+                        ["timestamp"] = new() { Path = ["source", "time"] },
+                        ["projectId"] = new() { Default = project },
+                        ["tenantId"] = new() { Path = ["source", "tenant"] },
+                        ["eventType"] = new() { Default = "action" },
+                        ["measures." + measure] = new() { Path = ["source", "amount"] }
+                    }
+                };
+            }
             File.WriteAllText(_schema, JsonSerializer.Serialize(new Dictionary<string, TelemetryEngineOptions> { ["TelemetryEngine"] = options }));
             _previous = Environment.GetEnvironmentVariable("TelemetryEngine__SchemaFile");
             Environment.SetEnvironmentVariable("TelemetryEngine__SchemaFile", _schema);

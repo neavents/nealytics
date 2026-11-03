@@ -34,6 +34,7 @@ using Nealytics.Engine.Features.GetSessionAnalytics;
 using Nealytics.Engine.Features.GetTopEvents;
 using Nealytics.Engine.Features.IngestTelemetry;
 using Nealytics.Engine.Features.ImportNdjson;
+using Nealytics.Engine.Features.SourceMapping;
 using Nealytics.Engine.Features.UpsertTenantAttributes;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Query;
@@ -243,6 +244,7 @@ if (engineOpts.EnableNdjsonImport)
 {
     NdjsonImportLimits importLimits = NdjsonImportLimits.Create(engineOpts);
     builder.Services.AddSingleton(importLimits);
+    builder.Services.AddSingleton(new NdjsonSourceMappings(engineOpts, projectCatalog));
     builder.Services.AddScoped<NdjsonImporter>();
     builder.Services.Configure<RateLimiterOptions>(options =>
         options.AddConcurrencyLimiter("ndjson-import", limiter =>

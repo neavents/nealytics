@@ -2,19 +2,21 @@ namespace Nealytics.Engine.Features.KafkaIngestion;
 
 using System;
 using Confluent.Kafka;
+using Nealytics.Engine.Features.SourceMapping;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Security;
 
 internal sealed class KafkaConnectorSettings
 {
     private KafkaConnectorSettings(ConsumerConfig consumer, string topic, int maxMessageBytes,
-        IngestionKeyPolicy policy, ProjectContext context)
+        IngestionKeyPolicy policy, ProjectContext context, SourceRecordMapping? mapping)
     {
         Consumer = consumer;
         Topic = topic;
         MaxMessageBytes = maxMessageBytes;
         Policy = policy;
         Context = context;
+        SourceMapping = mapping;
     }
 
     public ConsumerConfig Consumer { get; }
@@ -22,6 +24,7 @@ internal sealed class KafkaConnectorSettings
     public int MaxMessageBytes { get; }
     public IngestionKeyPolicy Policy { get; }
     public ProjectContext Context { get; }
+    public SourceRecordMapping? SourceMapping { get; }
 
     public static KafkaConnectorSettings Create(KafkaConnectorOptions options, ApiKeyValidator keys,
         ProjectCatalog projects)
@@ -104,7 +107,8 @@ internal sealed class KafkaConnectorSettings
             consumer.SaslUsername = options.SaslUsername;
             consumer.SaslPassword = options.SaslPassword;
         }
-        return new KafkaConnectorSettings(consumer, options.Topic, options.MaxMessageBytes, policy, context);
+        SourceRecordMapping? mapping = options.SourceMapping is null ? null : SourceRecordMapping.Compile(options.SourceMapping);
+        return new KafkaConnectorSettings(consumer, options.Topic, options.MaxMessageBytes, policy, context, mapping);
     }
 
     private static bool ValidName(string? value, int maxLength)

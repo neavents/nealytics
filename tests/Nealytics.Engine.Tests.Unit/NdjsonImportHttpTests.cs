@@ -346,7 +346,8 @@ public sealed class NdjsonImportHttpTests : IClassFixture<NdjsonImportHttpTests.
         private readonly string? _previous;
         private HttpClient? _client;
         public Factory() : this("managed", true, false) { }
-        internal Factory(string path = "managed", bool enabled = true, bool kestrel = false, int records = 2)
+        internal Factory(string path = "managed", bool enabled = true, bool kestrel = false, int records = 2,
+            Action<TelemetryEngineOptions>? configure = null)
         {
             _path = path;
             _schema = _directory + ".json";
@@ -364,6 +365,7 @@ public sealed class NdjsonImportHttpTests : IClassFixture<NdjsonImportHttpTests.
                     new() { Key = "unpinned-key", Scope = "server" }
                 ]
             };
+            configure?.Invoke(options);
             File.WriteAllText(_schema, JsonSerializer.Serialize(new Dictionary<string, TelemetryEngineOptions> { ["TelemetryEngine"] = options }));
             _previous = Environment.GetEnvironmentVariable("TelemetryEngine__SchemaFile");
             Environment.SetEnvironmentVariable("TelemetryEngine__SchemaFile", _schema);

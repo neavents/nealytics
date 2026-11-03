@@ -58,6 +58,9 @@ arbitrary native-client overrides are not exposed by E1. Configuration changes r
 ## Message contract
 
 The value is one UTF-8 telemetry JSON object. Kafka keys and headers do not affect routing.
+An optional startup `Kafka:SourceMapping` accepts an external JSON envelope through
+[declarative source mapping](source-mapping.md); the policy, size, delivery and offset rules below
+still apply after translation. Without a mapping the canonical contract below is unchanged.
 An explicit nonzero eventId and UTC timestamp ending in Z are required; the storage calendar is
 1900–2299. Event types, identities, sizes and logical schema rules follow existing server
 injection policy. Unknown dimension/measure names follow existing sanitization.

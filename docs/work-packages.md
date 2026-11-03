@@ -176,3 +176,12 @@ jobs, additional formats and other connectors remain separate packages.
 E2 is now functionally qualified; see the [evidence ledger](packages/e2-ndjson-verification.md)
 and [operator guide](ndjson-import.md). E1 Kafka and E2 file import are the delivered integration
 baselines. No next connector, general job service or hosted platform is selected by this milestone.
+
+## E3: declarative source mapping
+
+The owner's continuation after the integration-gap review selects [source mapping](packages/e3-source-mapping.md)
+as the next bounded delivery. Kafka and project-pinned NDJSON share compiled nested-object field
+bindings, string defaults and custom scalar conversion, while preserving policy checks and source
+receipts. Implementation and qualification are in progress on `feat/integrations-e3-source-mapping`.
+Custom time formats, scripts, durable jobs, storage sources, sinks and connector expansion remain
+separate packages. See the [configuration contract](source-mapping.md).

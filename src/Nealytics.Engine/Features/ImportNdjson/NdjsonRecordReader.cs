@@ -3,12 +3,14 @@ namespace Nealytics.Engine.Features.ImportNdjson;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.IO;
 using System.IO.Pipelines;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Nealytics.Engine.Infrastructure.Serialization;
+using Nealytics.Engine.Features.SourceMapping;
 
 internal sealed record NdjsonRecord(GlobalTelemetryPayload? Payload, long WireBytes, string? Error);
 
@@ -16,7 +18,7 @@ internal static class NdjsonRecordReader
 {
     internal static async IAsyncEnumerable<NdjsonRecord> ReadAsync(
         PipeReader reader, int lineLimit, [EnumeratorCancellation] CancellationToken cancellationToken,
-        ArrayPool<byte>? bufferPool = null)
+        ArrayPool<byte>? bufferPool = null, SourceRecordMapping? mapping = null)
     {
         ArrayPool<byte> pool = bufferPool ?? ArrayPool<byte>.Shared;
         byte[]? partial = null;
@@ -59,12 +61,13 @@ internal static class NdjsonRecordReader
                 NdjsonRecord record = null!;
                 if (partialLength == 0)
                 {
-                    record = Parse(line, bytes);
+                    record = Parse(line, bytes, mapping, lineLimit);
                 }
                 else
                 {
                     line.CopyTo(partial!.AsSpan(partialLength));
-                    record = Parse(new ReadOnlySequence<byte>(partial.AsMemory(0, partialLength + (int)line.Length)), bytes);
+                    record = Parse(new ReadOnlySequence<byte>(partial.AsMemory(0, partialLength + (int)line.Length)),
+                        bytes, mapping, lineLimit);
                     partialLength = 0;
                 }
                 reader.AdvanceTo(newline is null ? buffer.End : buffer.GetPosition(1, newline.Value));
@@ -91,12 +94,16 @@ internal static class NdjsonRecordReader
         }
     }
 
-    private static NdjsonRecord Parse(ReadOnlySequence<byte> line, long bytes)
+    private static NdjsonRecord Parse(ReadOnlySequence<byte> line, long bytes, SourceRecordMapping? mapping, int lineLimit)
     {
         try
         {
             using JsonDocument document = JsonDocument.Parse(line);
             JsonElement root = document.RootElement;
+            if (mapping is not null)
+            {
+                return new(mapping.Read(root, lineLimit), bytes, null);
+            }
             if (root.ValueKind != JsonValueKind.Object)
             {
                 return new(null, 0, "invalid_record");
@@ -121,6 +128,10 @@ internal static class NdjsonRecordReader
         catch (JsonException)
         {
             return new(null, 0, "invalid_json");
+        }
+        catch (InvalidDataException)
+        {
+            return new(null, 0, "invalid_mapping");
         }
     }
 }

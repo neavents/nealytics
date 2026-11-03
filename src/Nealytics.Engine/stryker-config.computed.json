@@ -18,7 +18,7 @@
       "Features/GetNamedMetric/NamedMetricRequestFactory.cs",
       "Features/GetNamedMetric/GetNamedMetricEndpoint.cs",
       "Features/GetSavedReport/GetSavedReportEndpoint.cs",
-      "Program.cs{3281..3740}",
+      "Program.cs{3328..3787}",
       "Infrastructure/Configuration/TelemetryEngineOptions.cs{6549..6682}",
       "Features/GetSchema/SchemaResponse.cs{3766..3979}"
     ],

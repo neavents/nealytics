@@ -33,6 +33,7 @@ def main():
     parser.add_argument('--image', required=True)
     parser.add_argument('--architecture', choices=['amd64', 'arm64'], required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--mapped', action='store_true')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     architecture = run(['docker', 'image', 'inspect', '--format', '{{.Architecture}}', args.image])
@@ -90,6 +91,11 @@ def main():
             return False
 
     def event(value):
+        if args.mapped:
+            return json.dumps({'source': {'id': str(uuid.uuid4()),
+                'time': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+                'tenant': 't', 'tag': '日本語 é', 'amount': value}},
+                ensure_ascii=False, separators=(',', ':')).encode()
         return json.dumps({'eventId': str(uuid.uuid4()), 'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
                           'projectId': 'p', 'tenantId': 't', 'eventType': 'action',
                           'dimensions': {'tag': '日本語 é', 'unknown': 'drop'},
@@ -126,6 +132,15 @@ def main():
             'TelemetryEngine__IngestionExecutionPath': 'custom', 'TelemetryEngine__WalIoBackend': 'io_uring',
             'TelemetryEngine__ForceFlushIntervalSeconds': '1'
         }
+        if args.mapped:
+            prefix = 'TelemetryEngine__NdjsonSourceMappings__p__Fields__'
+            for target, source in {'eventId': 'id', 'timestamp': 'time', 'tenantId': 'tenant',
+                    'dimensions.tag': 'tag', 'measures.amount': 'amount'}.items():
+                settings[prefix + target + '__Path__0'] = 'source'
+                settings[prefix + target + '__Path__1'] = source
+            for target, value in {'projectId': 'p', 'eventType': 'action',
+                    'dimensions.unknown': 'drop', 'measures.unknown': '999'}.items():
+                settings[prefix + target + '__Default'] = value
         options = ['--memory', '512m', '--cpus', '2', '--security-opt', 'seccomp=unconfined', '--publish', '127.0.0.1::5000']
         for key, value in settings.items():
             options.extend(['--env', key + '=' + value])
@@ -135,6 +150,11 @@ def main():
         assert request('POST', route, b'', key='public-key')[0] == 403
         assert request('POST', route, b'', content_type='application/json')[0] == 415
         assert request('POST', route, b'') == (202, {'acceptedRecords': 0, 'nextByteOffset': 0, 'nextLine': 1, 'complete': True})
+        if args.mapped:
+            invalid = event(100).replace(b'"tenant":"t"', b'"tenant":"\\ud800"')
+            status, receipt = request('POST', route, invalid, chunked=True)
+            assert status == 400 and receipt == {'acceptedRecords': 0, 'nextByteOffset': 0,
+                'error': 'invalid_mapping', 'nextLine': 1, 'complete': False}, receipt
         prefix = event(2) + b'\r\n' + event(4) + b'\n'
         status, receipt = request('POST', route, prefix + b'{\n' + event(100), chunked=True)
         assert status == 400, (status, receipt)
@@ -165,7 +185,7 @@ def main():
                    for line in logs.splitlines() if line.startswith('{'))
         (args.output / 'summary.json').write_text(json.dumps({
             'source': run(['git', 'rev-parse', 'HEAD']), 'image': args.image,
-            'architecture': architecture, 'hostArchitecture': host,
+            'architecture': architecture, 'hostArchitecture': host, 'sourceMapping': args.mapped,
             'checks': ['custom-io_uring', 'authentication', 'streamed-utf8-prefix-receipt', 'pinned-project-schema',
                        'sanitization', 'exact-record-limit', 'final-line', 'line-body-limits', 'compression', 'restart-visibility'],
             'result': 'passed', 'measurements': 'disabled'
