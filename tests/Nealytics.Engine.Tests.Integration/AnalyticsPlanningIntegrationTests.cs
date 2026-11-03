@@ -127,7 +127,30 @@ public sealed class AnalyticsPlanningIntegrationTests : IAsyncLifetime, IClassFi
         else
         {
             Assert.Empty(automatic.RootElement.GetProperty("fields").EnumerateArray());
-            Assert.NotEmpty(automatic.RootElement.GetProperty("rows").EnumerateArray());
+            var rows = automatic.RootElement.GetProperty("rows").EnumerateArray().ToArray();
+            Assert.NotEmpty(rows);
+            string[] groups = name == "nullable" ? [Nullable] : name == "computed" ? ["normalized"] : [Tag, "event_type"];
+            foreach (var row in rows)
+            {
+                Assert.Equal(groups, row.GetProperty("groups").EnumerateArray().Select(group => group.GetProperty("name").GetString()));
+                foreach (var group in row.GetProperty("groups").EnumerateArray())
+                {
+                    string? value = group.GetProperty("value").GetString();
+                    Assert.Contains(value, group.GetProperty("name").GetString() == "event_type"
+                        ? new[] { "action", "other" } : name == "nullable" ? new[] { null, "" } : new[] { "x", "y" });
+                }
+                string[] fields = ["events", "actions", "sum", "avg", "min", "max", "count", "ratio"];
+                Assert.Equal(fields, row.GetProperty("fields").EnumerateArray().Select(field => field.GetProperty("name").GetString()));
+                Assert.Equal(fields, row.GetProperty("fields").EnumerateArray().Select(field => field.GetProperty("metric").GetString()));
+                if (shape == "timeseries")
+                {
+                    DateTime bucket = row.GetProperty("bucket").GetDateTime();
+                    Assert.Equal(DateTimeKind.Utc, bucket.Kind);
+                    Assert.Equal(0, bucket.Ticks % (name == "daily" ? TimeSpan.TicksPerDay : TimeSpan.TicksPerHour));
+                }
+            }
+            Assert.Equal(8, rows.Sum(row => int.Parse(row.GetProperty("fields")[0].GetProperty("value").GetString()!)));
+            Assert.Equal(110, rows.Sum(row => double.Parse(row.GetProperty("fields")[2].GetProperty("value").GetString()!, System.Globalization.CultureInfo.InvariantCulture)));
         }
     }
 
