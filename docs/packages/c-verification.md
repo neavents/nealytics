@@ -1,7 +1,7 @@
 # Category C qualification ledger
 
 Date: 2026-11-03. Selected scope: [C completion contract](c-completion-plan.md).
-C4–C7 scoped mutation gates have passed. C8 final mutation qualification is still running;
+C4–C7 and C8 managed mutation gates have passed. C8 storage mutation qualification is still running;
 this record is updated with final results before category integration.
 
 ## Implemented contracts
@@ -79,6 +79,7 @@ No passing run has surviving or uncovered executable mutants.
 | C6 storage / `d549675` | 35 | 0 | 11 | 275 | 100% |
 | C7 managed / `23166e3` | 244 | 6 | 235 | 991 | 100% |
 | C7 storage / `c61a3f3` | 5 | 0 | 5 | 300 | 100% |
+| C8 managed / `747b348` | 478 | 0 | 50 | 664 | 100% |
 
 C6 timeouts remove cycle/depth protection and cause nontermination. C7 timeouts mutate batch
 loop bounds/progress or remove failure propagation, causing nontermination in the durable
