@@ -84,7 +84,7 @@ public static class NamedMetricRequestFactory
             conditions.AddRange(parsed.Filters);
             combined = conditions;
         }
-        if (additionalFilters is not null && additionalFilters.Count > 0)
+        if (additionalFilters is not null && additionalFilters.Count != 0)
         {
             List<QueryFilter> extended = new(combined.Count + additionalFilters.Count);
             extended.AddRange(combined);
