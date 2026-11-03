@@ -31,3 +31,7 @@ Acceptance: invalid/forward/cyclic/depth/size declarations, unit inference and e
 unit validation; exact rational/rounding/zero/null/overflow cases; immutable metadata and generated
 JSON; primitive regression SQL; deduplicated one-query scalar/report reference results on real
 ClickHouse; scoped coverage/mutation plus milestone suites and published executable smoke.
+
+Qualification: the selected contract is implemented and its scoped Complete-level mutation gate
+passes. See the source-specific [category qualification ledger](c-verification.md) and
+[operator guide](../analytics-customization.md) for evidence, deployment preconditions and limits.

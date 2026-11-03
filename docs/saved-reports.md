@@ -1,4 +1,4 @@
-# Saved scalar reports
+# Saved reports
 
 Combine up to 16 [named metrics](named-metrics.md) into one ordered response. Reports activate
 at restart through the existing self-hosted executable. They use one parameterized aggregate
@@ -54,8 +54,9 @@ curl --get "$NEALYTICS_URL/api/v1/analytics/reports/overview" \
   --data-urlencode 'filter=country:GB'
 ```
 
-Accepted query parameters are `from`, `to`, `traffic`, repeated `filter`, and tenant-set narrowing
-via `tenant`. Other parameters return 400, including `segment`: callers cannot replace the
+Accepted query parameters are `from`, `to`, `traffic`, repeated `filter`, tenant-set narrowing
+via `tenant`, declared `param.<name>` values, `execution` and `accuracy`. Other parameters return
+400, including `segment`: callers cannot replace the
 configured segment. Unknown reports return 404. Invalid identity/input checks precede storage
 access. When both the report name and parameters are invalid, identity checks run first, then
 report lookup, then input validation.
@@ -102,8 +103,11 @@ without compiled metric references. An empty configuration publishes an empty co
 
 ## Boundaries and rollout
 
-Reports read raw events. They have no formulas, grouping, per-field segments, arbitrary SQL,
-caching, hybrid rollup planning, live editing, project-specific catalogs, or hosted service.
+Reports support typed formulas, fixed grouping/time series, declared parameters, computed
+dimensions and authenticated project catalogs. Compatible rollup/hybrid planning is explicitly
+opt-in; raw execution remains available. See [the customization guide](analytics-customization.md)
+for configuration, limits, accuracy, source-policy requirements and administrative explain.
+Per-field segments, arbitrary SQL, caching, live editing and hosted services remain outside scope.
 The fixed field bound caps query/response shape; the selected time range still determines the
 amount of event data read. One query is a structural property, not a measured speed claim.
 

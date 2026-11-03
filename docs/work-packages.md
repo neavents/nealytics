@@ -85,9 +85,14 @@ handoff in custom mode. Broad qualification is consolidated at implementation mi
 
 ## 3. How to split the later work
 
-The owner selected [C completion](packages/c-completion-plan.md) on 2026-11-03. C4 typed
-formulas are active on `feat/analytics-customization-c4-formulas`; see the
-[package brief](packages/c4-formulas.md). C5–C8 follow sequentially after their prerequisites.
+The owner selected [C completion](packages/c-completion-plan.md) on 2026-11-03. C4–C8 are
+implemented on separate step branches: [formulas](packages/c4-formulas.md),
+[report shapes/parameters](packages/c5-report-shapes.md),
+[computed dimensions](packages/c6-computed-dimensions.md),
+[project contexts](packages/c7-project-contexts.md) and
+[planning/accuracy](packages/c8-query-planning.md). C4–C7 mutation gates pass; C8 final
+qualification is closing. See the [category evidence](packages/c-verification.md) and
+[operator guide](analytics-customization.md).
 
 C1 is functionally qualified on `feat/analytics-customization-c1-named-metrics`; see the
 [named metrics brief](packages/c1-named-metrics.md) and
@@ -100,9 +105,11 @@ C2 is functionally qualified on `feat/analytics-customization-c2-event-segments`
 [verification evidence](packages/c2-verification.md). It adds one bounded AND selection
 to named metrics without changing ingestion or introducing user/session cohort semantics.
 
-C remains partially implemented: named metrics, event segments and saved scalar reports are
-complete bounded slices. Formulas, grouped reports, transforms, project overrides and hybrid
-planning remain separate work.
+The selected C implementation includes named metrics/formulas, event segments, scalar/grouped/
+time-series reports, typed parameters, deterministic read-time transforms, logical project
+schemas and opt-in hybrid planning. Remaining mutation qualification precedes final category
+integration. Broader scripts, historical cohorts, external enrichment, automatic rollups,
+result caching and live definition deployment are deferred in the completion contract.
 New D/E packages have not started, and hosted-platform work remains outside current scope.
 
 C3 is functionally qualified on `feat/analytics-customization-c3-saved-reports`; see the
