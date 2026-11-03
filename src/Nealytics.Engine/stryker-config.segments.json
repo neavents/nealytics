@@ -4,7 +4,7 @@
     "test-projects": [
       "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
     ],
-    "test-case-filter": "FullyQualifiedName~NamedMetric|FullyQualifiedName~EventSegment|FullyQualifiedName~SavedReport",
+    "test-case-filter": "FullyQualifiedName~NamedMetric|FullyQualifiedName~EventSegment|FullyQualifiedName~SavedReport|FullyQualifiedName~ComputedDimension",
     "mutate": [
       "Infrastructure/Configuration/NamedMetricRegistry.cs",
       "Features/GetNamedMetric/GetNamedMetricEndpoint.cs",
