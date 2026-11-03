@@ -451,3 +451,23 @@ retry or quarantine policy. Failure diagnostics expose a fixed stage and source 
 upstream exceptions are not attached. Topic/group security, broker retention and manual source
 repair remain explicit operator choices. Native redist and managed licenses are embedded in the
 single-file artifact and retained verbatim in the repository's licenses directory.
+
+## E2 bounded NDJSON framing and receipts
+
+Complete lines parse directly from buffered input. Incomplete lines transfer to one bounded,
+lazily rented byte buffer while their pipe fragments are consumed. Retaining incomplete segments
+until a delimiter arrives can deadlock if a producer's pause threshold is below the permitted line
+length. Pooled ownership is returned with clearing even if reading/completion fails or the
+consumer exits early. Oversized input releases its pipe buffer before yielding the rejection.
+
+The importer applies the pinned project's gate/sanitizers, then shares WAL normalization,
+persistence and handoff. A caller token governs pre-admission and further reads; application
+shutdown governs admitted persistence/handoff on both execution paths. Accepted-prefix offsets
+count decoded UTF-8 bytes and line endings only after completed durable handoff. They are request
+receipts, not durable job/checkpoint identities. Missing receipts require reconciliation rather
+than automatic chunk retries or an exactly-once assumption.
+
+One explicit import concurrency policy composes with global write/byte admission without changing
+track/beacon endpoints. It has no queue. Import settings and route existence are frozen at startup;
+no physical schema, persistent job state or optional service framework is added. Native backend
+defaults and the owner's measurement stop remain unchanged.

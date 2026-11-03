@@ -195,4 +195,9 @@ public sealed class TelemetryEngineOptions
     public List<SavedReportOptions> SavedReports { get; set; } = [];
     public int MaxSavedReports { get; set; } = 128;
     public KafkaConnectorOptions? Kafka { get; set; }
+
+    public bool EnableNdjsonImport { get; set; }
+    public int ImportMaxLineBytes { get; set; } = 65_536;
+    public int ImportMaxRecords { get; set; } = 1_000;
+    public int ImportMaxConcurrency { get; set; } = 2;
 }

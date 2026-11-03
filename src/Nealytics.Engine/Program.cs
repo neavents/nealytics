@@ -33,6 +33,7 @@ using Nealytics.Engine.Features.GetRetention;
 using Nealytics.Engine.Features.GetSessionAnalytics;
 using Nealytics.Engine.Features.GetTopEvents;
 using Nealytics.Engine.Features.IngestTelemetry;
+using Nealytics.Engine.Features.ImportNdjson;
 using Nealytics.Engine.Features.UpsertTenantAttributes;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Query;
@@ -238,6 +239,19 @@ builder.Services.AddOptions<RateLimiterOptions>().Configure<IOptions<TelemetryEn
     });
 });
 
+if (engineOpts.EnableNdjsonImport)
+{
+    NdjsonImportLimits importLimits = NdjsonImportLimits.Create(engineOpts);
+    builder.Services.AddSingleton(importLimits);
+    builder.Services.AddScoped<NdjsonImporter>();
+    builder.Services.Configure<RateLimiterOptions>(options =>
+        options.AddConcurrencyLimiter("ndjson-import", limiter =>
+        {
+            limiter.PermitLimit = importLimits.Concurrency;
+            limiter.QueueLimit = 0;
+        }));
+}
+
 builder.Services.AddSingleton<ClickHouseConnectionFactory>();
 builder.Services.AddSingleton<WriteAheadLogger>();
 builder.Services.AddSingleton<TelemetryChannelBroker>();
@@ -382,6 +396,10 @@ app.UseAuthorization();
 
 app.MapTelemetryIngestion();
 app.MapBeaconIngestion();
+if (engineOpts.EnableNdjsonImport)
+{
+    app.MapNdjsonImport();
+}
 app.MapGetProjectTimeline();
 app.MapGetSessionAnalytics();
 app.MapGetEventTimeSeries();
