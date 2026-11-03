@@ -35,19 +35,14 @@ internal sealed class KafkaRecordParser
         {
             using JsonDocument document = JsonDocument.Parse(value);
             JsonElement root = document.RootElement;
-            if (root.ValueKind != JsonValueKind.Object
-                || !root.TryGetProperty("eventId", out JsonElement identity)
-                || identity.ValueKind != JsonValueKind.String
-                || !identity.TryGetGuid(out Guid eventId) || eventId == Guid.Empty
-                || !root.TryGetProperty("timestamp", out JsonElement time)
-                || time.ValueKind != JsonValueKind.String
-                || !time.GetString()!.EndsWith('Z')
-                || !time.TryGetDateTime(out DateTime timestamp)
-                || timestamp.Year is < 1900 or > 2299)
+            if (_settings.SourceMapping is not null)
             {
-                throw new InvalidDataException("Kafka record requires an explicit nonzero eventId and UTC timestamp in the storage calendar.");
+                payload = _settings.SourceMapping.Read(root, _settings.MaxMessageBytes);
             }
-            payload = root.Deserialize(TelemetryRequestJson.Payload)!;
+            else
+            {
+                payload = ParseCanonical(root);
+            }
         }
         catch (JsonException)
         {
@@ -61,5 +56,22 @@ internal sealed class KafkaRecordParser
         _dimensions.Sanitize(payload);
         _measures.Sanitize(payload);
         return payload;
+    }
+
+    private static GlobalTelemetryPayload ParseCanonical(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("eventId", out JsonElement identity)
+            || identity.ValueKind != JsonValueKind.String
+            || !identity.TryGetGuid(out Guid eventId) || eventId == Guid.Empty
+            || !root.TryGetProperty("timestamp", out JsonElement time)
+            || time.ValueKind != JsonValueKind.String
+            || !time.GetString()!.EndsWith('Z')
+            || !time.TryGetDateTime(out DateTime timestamp)
+            || timestamp.Year is < 1900 or > 2299)
+        {
+            throw new InvalidDataException("Kafka record requires an explicit nonzero eventId and UTC timestamp in the storage calendar.");
+        }
+        return root.Deserialize(TelemetryRequestJson.Payload)!;
     }
 }

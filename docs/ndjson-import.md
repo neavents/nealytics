@@ -36,6 +36,11 @@ curl -i http://localhost:5000/api/v1/telemetry/import/ndjson \
   --data-binary @events.ndjson
 ```
 
+An optional project-pinned [source mapping](source-mapping.md) can translate each source object
+before normal validation. Receipts always count the original decoded source bytes, and an
+incompatible mapped object returns `invalid_mapping`. Without a mapping the canonical contract
+below is unchanged.
+
 Send raw UTF-8 NDJSON, not multipart/form-data. Content-Type must be application/x-ndjson;
 an optional charset must be UTF-8. Each line contains one telemetry object with an explicit
 nonzero eventId, explicit UTC-Z timestamp in the 1900–2299 calendar, matching projectId, tenantId

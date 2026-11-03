@@ -3,6 +3,7 @@ namespace Nealytics.Engine.Infrastructure.Configuration;
 public sealed class KafkaConnectorOptions
 {
     public bool Enabled { get; set; }
+    public SourceMappingOptions? SourceMapping { get; set; }
     public string BootstrapServers { get; set; } = string.Empty;
     public string Topic { get; set; } = string.Empty;
     public string GroupId { get; set; } = string.Empty;

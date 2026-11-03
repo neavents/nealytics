@@ -1,0 +1,49 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~SourceMapping|FullyQualifiedName~SourceRecordMapping|FullyQualifiedName~Kafka|FullyQualifiedName~Ndjson",
+    "mutation-level": "Complete",
+    "concurrency": 4,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    },
+    "mutate": [
+      "Features/SourceMapping/*.cs",
+      "Features/KafkaIngestion/KafkaRecordParser.cs",
+      "Infrastructure/Configuration/SourceMappingOptions.cs",
+      "Features/ImportNdjson/NdjsonImporter.cs{264..311}",
+      "Features/ImportNdjson/NdjsonImporter.cs{704..758}",
+      "Features/ImportNdjson/NdjsonImporter.cs{878..1022}",
+      "Features/ImportNdjson/NdjsonImporter.cs{1204..1234}",
+      "Features/ImportNdjson/NdjsonImporter.cs{1491..1682}",
+      "Features/ImportNdjson/NdjsonRecordReader.cs{121..138}",
+      "Features/ImportNdjson/NdjsonRecordReader.cs{335..382}",
+      "Features/ImportNdjson/NdjsonRecordReader.cs{700..781}",
+      "Features/ImportNdjson/NdjsonRecordReader.cs{2547..2616}",
+      "Features/ImportNdjson/NdjsonRecordReader.cs{2738..2908}",
+      "Features/ImportNdjson/NdjsonRecordReader.cs{3562..3686}",
+      "Features/ImportNdjson/NdjsonRecordReader.cs{3835..3972}",
+      "Features/ImportNdjson/NdjsonRecordReader.cs{5119..5228}",
+      "Features/KafkaIngestion/KafkaConnectorSettings.cs{90..137}",
+      "Features/KafkaIngestion/KafkaConnectorSettings.cs{381..470}",
+      "Features/KafkaIngestion/KafkaConnectorSettings.cs{623..656}",
+      "Features/KafkaIngestion/KafkaConnectorSettings.cs{869..924}",
+      "Features/KafkaIngestion/KafkaConnectorSettings.cs{5203..5452}",
+      "Infrastructure/Configuration/KafkaConnectorOptions.cs{140..201}",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{7156..7249}",
+      "Program.cs{1496..1543}",
+      "Program.cs{10620..10709}"
+    ]
+  }
+}

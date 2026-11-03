@@ -34,6 +34,7 @@ def main():
     parser.add_argument('--image', required=True)
     parser.add_argument('--architecture', choices=['amd64', 'arm64'], required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--mapped', action='store_true')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     architecture = run(['docker', 'image', 'inspect', '--format', '{{.Architecture}}', args.image])
@@ -83,6 +84,9 @@ def main():
              '--bootstrap-server', 'broker:9092', '--topic', 'events'], input='\n'.join(values) + '\n')
 
     def event(sequence):
+        if args.mapped:
+            return json.dumps({'source': {'id': str(uuid.uuid4()),
+                'time': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'), 'tenant': 't'}})
         return json.dumps({'eventId': str(uuid.uuid4()), 'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
                            'projectId': 'p', 'tenantId': 't', 'eventType': 'action', 'seq': sequence})
 
@@ -146,6 +150,13 @@ def main():
             'TelemetryEngine__WalIoBackend': 'io_uring',
             'TelemetryEngine__ForceFlushIntervalSeconds': '1'
         }
+        if args.mapped:
+            prefix = 'TelemetryEngine__Kafka__SourceMapping__Fields__'
+            for target, source in {'eventId': 'id', 'timestamp': 'time', 'tenantId': 'tenant'}.items():
+                settings[prefix + target + '__Path__0'] = 'source'
+                settings[prefix + target + '__Path__1'] = source
+            settings[prefix + 'projectId__Default'] = 'p'
+            settings[prefix + 'eventType__Default'] = 'action'
         options = ['--memory', '512m', '--cpus', '2', '--security-opt', 'seccomp=unconfined', '--publish', '127.0.0.1::5000']
         for key, value in settings.items():
             options.extend(['--env', key + '=' + value])
@@ -169,7 +180,7 @@ def main():
         wait_for(lambda: request('/ready')[0] == 200, 'restart readiness')
         wait_for(lambda: offset() == 2, 'restart resumes from committed offset')
         wait_for(lambda: sql("SELECT count() FROM nealytics_core.global_events WHERE project_id='p'") == '2', 'stored restart count')
-        produce(['{invalid-secret-payload}', event(3)])
+        produce(['{"invalid-secret-payload":true}' if args.mapped else '{invalid-secret-payload}', event(3)])
         wait_for(lambda: run(['docker', 'inspect', '--format', '{{.State.Running}}', engine]) == 'false', 'poison input stops host')
         assert offset() == 2, 'Poison input advanced the group offset'
         assert sql("SELECT count() FROM nealytics_core.global_events WHERE project_id='p'") == '2'
@@ -180,7 +191,7 @@ def main():
         (args.output / 'application.log').write_text(logs)
         (args.output / 'summary.json').write_text(json.dumps({
             'source': run(['git', 'rev-parse', 'HEAD']), 'image': args.image, 'architecture': architecture,
-            'hostArchitecture': host_architecture, 'sha256': digest,
+            'hostArchitecture': host_architecture, 'sha256': digest, 'sourceMapping': args.mapped,
             'checks': ['native-single-file-loading', 'custom-io_uring', 'kafka-to-wal-to-clickhouse',
                        'named-metric-visibility', 'committed-offset-restart', 'poison-prefix-stop', 'payload-log-redaction'],
             'result': 'passed', 'measurements': 'disabled'

@@ -39,8 +39,8 @@
       "Features/GetSavedReport/SavedReportRequest.cs{322..374}",
       "Features/GetSavedReport/SavedReportRequest.cs{1871..1923}",
       "Infrastructure/Configuration/TelemetryEngineOptions.cs{6420..6479}",
-      "Program.cs{13772..13819}",
-      "Program.cs{16665..16691}",
+      "Program.cs{13908..13955}",
+      "Program.cs{16801..16827}",
       "Infrastructure/Configuration/TelemetryEngineOptions.cs{6480..6543}"
     ]
   }

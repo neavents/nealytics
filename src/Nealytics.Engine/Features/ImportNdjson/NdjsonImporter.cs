@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using Nealytics.Engine.Features.IngestTelemetry;
+using Nealytics.Engine.Features.SourceMapping;
 using Nealytics.Engine.Infrastructure.Security;
 
 internal sealed class NdjsonImporter
@@ -17,10 +18,12 @@ internal sealed class NdjsonImporter
     private readonly MeasureSanitizer _measures;
     private readonly NdjsonImportLimits _limits;
     private readonly IHostApplicationLifetime _lifetime;
+    private readonly NdjsonSourceMappings? _mappings;
 
     public NdjsonImporter(
         DurableIngestDispatcher dispatcher, IngestGate gate, DimensionSanitizer dimensions,
-        MeasureSanitizer measures, NdjsonImportLimits limits, IHostApplicationLifetime lifetime)
+        MeasureSanitizer measures, NdjsonImportLimits limits, IHostApplicationLifetime lifetime,
+        NdjsonSourceMappings? mappings = null)
     {
         _dispatcher = dispatcher;
         _gate = gate;
@@ -28,6 +31,7 @@ internal sealed class NdjsonImporter
         _measures = measures;
         _limits = limits;
         _lifetime = lifetime;
+        _mappings = mappings;
     }
 
     internal async Task<NdjsonImportResponse> IngestAsync(
@@ -37,7 +41,8 @@ internal sealed class NdjsonImporter
         long offset = 0;
         try
         {
-            await foreach (NdjsonRecord record in NdjsonRecordReader.ReadAsync(reader, _limits.LineBytes, cancellationToken))
+            await foreach (NdjsonRecord record in NdjsonRecordReader.ReadAsync(reader, _limits.LineBytes, cancellationToken,
+                mapping: _mappings?.Find(policy.PinnedProject!)))
             {
                 if (accepted == _limits.Records)
                 {

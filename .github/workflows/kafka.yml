@@ -35,6 +35,12 @@ jobs:
       - name: NDJSON streaming, receipts, schema and restart checks
         run: python3 scripts/qualify-ndjson.py --image nealytics-kafka-qualification:local --architecture '${{ matrix.architecture }}' --output 'artifacts/ndjson/${{ matrix.architecture }}'
 
+      - name: Mapped Kafka source, offsets, storage and restart checks
+        run: python3 scripts/qualify-kafka.py --mapped --image nealytics-kafka-qualification:local --architecture '${{ matrix.architecture }}' --output 'artifacts/mapped-kafka/${{ matrix.architecture }}'
+
+      - name: Mapped NDJSON source, receipts, schema and restart checks
+        run: python3 scripts/qualify-ndjson.py --mapped --image nealytics-kafka-qualification:local --architecture '${{ matrix.architecture }}' --output 'artifacts/mapped-ndjson/${{ matrix.architecture }}'
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
@@ -43,3 +49,5 @@ jobs:
           path: |
             artifacts/kafka/${{ matrix.architecture }}
             artifacts/ndjson/${{ matrix.architecture }}
+            artifacts/mapped-kafka/${{ matrix.architecture }}
+            artifacts/mapped-ndjson/${{ matrix.architecture }}

@@ -1,5 +1,14 @@
 # Implementation evidence
 
+E3 declarative source mapping is implemented and functionally qualified. Kafka and pinned-project
+NDJSON share bounded nested-field bindings, defaults and scalar conversion, followed by existing
+authorization, schema validation and durable delivery. The milestone has 3,210 passing unit cases,
+305 passing integration cases, 191/191 changed executable lines, 150/150 branch outcomes and
+232/232 killed executable mutants. Published actual Linux x64/ARM64 checks pass with io_uring/custom
+for canonical and mapped inputs. See the [E3 evidence ledger](packages/e3-source-mapping-verification.md)
+and [configuration guide](source-mapping.md). Durable jobs, further sources/formats, sinks, expanded
+Kafka support and hosted F remain separate packages. Benchmarks remain stopped; main is untouched.
+
 E2 NDJSON import is implemented and functionally qualified. It adds an optional streamed,
 project-pinned file route with durable accepted-prefix receipts and bounded pooled framing.
 The milestone has 3,111 passing unit and 301 passing integration cases, 202/202 changed executable
@@ -15,7 +24,7 @@ replay semantics. The milestone has 2,988 passing unit and 299 passing integrati
 226/226 changed executable lines, 124/124 branch outcomes and 179/179 killed executable mutants.
 Published actual Linux x64/ARM64 checks pass with io_uring/custom ingestion. See the
 [E1 evidence ledger](packages/e1-kafka-verification.md) and [operator guide](kafka-connector.md).
-Adapters beyond E2 remain unselected/deferred; D and hosted F work have not started. Benchmarks
+Adapters beyond the delivered E1–E3 scopes remain unselected/deferred; D and hosted F work have not started. Benchmarks
 remain stopped and main remains untouched.
 
 Category C's selected C1–C8 contract is implemented and functionally qualified. All C4–C8

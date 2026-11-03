@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Nealytics.Engine.Features.KafkaIngestion;
+using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Serialization;
 using Octonica.ClickHouseClient;
 
@@ -61,25 +62,27 @@ public sealed class KafkaConnectorIntegrationTests : IAsyncLifetime
     }
 
     [Theory]
-    [InlineData("managed")]
-    [InlineData("custom")]
-    public async Task RealKafkaOffsetsSurviveRestartAndPoisonInputCannotAdvanceThePrefix(string path)
+    [InlineData("managed", false)]
+    [InlineData("custom", false)]
+    [InlineData("managed", true)]
+    [InlineData("custom", true)]
+    public async Task RealKafkaOffsetsSurviveRestartAndPoisonInputCannotAdvanceThePrefix(string path, bool mapped)
     {
-        string group = Group + path;
-        string project = Project + path;
+        string group = Group + path + mapped;
+        string project = Project + path + mapped;
         using var producer = new ProducerBuilder<Null, byte[]>(new ProducerConfig { BootstrapServers = Servers }).Build();
-        var first = await producer.ProduceAsync(new TopicPartition(Topic, 0), new() { Value = Event(project, 1) });
-        await using (var host = new Factory(Servers, Topic, group, project, path))
+        var first = await producer.ProduceAsync(new TopicPartition(Topic, 0), new() { Value = Event(project, 1, mapped) });
+        await using (var host = new Factory(Servers, Topic, group, project, path, mapped))
         {
             using var client = host.CreateClient();
             await WaitForOffset(group, 0, first.Offset + 1);
             await WaitForCount(project, 1);
             Assert.False(host.Services.GetServices<IHostedService>().OfType<KafkaConnector>().Single().ExecuteTask!.IsCompleted);
         }
-        var second = await producer.ProduceAsync(new TopicPartition(Topic, 1), new() { Value = Event(project, 2) });
+        var second = await producer.ProduceAsync(new TopicPartition(Topic, 1), new() { Value = Event(project, 2, mapped) });
         var poison = await producer.ProduceAsync(new TopicPartition(Topic, 1), new() { Value = Encoding.UTF8.GetBytes("{invalid}") });
-        await producer.ProduceAsync(new TopicPartition(Topic, 1), new() { Value = Event(project, 3) });
-        await using (var restarted = new Factory(Servers, Topic, group, project, path))
+        await producer.ProduceAsync(new TopicPartition(Topic, 1), new() { Value = Event(project, 3, mapped) });
+        await using (var restarted = new Factory(Servers, Topic, group, project, path, mapped))
         {
             using var client = restarted.CreateClient();
             var connector = restarted.Services.GetServices<IHostedService>().OfType<KafkaConnector>().Single();
@@ -94,7 +97,10 @@ public sealed class KafkaConnectorIntegrationTests : IAsyncLifetime
         Assert.Equal(2, await Count(project));
     }
 
-    private byte[] Event(string project, int sequence) => JsonSerializer.SerializeToUtf8Bytes(new GlobalTelemetryPayload
+    private byte[] Event(string project, int sequence, bool mapped) => mapped ? JsonSerializer.SerializeToUtf8Bytes(new
+    {
+        source = new { id = Guid.NewGuid(), time = DateTime.UtcNow, tenant = "t" }
+    }) : JsonSerializer.SerializeToUtf8Bytes(new GlobalTelemetryPayload
     {
         EventId = Guid.NewGuid(), ProjectId = project, TenantId = "t", EventType = "action",
         Timestamp = DateTime.UtcNow, Seq = (uint)sequence
@@ -144,7 +150,7 @@ public sealed class KafkaConnectorIntegrationTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         await _broker.DisposeAsync();
-        await ClickHouseTestSupport.DeleteProjectsAsync(Project + "managed", Project + "custom");
+        await ClickHouseTestSupport.DeleteProjectsAsync(Project + "managedFalse", Project + "customFalse", Project + "managedTrue", Project + "customTrue");
     }
 
     private sealed class Factory : TestWebApplicationFactory
@@ -152,7 +158,7 @@ public sealed class KafkaConnectorIntegrationTests : IAsyncLifetime
         private readonly string _schema = Path.Combine(Path.GetTempPath(), "kafka-schema-" + Guid.NewGuid().ToString("N") + ".json");
         private readonly string? _previousSchema;
         private readonly string _wal = Path.Combine(Path.GetTempPath(), "kafka-wal-" + Guid.NewGuid().ToString("N"));
-        public Factory(string servers, string topic, string group, string project, string path)
+        public Factory(string servers, string topic, string group, string project, string path, bool mapped)
         {
             _previousSchema = Environment.GetEnvironmentVariable("TelemetryEngine__SchemaFile");
             File.WriteAllText(_schema, JsonSerializer.Serialize(new
@@ -162,7 +168,18 @@ public sealed class KafkaConnectorIntegrationTests : IAsyncLifetime
                     IngestionExecutionPath = path,
                     IngestionKeys = new[] { new { Key = "integration-source-key", Scope = "server", ProjectId = project, EventTypes = "action" } },
                     Kafka = new { Enabled = true, BootstrapServers = servers, Topic = topic, GroupId = group,
-                        ProjectKey = "integration-source-key", SecurityProtocol = "plaintext", InitialOffset = "earliest" }
+                        ProjectKey = "integration-source-key", SecurityProtocol = "plaintext", InitialOffset = "earliest",
+                        SourceMapping = mapped ? new SourceMappingOptions
+                        {
+                            Fields = new()
+                            {
+                                ["eventId"] = new() { Path = ["source", "id"] },
+                                ["timestamp"] = new() { Path = ["source", "time"] },
+                                ["projectId"] = new() { Default = project },
+                                ["tenantId"] = new() { Path = ["source", "tenant"] },
+                                ["eventType"] = new() { Default = "action" }
+                            }
+                        } : null }
                 }
             }));
             Environment.SetEnvironmentVariable("TelemetryEngine__SchemaFile", _schema);

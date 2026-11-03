@@ -228,6 +228,14 @@ public sealed class IngestionCapacityTests : IAsyncDisposable
         }
         await processor.StartAsync(CancellationToken.None);
         await (replay ? target.AllReceived.Task : target.SixReceived.Task).WaitAsync(TimeSpan.FromSeconds(5));
+        if (replay)
+        {
+            using CancellationTokenSource recovery = new(TimeSpan.FromSeconds(5));
+            while (wal.RetainedWalBytes != 0)
+            {
+                await Task.Delay(1, recovery.Token);
+            }
+        }
         await processor.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(items.Select(item => item.EventId), target.Batches.SelectMany(batch => batch).Select(item => item.EventId));
         Assert.All(target.Batches, batch => Assert.InRange(batch.Sum(TelemetryPayloadMemory.Estimate), 1, options.DatabaseBatchByteCapacity));
