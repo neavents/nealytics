@@ -85,6 +85,10 @@ handoff in custom mode. Broad qualification is consolidated at implementation mi
 
 ## 3. How to split the later work
 
+The owner selected [C completion](packages/c-completion-plan.md) on 2026-11-03. C4 typed
+formulas are active on `feat/analytics-customization-c4-formulas`; see the
+[package brief](packages/c4-formulas.md). C5–C8 follow sequentially after their prerequisites.
+
 C1 is functionally qualified on `feat/analytics-customization-c1-named-metrics`; see the
 [named metrics brief](packages/c1-named-metrics.md) and
 [verification evidence](packages/c1-verification.md). The category branch includes the qualified

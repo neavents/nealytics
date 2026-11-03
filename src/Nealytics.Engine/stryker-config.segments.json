@@ -21,7 +21,14 @@
       "Infrastructure/Configuration/TelemetryEngineOptions.cs{6360..6483}",
       "Program.cs{3101..3368}",
       "Features/GetSchema/SchemaResponse.cs{3258..3456}",
-      "Infrastructure/Query/MetricAggregateSql.cs"
+      "Infrastructure/Query/MetricAggregateSql.cs",
+      "Infrastructure/Configuration/MetricExpression.cs",
+      "Infrastructure/Configuration/MetricFormulaCompiler.cs",
+      "Infrastructure/Query/FormulaNode.cs",
+      "Infrastructure/Query/FormulaNumber.cs",
+      "Infrastructure/Query/MetricProjection.cs",
+      "Infrastructure/Query/MetricProjectionSql.cs",
+      "Infrastructure/Query/FormulaUnit.cs"
     ],
     "mutation-level": "Complete",
     "concurrency": 1,

@@ -9,7 +9,8 @@
     "mutate": [
       "Features/GetNamedMetric/GetNamedMetricQuery.cs",
       "Features/GetSchema/GetSchemaEndpoint.cs{5326..5363}",
-      "Features/GetSchema/GetSchemaEndpoint.cs{5364..5419}"
+      "Features/GetSchema/GetSchemaEndpoint.cs{5364..5419}",
+      "Infrastructure/Query/MetricAggregateReader.cs"
     ],
     "mutation-level": "Complete",
     "concurrency": 1,

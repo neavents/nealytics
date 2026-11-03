@@ -5,6 +5,7 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Nealytics.Engine.Infrastructure.Query;
 
 public sealed class NamedMetricOptions
 {
@@ -14,6 +15,7 @@ public sealed class NamedMetricOptions
     public string Measure { get; set; } = string.Empty;
     public string EventType { get; set; } = string.Empty;
     public string Unit { get; set; } = string.Empty;
+    public MetricExpressionOptions? Expression { get; set; }
 }
 
 public sealed record NamedMetric(
@@ -25,7 +27,10 @@ public sealed record NamedMetric(
     string? Unit,
     string? UnitDimension)
 {
+    public MetricExpression? Expression { get; init; }
     internal bool WidenSum { get; init; }
+    internal FormulaNode? CompiledExpression { get; init; }
+    internal IReadOnlyList<NamedMetric> Dependencies { get; init; } = Array.Empty<NamedMetric>();
 }
 
 public sealed class NamedMetricRegistry
@@ -69,11 +74,30 @@ public sealed class NamedMetricRegistry
                 throw Invalid(index, "only version 1 is supported");
             }
             string? aggregation = declaration.Aggregation?.Trim().ToLowerInvariant();
-            if (aggregation is not ("count" or "sum" or "avg" or "min" or "max"))
+            if (aggregation is not ("count" or "sum" or "avg" or "min" or "max" or "formula"))
             {
-                throw Invalid(index, "aggregation must be count, sum, avg, min or max");
+                throw Invalid(index, "aggregation must be count, sum, avg, min, max or formula");
             }
             string? column = Normalize(declaration.Measure);
+            string? eventType = Normalize(declaration.EventType);
+            string? unit = Normalize(declaration.Unit);
+            if (eventType?.Length > 256 || unit?.Length > 256)
+            {
+                throw Invalid(index, "event type and unit must not exceed 256 characters");
+            }
+            if (aggregation == "formula")
+            {
+                if (declaration.Expression is null || column is not null || eventType is not null)
+                {
+                    throw Invalid(index, "formula requires an expression and cannot declare a measure or event type");
+                }
+                definitions.Add(new NamedMetric(name, 1, aggregation, null, null, unit, null));
+                continue;
+            }
+            if (declaration.Expression is not null)
+            {
+                throw Invalid(index, "an expression requires formula aggregation");
+            }
             Measure? quantity = column is null ? null : measures.Find(column);
             if (column is not null && quantity is null)
             {
@@ -87,12 +111,6 @@ public sealed class NamedMetricRegistry
             {
                 throw Invalid(index, "aggregation is not permitted by the measure");
             }
-            string? eventType = Normalize(declaration.EventType);
-            string? unit = Normalize(declaration.Unit);
-            if (eventType?.Length > 256 || unit?.Length > 256)
-            {
-                throw Invalid(index, "event type and unit must not exceed 256 characters");
-            }
             definitions.Add(new NamedMetric(name, 1, aggregation, column, eventType, unit,
                 aggregation == "count" ? null : quantity!.UnitDimension)
             {
@@ -100,6 +118,7 @@ public sealed class NamedMetricRegistry
                     (MeasureValueKind.Float32 or MeasureValueKind.Float64 or MeasureValueKind.Decimal)
             });
         }
+        definitions = new MetricFormulaCompiler(configured, definitions).Compile().ToList();
         Declared = Array.AsReadOnly(definitions.ToArray());
         _byName = definitions.ToFrozenDictionary(definition => definition.Name, StringComparer.Ordinal);
     }

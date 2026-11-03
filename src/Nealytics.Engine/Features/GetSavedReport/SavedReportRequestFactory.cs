@@ -54,13 +54,10 @@ public static class SavedReportRequestFactory
         {
             SavedReportField field = definition.Fields[index];
             NamedMetric metric = field.Definition;
-            if (metric.Measure is string measureName)
+            string? violation = MetricProjection.UnitViolation(metric, measures, selected.Filters);
+            if (violation is not null)
             {
-                string? violation = UnitSafety.Violation(measures.Find(measureName)!, metric.Aggregation, null, selected.Filters);
-                if (violation is not null)
-                {
-                    return new(null, 400, $"Field '{field.Name}': {violation}");
-                }
+                return new(null, 400, $"Field '{field.Name}': {violation}");
             }
         }
         QueryScope scope = new QueryScope

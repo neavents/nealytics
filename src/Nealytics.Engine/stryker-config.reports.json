@@ -15,7 +15,14 @@
       "Features/GetSchema/SchemaResponse.cs{3458..3653}",
       "Program.cs{3370..3523}",
       "Program.cs{9490..9540}",
-      "Program.cs{12165..12189}"
+      "Program.cs{12165..12189}",
+      "Infrastructure/Configuration/MetricExpression.cs",
+      "Infrastructure/Configuration/MetricFormulaCompiler.cs",
+      "Infrastructure/Query/FormulaNode.cs",
+      "Infrastructure/Query/FormulaNumber.cs",
+      "Infrastructure/Query/MetricProjection.cs",
+      "Infrastructure/Query/MetricProjectionSql.cs",
+      "Infrastructure/Query/FormulaUnit.cs"
     ],
     "mutation-level": "Complete",
     "concurrency": 1,

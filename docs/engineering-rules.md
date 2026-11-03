@@ -134,6 +134,7 @@ named feat/correctness-and-safety cannot also contain child refs beneath that sa
 | C1 named metrics | feat/analytics-customization-c1-named-metrics |
 | C2 event segments | feat/analytics-customization-c2-event-segments |
 | C3 saved reports | feat/analytics-customization-c3-saved-reports |
+| C4 typed formulas | feat/analytics-customization-c4-formulas |
 
 New C-F steps receive branches when their bounded package scope is defined. Do not invent an
 implementation sequence for those categories just to populate branch names.
