@@ -212,6 +212,26 @@ public sealed class AnalyticsPlanningIntegrationTests : IAsyncLifetime, IClassFi
     }
 
     [Fact]
+    public async Task FullySummarizedExecutionUsesTheSelectedStateTableWithoutReadingTheRawTable()
+    {
+        string temporary = "c8_source_" + _suffix;
+        await ClickHouseTestSupport.ExecuteAsync($"RENAME TABLE nealytics_core.global_events TO nealytics_core.{temporary}");
+        try
+        {
+            using var metric = await Read("metrics/events", "00:00:00.000", "03:00:00.000");
+            Assert.Equal("rollup", metric.RootElement.GetProperty("source").GetString());
+            Assert.Equal("8", metric.RootElement.GetProperty("value").GetString());
+            using var report = await Read("reports/scalar", "00:00:00.000", "03:00:00.000");
+            Assert.Equal("rollup", report.RootElement.GetProperty("source").GetString());
+            Assert.Equal("1069", report.RootElement.GetProperty("fields")[2].GetProperty("value").GetString());
+        }
+        finally
+        {
+            await ClickHouseTestSupport.ExecuteAsync($"RENAME TABLE nealytics_core.{temporary} TO nealytics_core.global_events");
+        }
+    }
+
+    [Fact]
     public async Task EmptySelectionsPreserveZeroCountsAndSumsAndNullOtherAggregates()
     {
         using var raw = await Read("reports/scalar", "00:00:00.001", "03:00:00.001", "raw", "&filter=event_type:absent");
