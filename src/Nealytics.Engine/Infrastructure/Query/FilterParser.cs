@@ -92,13 +92,15 @@ public static class FilterParser
             string number = entry[(operatorAt + token.Length)..];
             Measure? measure = measures.Find(measureName);
 
-            string measureColumn = measure?.Name ?? string.Empty;
-            if (measure is null && !columns.TryResolveNumeric(measureName, out measureColumn))
+            string? computed = null;
+            string? measureColumn = measure?.Name
+                ?? (columns.TryResolveNumeric(measureName, out computed) ? computed : null);
+            if (measureColumn is null)
             {
                 return Fail(Outcome.UnknownColumn, entry, measureName);
             }
 
-            if (number.Length == 0 || number.Length > maxValueLength
+            if (number.Length > maxValueLength
                 || !double.TryParse(number, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed)
                 || !double.IsFinite(parsed))
             {
