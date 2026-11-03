@@ -82,7 +82,13 @@ public sealed class AnalyticsPlanningIntegrationTests : IAsyncLifetime, IClassFi
         using var response = await _client.SendAsync(request);
         string body = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.OK, response.StatusCode + ": " + body);
-        return JsonDocument.Parse(body);
+        var document = JsonDocument.Parse(body);
+        Assert.Equal(path.Split('/')[^1], document.RootElement.GetProperty("name").GetString());
+        Assert.Equal(1, document.RootElement.GetProperty("version").GetInt32());
+        Assert.Equal(DateTime.Parse("2090-01-01T" + from + "Z").ToUniversalTime(), document.RootElement.GetProperty("from").GetDateTime());
+        Assert.Equal(DateTime.Parse("2090-01-01T" + to + "Z").ToUniversalTime(), document.RootElement.GetProperty("to").GetDateTime());
+        Assert.Equal("string", document.RootElement.GetProperty("numericEncoding").GetString());
+        return document;
     }
 
     private static string Values(JsonDocument document) =>
@@ -106,6 +112,23 @@ public sealed class AnalyticsPlanningIntegrationTests : IAsyncLifetime, IClassFi
         Assert.Equal("raw", raw.RootElement.GetProperty("source").GetString());
         Assert.Equal(Values(raw), Values(automatic));
         Assert.Equal("exact", automatic.RootElement.GetProperty("accuracy").GetString());
+        string shape = name is "hourly" or "daily" ? "timeseries" : name == "scalar" ? "scalar" : "table";
+        Assert.Equal(shape, raw.RootElement.GetProperty("shape").GetString());
+        Assert.Equal(shape, automatic.RootElement.GetProperty("shape").GetString());
+        if (name == "scalar")
+        {
+            Assert.Empty(automatic.RootElement.GetProperty("rows").EnumerateArray());
+            Assert.Equal(new[] { "events", "actions", "sum", "avg", "min", "max", "count", "ratio" },
+                automatic.RootElement.GetProperty("fields").EnumerateArray().Select(field => field.GetProperty("name").GetString()));
+            Assert.Equal(from.EndsWith(".000", StringComparison.Ordinal) ? "1069" : "110",
+                automatic.RootElement.GetProperty("fields")[2].GetProperty("value").GetString());
+            Assert.Equal("0.875", automatic.RootElement.GetProperty("fields")[7].GetProperty("value").GetString());
+        }
+        else
+        {
+            Assert.Empty(automatic.RootElement.GetProperty("fields").EnumerateArray());
+            Assert.NotEmpty(automatic.RootElement.GetProperty("rows").EnumerateArray());
+        }
     }
 
     [Theory]
