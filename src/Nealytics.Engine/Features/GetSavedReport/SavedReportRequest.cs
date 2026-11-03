@@ -6,7 +6,10 @@ using System.Text.Json.Serialization;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Query;
 
-public sealed record SavedReportRequest(SavedReport Definition, QueryScope Scope);
+public sealed record SavedReportRequest(SavedReport Definition, QueryScope Scope)
+{
+    public string Execution { get; init; } = "auto";
+}
 
 public readonly record struct SavedReportRequestResult(
     SavedReportRequest? Request, int StatusCode, string? Error);
@@ -46,4 +49,5 @@ public sealed class SavedReportResponse
     public string Shape { get; init; } = "scalar";
     public string NumericEncoding { get; init; } = "string";
     public string Source { get; init; } = "raw";
+    public string Accuracy { get; init; } = "exact";
 }

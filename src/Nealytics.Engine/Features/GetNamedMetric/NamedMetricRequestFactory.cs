@@ -25,7 +25,9 @@ public static class NamedMetricRequestFactory
         EventSegmentRegistry segments,
         string? segment,
         IReadOnlyList<QueryFilter>? additionalFilters = null,
-        IReadOnlyList<string>? groupBy = null)
+        IReadOnlyList<string>? groupBy = null,
+        string? execution = null,
+        string? accuracy = null)
     {
         if (identity.Rejected)
         {
@@ -44,6 +46,11 @@ public static class NamedMetricRequestFactory
         if (definition is null)
         {
             return new(null, 404, "Unknown named metric.");
+        }
+        string? executionViolation = AnalyticsExecution.Violation(execution, accuracy, [definition]);
+        if (executionViolation is not null)
+        {
+            return new(null, 400, executionViolation);
         }
         EventSegment? selection = null;
         if (!string.IsNullOrEmpty(segment))
@@ -113,7 +120,11 @@ public static class NamedMetricRequestFactory
         {
             return new(null, 400, budget);
         }
-        return new(new NamedMetricRequest(definition, scope) { Segment = selection?.Name }, 200, null);
+        return new(new NamedMetricRequest(definition, scope)
+        {
+            Segment = selection?.Name,
+            Execution = string.IsNullOrEmpty(execution) ? "auto" : execution
+        }, 200, null);
     }
 
     private static bool TryTime(string? value, DateTime fallback, out DateTime result)

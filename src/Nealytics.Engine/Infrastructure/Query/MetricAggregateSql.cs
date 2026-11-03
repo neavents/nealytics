@@ -6,6 +6,8 @@ using Nealytics.Engine.Infrastructure.Configuration;
 
 internal static class MetricAggregateSql
 {
+    private static readonly string[] QuantileLevels = ["0.5", "0.75", "0.9", "0.95", "0.99"];
+
     internal static void Append(StringBuilder sql, NamedMetric definition, int? eventTypeIndex = null)
     {
         sql.Append("toString(");
@@ -30,6 +32,13 @@ internal static class MetricAggregateSql
         if (eventTypeIndex is not null)
         {
             function += "If";
+        }
+        int? quantileIndex = RollupRegistry.QuantileIndex(definition.Aggregation);
+        if (quantileIndex is not null)
+        {
+            string quantile = definition.Accuracy == "approximate" ? "quantileOrNull" : "quantileExactOrNull";
+            function = quantile + (eventTypeIndex is null ? "" : "If")
+                + "(" + QuantileLevels[quantileIndex.Value - 1] + ")";
         }
         if (definition.WidenSum)
         {

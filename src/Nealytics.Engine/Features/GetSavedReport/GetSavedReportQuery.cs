@@ -13,8 +13,13 @@ using Nealytics.Engine.Infrastructure.Storage;
 public sealed class GetSavedReportQuery
 {
     private readonly MetricAggregateReader _reader;
+    private readonly AnalyticsPlanner? _planner;
 
-    public GetSavedReportQuery(ClickHouseConnectionFactory connections) => _reader = new MetricAggregateReader(connections);
+    public GetSavedReportQuery(ClickHouseConnectionFactory connections, AnalyticsPlanner? planner = null)
+    {
+        _reader = new MetricAggregateReader(connections);
+        _planner = planner;
+    }
 
     internal static (string Sql, IReadOnlyList<KeyValuePair<string, object?>> Parameters) BuildQuery(SavedReportRequest request)
     {
@@ -31,9 +36,11 @@ public sealed class GetSavedReportQuery
 
     public async Task<SavedReportResponse> ExecuteAsync(SavedReportRequest request, CancellationToken cancellationToken)
     {
-        (string sql, IReadOnlyList<KeyValuePair<string, object?>> parameters) = BuildQuery(request);
         MetricProjection projection = new MetricProjection(request.Definition.Fields.Select(field => field.Definition));
         SavedReport definition = request.Definition;
+        AnalyticsPlan? plan = _planner?.Select(projection.Components, request.Scope, definition, request.Execution);
+        (string sql, IReadOnlyList<KeyValuePair<string, object?>> parameters) = plan?.Rollup is null
+            ? BuildQuery(request) : AnalyticsPlanSql.Build(plan, projection.Components, request.Scope, definition);
         IReadOnlyList<MetricAggregateRow> selected = await _reader.ReadRowsAsync(
             sql, parameters, projection.Components, definition.GroupBy.Count, definition.Interval is not null,
             definition.Limit, cancellationToken);
@@ -62,7 +69,9 @@ public sealed class GetSavedReportQuery
             Segment = definition.Segment,
             Shape = definition.Interval is not null ? "timeseries" : definition.IsGrouped ? "table" : "scalar",
             Fields = definition.IsGrouped ? Array.Empty<SavedReportValue>() : Values(definition, selected[0].Values),
-            Rows = Array.AsReadOnly(rows)
+            Rows = Array.AsReadOnly(rows),
+            Source = plan?.Source ?? "raw",
+            Accuracy = AnalyticsExecution.Accuracy(definition.Fields.Select(field => field.Definition))
         };
     }
 

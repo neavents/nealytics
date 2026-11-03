@@ -73,6 +73,7 @@ public sealed class GlobalTelemetryPayload
 [JsonSerializable(typeof(EventTimeSeriesResponse))]
 [JsonSerializable(typeof(NamedMetricResponse))]
 [JsonSerializable(typeof(SavedReportResponse))]
+[JsonSerializable(typeof(Nealytics.Engine.Features.GetAnalyticsPlan.AnalyticsPlanResponse))]
 [JsonSerializable(typeof(EventTimeSeriesPoint))]
 [JsonSerializable(typeof(List<EventTimeSeriesPoint>))]
 [JsonSerializable(typeof(ActiveUsersResponse))]

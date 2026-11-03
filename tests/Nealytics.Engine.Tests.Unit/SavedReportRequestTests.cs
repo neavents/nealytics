@@ -153,7 +153,7 @@ public sealed class SavedReportRequestTests
     [InlineData("")]
     public void OnlyTheDocumentedReportParametersAreAccepted(string parameter)
     {
-        Assert.Equal("Only from, to, traffic, filter and tenant are supported report parameters.",
+        Assert.Equal("Only from, to, traffic, filter, tenant, execution and accuracy are supported report parameters.",
             SavedReportRequestFactory.UnsupportedParameter(["from", parameter, "to"]));
     }
 

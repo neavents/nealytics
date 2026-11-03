@@ -24,7 +24,9 @@ public static class SavedReportRequestFactory
         MeasureRegistry measures,
         int defaultRangeHours,
         DateTime nowUtc,
-        IReadOnlyDictionary<string, string[]>? parameters = null)
+        IReadOnlyDictionary<string, string[]>? parameters = null,
+        string? execution = null,
+        string? accuracy = null)
     {
         if (identity.Rejected)
         {
@@ -44,6 +46,11 @@ public static class SavedReportRequestFactory
         {
             return new(null, 404, "Unknown saved report.");
         }
+        string? executionViolation = AnalyticsExecution.Violation(execution, accuracy, definition.Fields.Select(field => field.Definition));
+        if (executionViolation is not null)
+        {
+            return new(null, 400, executionViolation);
+        }
         ReportParameterResult bound = ReportParameterBinding.Bind(definition.Parameters, parameters);
         if (bound.Error is not null)
         {
@@ -51,7 +58,8 @@ public static class SavedReportRequestFactory
         }
         NamedMetricRequestResult parsed = NamedMetricRequestFactory.Create(
             identity, definition.Fields[0].Metric, from, to, traffic, filters,
-            metrics, columns, measures, defaultRangeHours, nowUtc, segments, definition.Segment, bound.Filters, definition.GroupBy);
+            metrics, columns, measures, defaultRangeHours, nowUtc, segments, definition.Segment, bound.Filters, definition.GroupBy,
+            execution, accuracy);
         if (parsed.Request is null)
         {
             return new(null, parsed.StatusCode, parsed.Error);
@@ -77,18 +85,18 @@ public static class SavedReportRequestFactory
             TrafficClass = selected.TrafficClass,
             Filters = selected.Filters
         };
-        return new(new SavedReportRequest(definition, scope), 200, null);
+        return new(new SavedReportRequest(definition, scope) { Execution = parsed.Request.Execution }, 200, null);
     }
 
     internal static string? UnsupportedParameter(IEnumerable<string> names, IReadOnlyList<ReportParameter>? parameters = null)
     {
         foreach (string name in names)
         {
-            if (name is not ("from" or "to" or "traffic" or "filter" or "tenant")
+            if (name is not ("from" or "to" or "traffic" or "filter" or "tenant" or "execution" or "accuracy")
                 && !(name.StartsWith("param.", StringComparison.Ordinal)
                     && parameters is not null && parameters.Any(parameter => parameter.Name == name[6..])))
             {
-                return "Only from, to, traffic, filter and tenant are supported report parameters.";
+                return "Only from, to, traffic, filter, tenant, execution and accuracy are supported report parameters.";
             }
         }
         return null;

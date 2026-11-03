@@ -111,7 +111,7 @@ public sealed class SavedReportHttpTests : IClassFixture<SavedReportHttpTests.Fa
             [new("scope", "reports"), new("project_id", "p"), new("tenant_id", "t")]);
         using var response = await _client.SendAsync(request);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal("\"Only from, to, traffic, filter and tenant are supported report parameters.\"", await response.Content.ReadAsStringAsync());
+        Assert.Equal("\"Only from, to, traffic, filter, tenant, execution and accuracy are supported report parameters.\"", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]
