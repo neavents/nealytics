@@ -1,8 +1,10 @@
 using System.Text;
+using System.Text.Json;
 using Nealytics.Engine.Features.GetSavedReport;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Security;
+using Nealytics.Engine.Infrastructure.Serialization;
 
 namespace Nealytics.Engine.Tests.Unit;
 
@@ -304,6 +306,7 @@ public sealed class SavedReportShapeTests
         Assert.StartsWith("SELECT " + bucket + "toString(country), toString(unit_key), toString(count()) FROM", query.Sql);
         Assert.Contains(interval is null ? " GROUP BY 1, 2 ORDER BY 1 ASC NULLS FIRST, 2 ASC NULLS FIRST LIMIT 2"
             : " GROUP BY 1, 2, 3 ORDER BY 1 ASC NULLS FIRST, 2 ASC NULLS FIRST, 3 ASC NULLS FIRST LIMIT 2", query.Sql);
+        Assert.Contains("SETTINGS enable_positional_arguments=1", query.Sql);
         Assert.Equal(interval is not null, query.Sql.Contains("enable_extended_results_for_datetime_functions=1"));
         Assert.Throws<InvalidOperationException>(() => ReportShapeSql.Bucket("bad"));
     }
@@ -320,5 +323,29 @@ public sealed class SavedReportShapeTests
         var sql = new StringBuilder();
         ReportShapeSql.AppendKeys(sql, SavedReportRegistryTests.Build(SavedReportRegistryTests.Options()).Find("overview")!);
         Assert.Equal("", sql.ToString());
+    }
+
+    [Fact]
+    public void RowJsonPreservesNullGroupValuesAndScalarDefaults()
+    {
+        var scalar = new SavedReportResponse();
+        Assert.Equal("scalar", scalar.Shape);
+        Assert.Empty(scalar.Rows);
+        var row = new SavedReportRow();
+        Assert.Null(row.Bucket);
+        Assert.Empty(row.Groups);
+        Assert.Empty(row.Fields);
+        var group = new SavedReportGroup();
+        Assert.Equal("", group.Name);
+        Assert.Null(group.Value);
+        var response = new SavedReportResponse
+        {
+            Shape = "table", Rows = [new() { Groups = [new() { Name = "country", Value = null }] }]
+        };
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(response, TelemetryAotContext.Default.SavedReportResponse));
+        Assert.Equal("table", document.RootElement.GetProperty("shape").GetString());
+        var serialized = document.RootElement.GetProperty("rows")[0].GetProperty("groups")[0];
+        Assert.Equal("country", serialized.GetProperty("name").GetString());
+        Assert.Equal(JsonValueKind.Null, serialized.GetProperty("value").ValueKind);
     }
 }

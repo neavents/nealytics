@@ -37,9 +37,10 @@ internal static class ReportShapeSql
         sql.Append(" ORDER BY ");
         AppendOrdinals(sql, keys, ordering: true);
         sql.Append(" LIMIT ").Append(definition.Limit.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        sql.Append(" SETTINGS enable_positional_arguments=1");
         if (definition.Interval is not null)
         {
-            sql.Append(" SETTINGS enable_extended_results_for_datetime_functions=1");
+            sql.Append(", enable_extended_results_for_datetime_functions=1");
         }
     }
 

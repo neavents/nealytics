@@ -122,7 +122,7 @@ public sealed class SavedReportRegistry
             bool grouped = groups.Count > 0 || interval is not null;
             int projected = new MetricProjection(fields.Select(field => field.Definition)).Components.Count;
             if (declaration.Limit < 1 || declaration.Limit > Math.Min(options.MaxQueryLimit, 10_000)
-                || grouped && (long)declaration.Limit * Math.Max(fields.Count, projected) > 16_384)
+                || grouped && declaration.Limit * Math.Max(fields.Count, projected) > 16_384)
             {
                 throw Invalid(index, "grouped report exceeds its row or 16384-cell limit");
             }
