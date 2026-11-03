@@ -53,11 +53,16 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
             Row(_project, "t", "action", "bot", "2090-01-01 00:00:01.000", "9", "u", "0", "9"),
             Row(_project, "t", "different", "normal", "2090-01-01 00:00:01.000", "10", "u", "0", "10"),
             Row(_project, "other", "action", "normal", "2090-01-01 00:00:01.000", "11", "u", "0", "11"),
-            Row(_project + "_other", "t", "action", "normal", "2090-01-01 00:00:01.000", "12", "u", "0", "12")
+            Row(_project + "_other", "t", "action", "normal", "2090-01-01 00:00:01.000", "12", "u", "0", "12"),
+            Row(_project, "t", "action", "normal", "2090-01-01 01:00:00.000", "20", "u", "0", "2"),
+            Row(_project, "t", "action", "normal", "2090-01-02 00:00:00.000", "30", "u", "0", "3")
         ];
         await ClickHouseTestSupport.ExecuteAsync("INSERT INTO nealytics_core.global_events"
             + $" (event_id,project_id,tenant_id,session_id,event_type,traffic_class,timestamp,{Amount},{Units},{Floating},{DecimalAmount}) VALUES "
             + string.Join(',', rows));
+        await ClickHouseTestSupport.ExecuteAsync("INSERT INTO nealytics_core.global_events"
+            + " (event_id,project_id,tenant_id,session_id,event_type,traffic_class,timestamp) VALUES"
+            + $" (generateUUIDv4(),'{_project}','t','s','group_null','normal','2090-01-01 00:00:03.000')");
         var options = new TelemetryEngineOptions
         {
             Dimensions = [new() { Name = Units }],
@@ -136,6 +141,42 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         {
             Name = "formula_report", Fields = new[] { "share", "scaled", "constant_value", "empty_ratio", "nullable_formula", "float_formula" }
                 .Select(name => new SavedReportFieldOptions { Name = name, Metric = name }).ToList()
+        });
+        List<SavedReportFieldOptions> ShapedFields() => new[] { "events", "sum_amount", "share" }
+            .Select(name => new SavedReportFieldOptions { Name = name, Metric = name }).ToList();
+        options.SavedReports.Add(new()
+        {
+            Name = "grouped_report", GroupBy = [Units, "event_type"], Fields = ShapedFields()
+        });
+        options.SavedReports.Add(new()
+        {
+            Name = "time_report", GroupBy = [Units], Interval = "hour", Segment = "selected", Fields = ShapedFields()
+        });
+        options.SavedReports.Add(new()
+        {
+            Name = "daily_report", Interval = "day", Segment = "selected", Fields = ShapedFields()
+        });
+        options.SavedReports.Add(new()
+        {
+            Name = "limited_report", GroupBy = [Units], Limit = 1, Fields = [new() { Name = "events", Metric = "events" }]
+        });
+        options.SavedReports.Add(new()
+        {
+            Name = "parameter_report", Fields = [new() { Name = "total", Metric = "sum_amount" }, new() { Name = "events", Metric = "events" }],
+            Parameters =
+            [
+                new() { Name = "unit", Column = Units, Default = "u" },
+                new() { Name = "minimum", Column = Amount, Type = "number", Comparison = "gte", Default = "0" },
+                new() { Name = "type", Column = "event_type", Required = true }
+            ]
+        });
+        options.SavedReports.Add(new()
+        {
+            Name = "calendar_report", Interval = "day", Fields = [new() { Name = "constant", Metric = "constant_value" }]
+        });
+        options.SavedReports.Add(new()
+        {
+            Name = "nullable_report", GroupBy = [Units], Fields = [new() { Name = "events", Metric = "all_events" }]
         });
         _factory = new Factory(options);
         _client = _factory.CreateClient();
@@ -345,6 +386,8 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var root = document.RootElement;
         Assert.Equal(name, root.GetProperty("name").GetString());
+        Assert.Equal("scalar", root.GetProperty("shape").GetString());
+        Assert.Empty(root.GetProperty("rows").EnumerateArray());
         Assert.Equal(1, root.GetProperty("version").GetInt32());
         Assert.Equal("raw", root.GetProperty("source").GetString());
         Assert.Equal("string", root.GetProperty("numericEncoding").GetString());
@@ -462,7 +505,7 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         using var response = await _client.SendAsync(request);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var reports = document.RootElement.GetProperty("savedReports");
-        Assert.Equal(6, reports.GetArrayLength());
+        Assert.Equal(13, reports.GetArrayLength());
         var report = reports.EnumerateArray().Single(item => item.GetProperty("name").GetString() == "selected_report");
         Assert.Equal(1, report.GetProperty("version").GetInt32());
         Assert.Equal("selected", report.GetProperty("segment").GetString());
@@ -505,6 +548,155 @@ public sealed class NamedMetricIntegrationTests : IAsyncLifetime
         using var selected = await GetAsync("share&segment=selected");
         using var selectedJson = JsonDocument.Parse(await selected.Content.ReadAsStringAsync());
         Assert.Equal("66.6666666666666666666666666666666667", selectedJson.RootElement.GetProperty("value").GetString());
+    }
+
+    [Fact]
+    public async Task DeclaredGroupingsPreserveIndependentMetricTypesAndUnitBoundaries()
+    {
+        using var response = await ReportAsync("grouped_report");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("table", document.RootElement.GetProperty("shape").GetString());
+        Assert.Empty(document.RootElement.GetProperty("fields").EnumerateArray());
+        var rows = document.RootElement.GetProperty("rows");
+        Assert.Equal(3, rows.GetArrayLength());
+        Assert.Equal(new[] { "u", "u", "v" }, rows.EnumerateArray().Select(row => row.GetProperty("groups")[0].GetProperty("value").GetString()));
+        Assert.Equal(new[] { "action", "different", "action" }, rows.EnumerateArray().Select(row => row.GetProperty("groups")[1].GetProperty("value").GetString()));
+        Assert.Equal(new[] { "3", "0", "1" }, rows.EnumerateArray().Select(row => row.GetProperty("fields")[0].GetProperty("value").GetString()));
+        Assert.Equal(new[] { "18446744073709551614", "0", "7" }, rows.EnumerateArray().Select(row => row.GetProperty("fields")[1].GetProperty("value").GetString()));
+        Assert.Equal(new[] { "100", "0", "100" }, rows.EnumerateArray().Select(row => row.GetProperty("fields")[2].GetProperty("value").GetString()));
+        Assert.Equal(Units, rows[0].GetProperty("groups")[0].GetProperty("name").GetString());
+        Assert.Equal("event_type", rows[0].GetProperty("groups")[1].GetProperty("name").GetString());
+        using var limited = await ReportAsync("limited_report");
+        using var limitedJson = JsonDocument.Parse(await limited.Content.ReadAsStringAsync());
+        Assert.Single(limitedJson.RootElement.GetProperty("rows").EnumerateArray());
+        Assert.Equal("u", limitedJson.RootElement.GetProperty("rows")[0].GetProperty("groups")[0].GetProperty("value").GetString());
+    }
+
+    [Theory]
+    [InlineData("time_report", 3, "2", "66.6666666666666666666666666666666667")]
+    [InlineData("daily_report", 2, "3", "75")]
+    public async Task TimeSeriesAggregateEachBucketBeforeFinalizingFormulas(string name, int expectedRows, string firstCount, string firstShare)
+    {
+        using var response = await ShapedAsync(name, "2090-01-01T00:00:00Z", "2090-01-03T00:00:00Z");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("timeseries", document.RootElement.GetProperty("shape").GetString());
+        var rows = document.RootElement.GetProperty("rows");
+        Assert.Equal(expectedRows, rows.GetArrayLength());
+        Assert.Equal(new DateTime(2090, 1, 1, 0, 0, 0, DateTimeKind.Utc), rows[0].GetProperty("bucket").GetDateTime());
+        Assert.Equal(DateTimeKind.Utc, rows[0].GetProperty("bucket").GetDateTime().Kind);
+        Assert.Equal(firstCount, rows[0].GetProperty("fields")[0].GetProperty("value").GetString());
+        Assert.Equal(firstShare, rows[0].GetProperty("fields")[2].GetProperty("value").GetString());
+        Assert.Equal("1", rows[expectedRows - 1].GetProperty("fields")[0].GetProperty("value").GetString());
+        Assert.Equal("100", rows[expectedRows - 1].GetProperty("fields")[2].GetProperty("value").GetString());
+        Assert.Equal(new DateTime(2090, 1, 2, 0, 0, 0, DateTimeKind.Utc), rows[expectedRows - 1].GetProperty("bucket").GetDateTime());
+    }
+
+    [Fact]
+    public async Task TimeSeriesRetainMillisecondExclusiveBoundsAndSparseEmptySelections()
+    {
+        using var response = await ShapedAsync("time_report", "2090-01-01T00:00:00.001Z", "2090-01-02T00:00:00.001Z");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var rows = document.RootElement.GetProperty("rows");
+        Assert.Equal(3, rows.GetArrayLength());
+        Assert.Equal("1", rows[0].GetProperty("fields")[0].GetProperty("value").GetString());
+        Assert.Equal("50", rows[0].GetProperty("fields")[2].GetProperty("value").GetString());
+        using var empty = await ReportAsync("time_report", "&filter=country:absent");
+        using var emptyJson = JsonDocument.Parse(await empty.Content.ReadAsStringAsync());
+        Assert.Empty(emptyJson.RootElement.GetProperty("rows").EnumerateArray());
+    }
+
+    [Theory]
+    [InlineData("&param.type=action", "18446744073709551614", "2")]
+    [InlineData("&param.type=action&param.unit=v", "7", "1")]
+    [InlineData("&param.type=action&param.unit=v&param.minimum=8", "0", "0")]
+    [InlineData("&param.type=different", "0", "0")]
+    [InlineData("&param.type=action&param.unit=u%27%20OR%201%3D1", "0", "0")]
+    public async Task DeclaredParametersBindTypedValuesAndParticipateInUnitSafety(string extra, string sum, string count)
+    {
+        using var response = await ReportAsync("parameter_report", extra);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(sum, document.RootElement.GetProperty("fields")[0].GetProperty("value").GetString());
+        Assert.Equal(count, document.RootElement.GetProperty("fields")[1].GetProperty("value").GetString());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("&param.type=action&param.type=other")]
+    [InlineData("&param.type=action&param.minimum=nan")]
+    [InlineData("&param.type=action&param.missing=x")]
+    [InlineData("&param.type=action&groupBy=country")]
+    public async Task InvalidReportParametersAndShapeOverridesAreRejected(string extra)
+    {
+        using var response = await ReportAsync("parameter_report", extra);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("1900-01-01T00:00:00Z", "1900-01-01T00:00:00.001Z", "1900-01-01T00:00:00Z")]
+    [InlineData("2299-12-31T23:59:59.998Z", "2299-12-31T23:59:59.999Z", "2299-12-31T00:00:00Z")]
+    public async Task TimeBucketsKeepTheFullDateTime64Calendar(string from, string to, string expected)
+    {
+        using var response = await ShapedAsync("calendar_report", from, to);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Empty(document.RootElement.GetProperty("rows").EnumerateArray());
+        using var scope = _factory.Services.CreateScope();
+        var definition = _factory.Services.GetRequiredService<SavedReportRegistry>().Find("calendar_report")!;
+        var request = new SavedReportRequest(definition, new QueryScope
+        {
+            ProjectId = _project, TenantId = "t", TrafficClass = "normal", Filters = [],
+            From = DateTime.Parse(from, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AdjustToUniversal),
+            To = DateTime.Parse(to, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AdjustToUniversal)
+        });
+        var query = GetSavedReportQuery.BuildQuery(request);
+        string source = "(SELECT {projectId:String} AS project_id, {tenantId:String} AS tenant_id, 'normal' AS traffic_class,"
+            + " toDateTime64({at:String}, 3, 'UTC') AS timestamp)";
+        string sql = query.Sql.Replace("nealytics_core.global_events", source, StringComparison.Ordinal);
+        var parameters = query.Parameters.Append(new KeyValuePair<string, object?>("at", request.Scope.From.ToString("yyyy-MM-dd HH:mm:ss.fff", System.Globalization.CultureInfo.InvariantCulture))).ToArray();
+        var reader = new MetricAggregateReader(scope.ServiceProvider.GetRequiredService<ClickHouseConnectionFactory>());
+        var row = Assert.Single(await reader.ReadRowsAsync(sql, parameters, [], 0, true, 1, CancellationToken.None));
+        Assert.Equal(DateTime.Parse(expected, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AdjustToUniversal), row.Bucket);
+        Assert.Equal("9007199254740993.0001", MetricProjection.Evaluate(definition.Fields[0].Definition, row.Values));
+    }
+
+    [Fact]
+    public async Task GroupNullValuesRemainExplicitAndDistinctFromEmptyStrings()
+    {
+        using var response = await ShapedAsync("nullable_report", "2090-01-01T00:00:00Z", "2090-01-01T00:00:04Z",
+            "&filter=event_type:group_null");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var row = Assert.Single(document.RootElement.GetProperty("rows").EnumerateArray());
+        Assert.Equal(JsonValueKind.Null, row.GetProperty("groups")[0].GetProperty("value").ValueKind);
+        Assert.Equal("1", row.GetProperty("fields")[0].GetProperty("value").GetString());
+    }
+
+    [Fact]
+    public async Task AggregateReaderHonorsItsOwnRowBoundAndCancellation()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var reader = new MetricAggregateReader(scope.ServiceProvider.GetRequiredService<ClickHouseConnectionFactory>());
+        var metric = _factory.Services.GetRequiredService<NamedMetricRegistry>().Find("events")!;
+        var rows = await reader.ReadRowsAsync("SELECT toString(number) FROM numbers(2)", [], [metric], 0, false, 1, CancellationToken.None);
+        Assert.Single(rows);
+        Assert.Equal("0", rows[0].Values["events"]);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.ReadRowsAsync(
+            "SELECT '0'", [], [metric], 0, false, 1, cancellation.Token));
+        rows = await reader.ReadRowsAsync("SELECT '1'", [], [metric], 0, false, 1, CancellationToken.None);
+        Assert.Equal("1", Assert.Single(rows).Values["events"]);
+    }
+
+    private async Task<HttpResponseMessage> ShapedAsync(string name, string from, string to, string extra = "")
+    {
+        using var request = Authorized("/api/v1/analytics/reports/" + name + "?from=" + from + "&to=" + to + extra, "t", "reports");
+        return await _client.SendAsync(request);
     }
 
     private async Task<HttpResponseMessage> ReportAsync(string name, string extra = "", string? tenant = "t")

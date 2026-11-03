@@ -20,6 +20,20 @@ public sealed class SavedReportValue
     public string? Unit { get; init; }
 }
 
+public sealed class SavedReportGroup
+{
+    public string Name { get; init; } = string.Empty;
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? Value { get; init; }
+}
+
+public sealed class SavedReportRow
+{
+    public DateTime? Bucket { get; init; }
+    public IReadOnlyList<SavedReportGroup> Groups { get; init; } = Array.Empty<SavedReportGroup>();
+    public IReadOnlyList<SavedReportValue> Fields { get; init; } = Array.Empty<SavedReportValue>();
+}
+
 public sealed class SavedReportResponse
 {
     public string Name { get; init; } = string.Empty;
@@ -28,6 +42,8 @@ public sealed class SavedReportResponse
     public DateTime To { get; init; }
     public string? Segment { get; init; }
     public IReadOnlyList<SavedReportValue> Fields { get; init; } = Array.Empty<SavedReportValue>();
+    public IReadOnlyList<SavedReportRow> Rows { get; init; } = Array.Empty<SavedReportRow>();
+    public string Shape { get; init; } = "scalar";
     public string NumericEncoding { get; init; } = "string";
     public string Source { get; init; } = "raw";
 }

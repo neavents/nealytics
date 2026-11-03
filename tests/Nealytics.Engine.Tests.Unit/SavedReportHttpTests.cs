@@ -25,6 +25,7 @@ public sealed class SavedReportHttpTests : IClassFixture<SavedReportHttpTests.Fa
             builder.ConfigureServices(services =>
             {
                 var declared = SavedReportRegistryTests.Options();
+                declared.SavedReports[0].Parameters = [new() { Name = "location", Column = "country" }];
                 var dimensions = new DimensionRegistry(declared);
                 var measures = new MeasureRegistry(declared, dimensions);
                 var metrics = new NamedMetricRegistry(declared, measures);
@@ -111,6 +112,21 @@ public sealed class SavedReportHttpTests : IClassFixture<SavedReportHttpTests.Fa
         using var response = await _client.SendAsync(request);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("\"Only from, to, traffic, filter and tenant are supported report parameters.\"", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task DeclaredParameterValuesAreParsedBeforeRangeValidationAndNeverReachStorageOnFailure()
+    {
+        using var request = Request("overview?param.location=GB&from=invalid",
+            [new("scope", "reports"), new("project_id", "p"), new("tenant_id", "t")]);
+        using var response = await _client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("Use a valid UTC range", await response.Content.ReadAsStringAsync());
+        using var duplicate = Request("overview?param.location=GB&param.location=US",
+            [new("scope", "reports"), new("project_id", "p"), new("tenant_id", "t")]);
+        using var rejected = await _client.SendAsync(duplicate);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        Assert.Equal("\"Report parameter 'location' requires exactly one value.\"", await rejected.Content.ReadAsStringAsync());
     }
 
     private static HttpRequestMessage Request(string path, List<Claim> claims)

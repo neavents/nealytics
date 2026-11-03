@@ -2,6 +2,7 @@ namespace Nealytics.Engine.Features.GetSavedReport;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Nealytics.Engine.Features.GetNamedMetric;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Query;
@@ -22,7 +23,8 @@ public static class SavedReportRequestFactory
         QueryColumns columns,
         MeasureRegistry measures,
         int defaultRangeHours,
-        DateTime nowUtc)
+        DateTime nowUtc,
+        IReadOnlyDictionary<string, string[]>? parameters = null)
     {
         if (identity.Rejected)
         {
@@ -42,9 +44,14 @@ public static class SavedReportRequestFactory
         {
             return new(null, 404, "Unknown saved report.");
         }
+        ReportParameterResult bound = ReportParameterBinding.Bind(definition.Parameters, parameters);
+        if (bound.Error is not null)
+        {
+            return new(null, 400, bound.Error);
+        }
         NamedMetricRequestResult parsed = NamedMetricRequestFactory.Create(
             identity, definition.Fields[0].Metric, from, to, traffic, filters,
-            metrics, columns, measures, defaultRangeHours, nowUtc, segments, definition.Segment);
+            metrics, columns, measures, defaultRangeHours, nowUtc, segments, definition.Segment, bound.Filters, definition.GroupBy);
         if (parsed.Request is null)
         {
             return new(null, parsed.StatusCode, parsed.Error);
@@ -54,7 +61,7 @@ public static class SavedReportRequestFactory
         {
             SavedReportField field = definition.Fields[index];
             NamedMetric metric = field.Definition;
-            string? violation = MetricProjection.UnitViolation(metric, measures, selected.Filters);
+            string? violation = MetricProjection.UnitViolation(metric, measures, selected.Filters, definition.GroupBy);
             if (violation is not null)
             {
                 return new(null, 400, $"Field '{field.Name}': {violation}");
@@ -73,11 +80,13 @@ public static class SavedReportRequestFactory
         return new(new SavedReportRequest(definition, scope), 200, null);
     }
 
-    internal static string? UnsupportedParameter(IEnumerable<string> names)
+    internal static string? UnsupportedParameter(IEnumerable<string> names, IReadOnlyList<ReportParameter>? parameters = null)
     {
         foreach (string name in names)
         {
-            if (name is not ("from" or "to" or "traffic" or "filter" or "tenant"))
+            if (name is not ("from" or "to" or "traffic" or "filter" or "tenant")
+                && !(name.StartsWith("param.", StringComparison.Ordinal)
+                    && parameters is not null && parameters.Any(parameter => parameter.Name == name[6..])))
             {
                 return "Only from, to, traffic, filter and tenant are supported report parameters.";
             }

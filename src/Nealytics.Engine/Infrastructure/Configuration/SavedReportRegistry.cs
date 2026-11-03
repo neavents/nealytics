@@ -19,6 +19,10 @@ public sealed class SavedReportOptions
     public int Version { get; set; } = 1;
     public string Segment { get; set; } = string.Empty;
     public List<SavedReportFieldOptions> Fields { get; set; } = [];
+    public List<string> GroupBy { get; set; } = [];
+    public string Interval { get; set; } = string.Empty;
+    public int Limit { get; set; } = 100;
+    public List<ReportParameterOptions> Parameters { get; set; } = [];
 }
 
 public sealed record SavedReportField(string Name, string Metric)
@@ -27,7 +31,14 @@ public sealed record SavedReportField(string Name, string Metric)
 }
 
 public sealed record SavedReport(
-    string Name, int Version, string? Segment, IReadOnlyList<SavedReportField> Fields);
+    string Name, int Version, string? Segment, IReadOnlyList<SavedReportField> Fields)
+{
+    public IReadOnlyList<string> GroupBy { get; init; } = Array.Empty<string>();
+    public string? Interval { get; init; }
+    public int Limit { get; init; } = 100;
+    public IReadOnlyList<ReportParameter> Parameters { get; init; } = Array.Empty<ReportParameter>();
+    internal bool IsGrouped => GroupBy.Count > 0 || Interval is not null;
+}
 
 public sealed class SavedReportRegistry
 {
@@ -52,6 +63,9 @@ public sealed class SavedReportRegistry
             throw new InvalidOperationException("TelemetryEngine:SavedReports exceeds MaxSavedReports.");
         }
 
+        DimensionRegistry dimensions = new(options);
+        QueryColumns columns = new(dimensions);
+        MeasureRegistry measures = new(options, dimensions);
         List<SavedReport> definitions = new(configured.Count);
         HashSet<string> names = new(StringComparer.Ordinal);
         for (int index = 0; index < configured.Count; index++)
@@ -99,7 +113,35 @@ public sealed class SavedReportRegistry
             {
                 throw Invalid(index, "report aggregate projection exceeds 128 components");
             }
-            definitions.Add(new SavedReport(name, 1, segment, Array.AsReadOnly(fields.ToArray())));
+            IReadOnlyList<string> groups = CompileGroups(declaration.GroupBy, columns, index);
+            string? interval = string.IsNullOrWhiteSpace(declaration.Interval) ? null : declaration.Interval.Trim().ToLowerInvariant();
+            if (interval is not (null or "hour" or "day"))
+            {
+                throw Invalid(index, "interval must be hour or day");
+            }
+            bool grouped = groups.Count > 0 || interval is not null;
+            int projected = new MetricProjection(fields.Select(field => field.Definition)).Components.Count;
+            if (declaration.Limit < 1 || declaration.Limit > Math.Min(options.MaxQueryLimit, 10_000)
+                || grouped && declaration.Limit * Math.Max(fields.Count, projected) > 16_384)
+            {
+                throw Invalid(index, "grouped report exceeds its row or 16384-cell limit");
+            }
+            IReadOnlyList<ReportParameter> parameters = Array.Empty<ReportParameter>();
+            try
+            {
+                parameters = ReportParameterCompiler.Compile(declaration.Parameters, columns, measures);
+            }
+            catch (InvalidOperationException error)
+            {
+                throw Invalid(index, error.Message);
+            }
+            definitions.Add(new SavedReport(name, 1, segment, Array.AsReadOnly(fields.ToArray()))
+            {
+                GroupBy = groups,
+                Interval = interval,
+                Limit = declaration.Limit,
+                Parameters = parameters
+            });
         }
         Declared = Array.AsReadOnly(definitions.ToArray());
         _byName = definitions.ToFrozenDictionary(definition => definition.Name, StringComparer.Ordinal);
@@ -109,6 +151,25 @@ public sealed class SavedReportRegistry
 
     public SavedReport? Find(string? name) =>
         name is not null && _byName.TryGetValue(name, out SavedReport? definition) ? definition : null;
+
+    private static IReadOnlyList<string> CompileGroups(List<string>? configured, QueryColumns columns, int index)
+    {
+        if (configured is null || configured.Count > 2)
+        {
+            throw Invalid(index, "provide a nonnull list with at most two group columns");
+        }
+        string[] groups = new string[configured.Count];
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        for (int position = 0; position < configured.Count; position++)
+        {
+            if (!columns.TryResolve(configured[position]?.Trim(), out string column) || !seen.Add(column))
+            {
+                throw Invalid(index, "group columns must be unique active event columns");
+            }
+            groups[position] = column;
+        }
+        return Array.AsReadOnly(groups);
+    }
 
     private static string ReadName(string? value, int index, string label)
     {

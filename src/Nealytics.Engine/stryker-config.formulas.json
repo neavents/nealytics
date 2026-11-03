@@ -16,7 +16,10 @@
       "Infrastructure/Configuration/SavedReportRegistry.cs",
       "Features/GetNamedMetric/NamedMetricRequestFactory.cs",
       "Features/GetSavedReport/SavedReportRequestFactory.cs",
-      "Infrastructure/Query/FormulaUnit.cs"
+      "Infrastructure/Query/FormulaUnit.cs",
+      "Infrastructure/Configuration/ReportParameter.cs",
+      "Infrastructure/Query/ReportParameterBinding.cs",
+      "Infrastructure/Query/ReportShapeSql.cs"
     ],
     "mutation-level": "Complete",
     "concurrency": 2,
