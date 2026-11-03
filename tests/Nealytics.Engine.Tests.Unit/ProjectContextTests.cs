@@ -136,7 +136,10 @@ public sealed class ProjectContextTests
             case "low_cap": options.MaxProjectSchemas = 0; break;
             case "high_cap": options.MaxProjectSchemas = 1025; break;
         }
-        Assert.Throws<InvalidOperationException>(() => Build(options));
+        string diagnostic = failure is "low_cap" or "high_cap" ? "MaxProjectSchemas must be between 1 and 1024."
+            : failure == "limit" ? "ProjectSchemas exceeds MaxProjectSchemas."
+            : "Project schemas require unique nonblank identifiers up to 256 characters and version 1.";
+        Assert.Equal(diagnostic, Assert.Throws<InvalidOperationException>(() => Build(options)).Message);
     }
 
     [Theory]
@@ -186,7 +189,16 @@ public sealed class ProjectContextTests
                 options.ProjectSchemas[1].Rollups = [new() { Name = "alpha_hour", Grain = "hour", Dimensions = "region", Measures = "amount:sum", EventTypes = "second" }];
                 break;
         }
-        Assert.Throws<InvalidOperationException>(() => Build(options));
+        string diagnostic = Assert.Throws<InvalidOperationException>(() => Build(options)).Message;
+        Assert.False(string.IsNullOrWhiteSpace(diagnostic));
+        if (failure.StartsWith("rollup_", StringComparison.Ordinal))
+        {
+            Assert.Equal("Project schemas declare incompatible rollup 'alpha_hour'.", diagnostic);
+        }
+        else if (failure is "dimension" or "measure" or "collision")
+        {
+            Assert.Equal($"Project schemas declare incompatible types for physical column '{(failure == "dimension" ? "region" : "amount")}'.", diagnostic);
+        }
     }
 
     [Fact]
@@ -198,6 +210,9 @@ public sealed class ProjectContextTests
         options.ProjectSchemas[1].Measures[0].Maximum = null;
         var catalog = Build(options);
         Assert.True(catalog.Storage.Dimensions.IsActive("region"));
+        options.ProjectSchemas[1].Measures[0].Retired = true;
+        Assert.True(Build(options).Storage.Measures.IsActive("amount"));
+        options.ProjectSchemas[1].Measures[0].Retired = false;
         Assert.Null(catalog.Storage.Measures.Find("amount")!.Minimum);
         Assert.Null(catalog.Storage.Measures.Find("amount")!.Maximum);
         var alpha = catalog.Resolve("alpha")!;
@@ -336,7 +351,29 @@ public sealed class ProjectContextTests
             Measures = [new() { Name = "m", Type = "Int64", Minimum = 0, Aggregations = "sum" }]
         }, new DimensionRegistry(new TelemetryEngineOptions())).Find("m")!;
         Assert.True(MeasureValueRules.Accepts(measure, "1"));
+        Assert.True(MeasureValueRules.Accepts(measure, "0"));
         Assert.False(MeasureValueRules.Accepts(measure, "-1"));
-        Assert.Throws<ArgumentOutOfRangeException>(() => MeasureValueRules.Accepts(measure with { Kind = (MeasureValueKind)999 }, "1"));
+        Assert.Contains("Unhandled measure value kind.", Assert.Throws<ArgumentOutOfRangeException>(() => MeasureValueRules.Accepts(measure with { Kind = (MeasureValueKind)999 }, "1")).Message);
+        Assert.Equal("", new ProjectSchemaOptions().ProjectId);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void OneSidedBoundsAreAppliedBeforePersistence(bool minimum)
+    {
+        var options = Options();
+        options.ProjectSchemas[0].Measures[0].Minimum = minimum ? 0 : null;
+        options.ProjectSchemas[0].Measures[0].Maximum = minimum ? null : 100;
+        var catalog = Build(options);
+        var payload = new GlobalTelemetryPayload
+        {
+            ProjectId = "alpha", Measures = new() { ["amount"] = minimum ? "-1" : "101" }
+        };
+        ProjectMeasureNormalizer.Normalize(payload, catalog);
+        Assert.Equal("", payload.Measures["amount"]);
+        var valid = new GlobalTelemetryPayload { ProjectId = "alpha", Measures = new() { ["amount"] = minimum ? "0" : "100" } };
+        ProjectMeasureNormalizer.Normalize(valid, catalog);
+        Assert.Equal(minimum ? "0" : "100", valid.Measures["amount"]);
     }
 }

@@ -15,6 +15,7 @@ using Microsoft.Extensions.Hosting;
 
 namespace Nealytics.Engine.Tests.Unit;
 
+[Collection("Project context hosts")]
 public sealed class ProjectContextHttpTests
 {
     public sealed class Factory : NoDatabaseWebFactory
@@ -22,7 +23,7 @@ public sealed class ProjectContextHttpTests
         private readonly string _schema = Path.Combine(Path.GetTempPath(), "nealytics-project-schema-" + Guid.NewGuid().ToString("N") + ".json");
         private readonly string? _previous;
 
-        public Factory(bool legacy = false)
+        public Factory(bool legacy = false, Action<TelemetryEngineOptions>? customize = null)
         {
             var options = ProjectContextTests.Options();
             options.AllowLegacyProjectSchema = legacy;
@@ -34,6 +35,7 @@ public sealed class ProjectContextHttpTests
                 new() { Key = "alpha-public", Scope = "public", ProjectId = "alpha" },
                 new() { Key = "unknown-key", Scope = "public", ProjectId = "unknown" }
             ];
+            customize?.Invoke(options);
             File.WriteAllText(_schema, JsonSerializer.Serialize(new Dictionary<string, TelemetryEngineOptions> { ["TelemetryEngine"] = options }));
             _previous = Environment.GetEnvironmentVariable("TelemetryEngine__SchemaFile");
             Environment.SetEnvironmentVariable("TelemetryEngine__SchemaFile", _schema);
@@ -100,11 +102,20 @@ public sealed class ProjectContextHttpTests
             string[] columns = schema.GetProperty("dimensions").EnumerateArray().Select(column => column.GetProperty("name").GetString()!).ToArray();
             Assert.Contains(own, columns);
             Assert.DoesNotContain(hidden, columns);
+            Assert.All(schema.GetProperty("dimensions").EnumerateArray(), dimension =>
+            {
+                Assert.True(dimension.GetProperty("groupable").GetBoolean());
+                Assert.True(dimension.GetProperty("filterable").GetBoolean());
+            });
             Assert.DoesNotContain("legacy", columns);
             Assert.Equal(type, Assert.Single(schema.GetProperty("namedMetrics").EnumerateArray()).GetProperty("eventType").GetString());
             Assert.DoesNotContain("legacy_count", await response.Content.ReadAsStringAsync());
             Assert.Equal(project == "alpha" ? 1 : 0, schema.GetProperty("computedDimensions").GetArrayLength());
             Assert.Equal(project == "alpha" ? 1 : 0, schema.GetProperty("savedReports").GetArrayLength());
+            if (project == "alpha")
+            {
+                Assert.Equal("tenant.cohort", Assert.Single(schema.GetProperty("tenantAttributes").EnumerateArray()).GetString());
+            }
             Assert.Equal(project + (project == "alpha" ? "_hour" : "_day"), Assert.Single(schema.GetProperty("rollups").EnumerateArray()).GetProperty("name").GetString());
         }
         await Task.WhenAll(Check("alpha", "region", "category", "first"), Check("beta", "category", "region", "second"));
