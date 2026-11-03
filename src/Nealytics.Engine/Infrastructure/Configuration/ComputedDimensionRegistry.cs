@@ -32,7 +32,7 @@ public sealed class ComputedDimensionRegistry
         {
             string? name = declaration?.Name?.Trim();
             if (name is null || !NamePattern.IsMatch(name) || DimensionRegistry.ReservedColumns.Contains(name)
-                || dimensions.Declared.Any(dimension => dimension.Name == name) || measures.Declared.Any(measure => measure.Name == name)
+                || dimensions.IsDeclared(name) || measures.IsDeclared(name)
                 || !declarations.TryAdd(name, declaration!))
             {
                 throw new InvalidOperationException("Computed dimension names must be unique, strict and distinct from physical fields.");
@@ -40,6 +40,24 @@ public sealed class ComputedDimensionRegistry
         }
         Dictionary<string, ComputedDimension> resolved = new(StringComparer.Ordinal);
         HashSet<string> visiting = new(StringComparer.Ordinal);
+        (string Expression, bool Numeric, int Depth) ResolveSource(string? name)
+        {
+            if (name is not null && declarations.ContainsKey(name))
+            {
+                ComputedDimension dependency = Resolve(name);
+                return (dependency.Expression, dependency.Numeric, dependency.Depth + 1);
+            }
+            if (name is not null && measures.Find(name) is Measure measure)
+            {
+                return (measure.Name, true, 1);
+            }
+            if (!physical.TryResolve(name, out string column))
+            {
+                throw new InvalidOperationException("Computed dimension source is not an active event field.");
+            }
+            bool numeric = dimensions.Find(column)?.Kind is DimensionValueKind.Int64 or DimensionValueKind.UInt64;
+            return (column, numeric, 1);
+        }
         ComputedDimension Resolve(string name)
         {
             ComputedDimension? cached = null;
@@ -58,29 +76,7 @@ public sealed class ComputedDimensionRegistry
             {
                 throw new InvalidOperationException("Computed dimensions require version 1 and a supported operation.");
             }
-            string source = string.Empty;
-            bool numeric = false;
-            int depth = 1;
-            if (sourceName is not null && declarations.ContainsKey(sourceName))
-            {
-                ComputedDimension dependency = Resolve(sourceName);
-                source = dependency.Expression;
-                numeric = dependency.Numeric;
-                depth = dependency.Depth + 1;
-            }
-            else if (sourceName is not null && measures.Find(sourceName) is Measure measure)
-            {
-                source = measure.Name;
-                numeric = true;
-            }
-            else if (!physical.TryResolve(sourceName, out source))
-            {
-                throw new InvalidOperationException("Computed dimension source is not an active event field.");
-            }
-            else
-            {
-                numeric = dimensions.Find(source)?.Kind is DimensionValueKind.Int64 or DimensionValueKind.UInt64;
-            }
+            (string source, bool numeric, int depth) = ResolveSource(sourceName);
             if (depth > 8 || operation == "bucket" && !numeric)
             {
                 throw new InvalidOperationException("Computed dimension source type or expanded depth is incompatible.");
