@@ -36,9 +36,11 @@ public sealed class NdjsonImportHttpTests : IClassFixture<NdjsonImportHttpTests.
     }
 
     [Fact]
-    public void EndpointMetadataDeclaresTheImportContractAndIndependentAdmissionPolicy()
+    public async Task EndpointMetadataDeclaresTheImportContractAndIndependentAdmissionPolicy()
     {
-        var endpoint = ImportEndpoint();
+        await using var factory = new Factory();
+        _ = factory.Client;
+        var endpoint = ImportEndpoint(factory);
         Assert.Equal("ImportNdjson", endpoint.Metadata.GetMetadata<IEndpointNameMetadata>()!.EndpointName);
         Assert.Equal("ndjson-import", endpoint.Metadata.GetMetadata<EnableRateLimitingAttribute>()!.PolicyName);
         Assert.Equal(ClickHouseWorkload.Write, endpoint.Metadata.GetMetadata<ClickHouseWorkloadMetadata>()!.Workload);
@@ -58,13 +60,13 @@ public sealed class NdjsonImportHttpTests : IClassFixture<NdjsonImportHttpTests.
         context.Response.Body = new MemoryStream();
         var feature = new MutableBodyLimit();
         context.Features.Set<IHttpMaxRequestBodySizeFeature>(feature);
-        await ImportEndpoint().RequestDelegate!(context);
+        await ImportEndpoint(_factory).RequestDelegate!(context);
         Assert.Equal(202, context.Response.StatusCode);
         Assert.Equal(4096, feature.MaxRequestBodySize);
     }
 
-    private RouteEndpoint ImportEndpoint() => Assert.Single(
-        _factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>(),
+    private static RouteEndpoint ImportEndpoint(Factory factory) => Assert.Single(
+        factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>(),
         endpoint => endpoint.RoutePattern.RawText == Route);
 
     private sealed class MutableBodyLimit : IHttpMaxRequestBodySizeFeature
