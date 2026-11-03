@@ -197,7 +197,7 @@ public sealed class AnalyticsPlanningTests
         var plan = configured.Planner.Select(components, scope, null, "auto");
         var query = AnalyticsPlanSql.Build(plan, components, scope, null);
         Assert.Equal(2, query.Sql.Split(" UNION ALL ").Length - 1);
-        Assert.Contains("countStateIf(amount, event_type = {reportEvent0:String}) AS __c0", query.Sql);
+        Assert.Contains("countState(if(event_type = {reportEvent0:String}, amount, NULL)) AS __c0", query.Sql);
         Assert.Contains("countMergeStateIf(amount_count, event_type = {reportEvent0:String}) AS __c0", query.Sql);
         Assert.Contains("timestamp < {slice0To:DateTime64}", query.Sql);
         Assert.Contains("bucket < {slice1To:DateTime64}", query.Sql);

@@ -95,8 +95,9 @@ internal static class AnalyticsPlanSql
     private static void AppendState(StringBuilder sql, NamedMetric metric, Rollup rollup, int index, bool summarized)
     {
         bool conditional = metric.EventType is not null;
+        bool nullableCondition = conditional && !summarized && metric.Measure is not null;
         sql.Append(metric.Aggregation).Append(summarized ? "MergeState" : "State");
-        if (conditional)
+        if (conditional && !nullableCondition)
         {
             sql.Append("If");
         }
@@ -104,11 +105,16 @@ internal static class AnalyticsPlanSql
         string? column = summarized
             ? metric.Measure is null ? "events" : rollup.MeasureColumn(metric.Measure, metric.Aggregation)
             : metric.Measure;
-        if (column is not null)
+        if (nullableCondition)
+        {
+            sql.Append("if(event_type = {").Append(MetricAggregateSql.EventTypeParameter(index))
+                .Append(":String}, ").Append(column).Append(", NULL)");
+        }
+        else if (column is not null)
         {
             sql.Append(column);
         }
-        if (conditional)
+        if (conditional && !nullableCondition)
         {
             if (column is not null)
             {
