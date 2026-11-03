@@ -140,6 +140,7 @@ named feat/correctness-and-safety cannot also contain child refs beneath that sa
 | C7 project contexts | feat/analytics-customization-c7-project-contexts |
 | C8 query planning and accuracy | feat/analytics-customization-c8-query-planning |
 | E1 Kafka connector | feat/integrations-e1-kafka-connector |
+| E2 bounded NDJSON import | feat/integrations-e2-ndjson-import |
 
 New C-F steps receive branches when their bounded package scope is defined. Do not invent an
 implementation sequence for those categories just to populate branch names.

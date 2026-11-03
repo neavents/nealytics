@@ -61,6 +61,7 @@ public sealed class GlobalTelemetryPayload
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(GlobalTelemetryPayload))]
+[JsonSerializable(typeof(Nealytics.Engine.Features.ImportNdjson.NdjsonImportResponse))]
 [JsonSerializable(typeof(TelemetryDeliveryUnit))]
 [JsonSerializable(typeof(List<GlobalTelemetryPayload>))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
