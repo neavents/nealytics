@@ -17,7 +17,7 @@
       "Features/GetNamedMetric/NamedMetricRequestFactory.cs"
     ],
     "mutation-level": "Complete",
-    "concurrency": 1,
+    "concurrency": 2,
     "break-on-initial-test-failure": true,
     "reporters": [
       "dots",

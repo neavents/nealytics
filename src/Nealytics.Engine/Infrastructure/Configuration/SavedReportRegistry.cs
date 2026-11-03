@@ -126,7 +126,7 @@ public sealed class SavedReportRegistry
             {
                 throw Invalid(index, "grouped report exceeds its row or 16384-cell limit");
             }
-            IReadOnlyList<ReportParameter> parameters;
+            IReadOnlyList<ReportParameter> parameters = Array.Empty<ReportParameter>();
             try
             {
                 parameters = ReportParameterCompiler.Compile(declaration.Parameters, columns, measures);
