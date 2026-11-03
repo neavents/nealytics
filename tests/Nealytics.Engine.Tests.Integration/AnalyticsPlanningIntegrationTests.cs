@@ -10,6 +10,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
 using Nealytics.Engine.Features.BatchProcessor;
 using Nealytics.Engine.Infrastructure.Configuration;
+using Nealytics.Engine.Infrastructure.Serialization;
+using Nealytics.Engine.Infrastructure.Storage.Delivery;
 
 namespace Nealytics.Engine.Tests.Integration;
 
@@ -76,6 +78,7 @@ public sealed class AnalyticsPlanningIntegrationTests : IAsyncLifetime
             Row(Project, "t", "action", "normal", "00:00:00.001", "10", "x", "NULL"),
             Row(Project, "t", "action", "bot", "00:00:00.500", "999", "x", "''"),
             Row(Project, "t", "action", "normal", "00:00:00.999", "NULL", "x", "''"),
+            Row(Project, "t", "action", "normal", "00:00:01.000", "10", "x", "NULL"),
             Row(Project, "t", "action", "normal", "01:00:00.000", "20", "x", "NULL"),
             Row(Project, "t", "other", "normal", "01:00:00.001", "100", "y", "''"),
             Row(Project, "t", "action", "normal", "01:01:00.000", "NULL", "y", "NULL"),
@@ -162,6 +165,10 @@ public sealed class AnalyticsPlanningIntegrationTests : IAsyncLifetime
         Assert.Equal(source, automatic.RootElement.GetProperty("source").GetString());
         Assert.Equal(Values(raw), Values(automatic));
         Assert.Equal(metric == "approx_quantile" ? "approximate" : "exact", automatic.RootElement.GetProperty("accuracy").GetString());
+        if (metric == "avg")
+        {
+            Assert.Equal("22", automatic.RootElement.GetProperty("value").GetString());
+        }
     }
 
     [Theory]
@@ -186,13 +193,24 @@ public sealed class AnalyticsPlanningIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task LateAndDeduplicatedReplayRowsPreserveStateResultsAndReadinessFencesForceRaw()
     {
-        string row = $"('{Guid.NewGuid()}','{Project}','t','s','action','normal','2090-01-01 01:30:00.000',5,7,'x',NULL)";
-        string insert = Insert(row, $"SETTINGS insert_deduplicate=1, insert_deduplication_token='c8_{_suffix}'");
-        await ClickHouseTestSupport.ExecuteAsync(insert);
-        await ClickHouseTestSupport.ExecuteAsync(insert);
+        var writer = _factory.Services.GetRequiredService<ClickHouseBatchWriter>();
+        var unit = new TelemetryDeliveryUnit
+        {
+            Schema = writer.SchemaFingerprint,
+            SourceId = await writer.GetSourceIdAsync(CancellationToken.None),
+            Items = [new()
+            {
+                ProjectId = Project, TenantId = "t", SessionId = "s", EventType = "action",
+                Timestamp = new DateTime(2090, 1, 1, 1, 30, 0, DateTimeKind.Utc),
+                Dimensions = new() { [Tag] = "x" }, Measures = new() { [Amount] = "5", [Integer] = "7" }
+            }]
+        };
+        await ((IDeliveryBatchWriter)writer).WriteDeliveryAsync(unit, CancellationToken.None);
+        await ((IDeliveryBatchWriter)writer).WriteDeliveryAsync(unit, CancellationToken.None);
         using var raw = await Read("metrics/sum", "00:00:00.001", "03:00:00.001", "raw");
         using var automatic = await Read("metrics/sum", "00:00:00.001", "03:00:00.001");
-        Assert.Equal("105", automatic.RootElement.GetProperty("value").GetString());
+        Assert.Equal("115", raw.RootElement.GetProperty("value").GetString());
+        Assert.Equal("115", automatic.RootElement.GetProperty("value").GetString());
         Assert.Equal(Values(raw), Values(automatic));
         var registry = _factory.Services.GetRequiredService<RollupRegistry>();
         registry.MarkUnroutable(Assert.Single(registry.Declared), "ambiguous replay identity");
