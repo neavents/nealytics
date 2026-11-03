@@ -22,9 +22,13 @@ public sealed class ProjectContextHttpTests
     {
         private readonly string _schema = Path.Combine(Path.GetTempPath(), "nealytics-project-schema-" + Guid.NewGuid().ToString("N") + ".json");
         private readonly string? _previous;
+        private readonly string _directory;
+        private readonly Action<IServiceCollection>? _configure;
 
-        public Factory(bool legacy = false, Action<TelemetryEngineOptions>? customize = null)
+        public Factory(bool legacy = false, Action<TelemetryEngineOptions>? customize = null, Action<IServiceCollection>? configure = null)
         {
+            _directory = Environment.GetEnvironmentVariable("TelemetryEngine__WriteAheadLogDirectory")!;
+            _configure = configure;
             var options = ProjectContextTests.Options();
             options.AllowLegacyProjectSchema = legacy;
             options.ReadScopeClaim = "scope";
@@ -57,6 +61,7 @@ public sealed class ProjectContextHttpTests
                     context.Response.Headers["X-Test-Forbidden"] = "handled";
                     return Task.CompletedTask;
                 });
+                _configure?.Invoke(services);
             });
         }
 
@@ -65,6 +70,10 @@ public sealed class ProjectContextHttpTests
             await base.DisposeAsync();
             Environment.SetEnvironmentVariable("TelemetryEngine__SchemaFile", _previous);
             File.Delete(_schema);
+            if (Directory.Exists(_directory))
+            {
+                Directory.Delete(_directory, true);
+            }
         }
     }
 
