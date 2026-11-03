@@ -6,6 +6,57 @@ namespace Nealytics.Engine.Tests.Unit;
 public sealed class SourceMappingCompilationTests
 {
     [Theory]
+    [InlineData("count", "Source mapping requires 5–64 field bindings.")]
+    [InlineData("field", "Source mapping contains an invalid field declaration.")]
+    [InlineData("path", "Source mapping paths require 1–128 character object keys.")]
+    [InlineData("identity", "Source mapping requires explicit identity/time paths and project, tenant and event bindings.")]
+    public void ConfigurationErrorsIdentifyTheRuleWithoutIncludingSourceValues(string scenario, string message)
+    {
+        var options = SourceRecordMappingTests.Options();
+        switch (scenario)
+        {
+            case "count":
+                options.Fields.Remove("eventType");
+                break;
+            case "field":
+                options.Fields["secret-unsupported-target"] = new() { Default = "secret-value" };
+                break;
+            case "path":
+                options.Fields["userId"] = new() { Path = [""] };
+                break;
+            case "identity":
+                options.Fields["timestamp"].Default = "secret-value";
+                break;
+        }
+        var error = Assert.Throws<InvalidOperationException>(() => SourceRecordMapping.Compile(options));
+        Assert.Equal(message, error.Message);
+        Assert.Null(error.InnerException);
+    }
+
+    [Theory]
+    [InlineData(true, "NDJSON accepts at most 128 project source mappings.")]
+    [InlineData(false, "NDJSON source mappings require configured project contexts and declarations.")]
+    public void ProjectMappingConfigurationErrorsUseSafeDiagnostics(bool nullCollection, string message)
+    {
+        var options = new TelemetryEngineOptions
+        {
+            NdjsonSourceMappings = nullCollection ? null! : new() { ["secret-invalid-project"] = null! }
+        };
+        var error = Assert.Throws<InvalidOperationException>(() => new NdjsonSourceMappings(options, Catalog(options)));
+        Assert.Equal(message, error.Message);
+        Assert.Null(error.InnerException);
+    }
+
+    [Fact]
+    public void NewMappingOptionsStartWithAnEmptyMutableFieldCollection()
+    {
+        var options = new SourceMappingOptions();
+        Assert.Empty(options.Fields);
+        options.Fields.Add("example", new());
+        Assert.Single(options.Fields);
+    }
+
+    [Theory]
     [InlineData("eventId")]
     [InlineData("timestamp")]
     [InlineData("projectId")]
