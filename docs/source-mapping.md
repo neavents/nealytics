@@ -46,7 +46,7 @@ Offsets, local times, implicit IDs/times and custom date formats are unsupported
 
 Optional envelope targets are `sessionId`, `userId`, `objectId`, `trafficClass`, `pagePath`,
 `referrer`, `deviceClass`, `os`, `browser`, `country` and `metadataJson`. They accept strings;
-metadataJson is already encoded JSON text, not an arbitrary object. Dimensions and measures
+metadataJson accepts text without serializing a source object. Dimensions and measures
 use `dimensions.<name>` and `measures.<name>` and additionally accept numbers and booleans as
 their original JSON scalar text. Containers are rejected rather than stringified. `seq`,
 `_walRecordId` and unknown targets are unsupported.

@@ -111,7 +111,7 @@ schemas and opt-in hybrid planning. Qualification includes 2,874 unit cases, 297
 cases, changed-code coverage, scoped mutation and a published native/custom executable check.
 Broader scripts, historical cohorts, external enrichment, automatic rollups,
 result caching and live definition deployment are deferred in the completion contract.
-New D/E packages have not started, and hosted-platform work remains outside current scope.
+D packages have not started; delivered E scopes are listed below. Hosted-platform work remains outside current scope.
 
 C3 is functionally qualified on `feat/analytics-customization-c3-saved-reports`; see the
 [saved scalar-report brief](packages/c3-saved-reports.md) and
@@ -182,6 +182,7 @@ baselines. No next connector, general job service or hosted platform is selected
 The owner's continuation after the integration-gap review selects [source mapping](packages/e3-source-mapping.md)
 as the next bounded delivery. Kafka and project-pinned NDJSON share compiled nested-object field
 bindings, string defaults and custom scalar conversion, while preserving policy checks and source
-receipts. Implementation and qualification are in progress on `feat/integrations-e3-source-mapping`.
+receipts. The bounded implementation is qualified on `feat/integrations-e3-source-mapping`;
+see the [evidence ledger](packages/e3-source-mapping-verification.md).
 Custom time formats, scripts, durable jobs, storage sources, sinks and connector expansion remain
 separate packages. See the [configuration contract](source-mapping.md).

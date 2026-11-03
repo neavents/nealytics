@@ -2,7 +2,9 @@
 
 Selected on the owner's continuation after the integration-gap review, 2026-11-04.
 Branch: `feat/integrations-e3-source-mapping`, based on qualified category commit `0f092b6`.
-Status: implementation in progress. Main and the original checkout's unfinished rebase stay untouched.
+Status: bounded functional implementation qualified; see the
+[evidence ledger](e3-source-mapping-verification.md) and [configuration guide](../source-mapping.md).
+Main and the original checkout's unfinished rebase stay untouched.
 
 ## Outcome and compatibility
 

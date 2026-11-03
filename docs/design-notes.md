@@ -471,3 +471,24 @@ One explicit import concurrency policy composes with global write/byte admission
 track/beacon endpoints. It has no queue. Import settings and route existence are frozen at startup;
 no physical schema, persistent job state or optional service framework is added. Native backend
 defaults and the owner's measurement stop remain unchanged.
+
+## Compiled external source mapping
+
+E3 shares a pure mapping feature between Kafka and NDJSON rather than adding a general plugin
+runtime. Startup copies bounded field declarations into literal object paths and permitted targets.
+Mapping directly constructs the existing envelope; no intermediate rewritten JSON document,
+runtime code generation or new serialization dependency is needed. Materialized value UTF-8 bytes
+share the adapter's existing line/message cap, including repeated values and defaults.
+
+Identity/time remain explicit source data. Fixed envelope fields accept strings; custom dimensions
+and measures additionally accept JSON scalar text before normal schema/policy validation. Missing
+mapped project/tenant/event text stays empty for ordinary ingestion rejection. Unmapped source
+fields cannot set internal delivery identity or select a different project mapping. Invalid Unicode
+decoding produces a safe mapping error rather than an unstructured HTTP storage failure.
+
+NDJSON chooses its declaration using the already authenticated server key's pinned project and
+retains original source offsets. Kafka keeps its existing handoff/commit ownership. WAL records
+hold the mapped envelope, so replay never applies a later mapping to acknowledged records; an
+uncommitted Kafka replay can observe a new declaration after restart and requires operator review.
+Durable source identities, retry/deduplication, import jobs and live mapping changes need separate
+contracts. This package does not change persistent formats or backend defaults.
