@@ -4,11 +4,29 @@ using Nealytics.Engine.Features.GetSavedReport;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Query;
 using Nealytics.Engine.Infrastructure.Security;
+using Nealytics.Engine.Features.GetAnalyticsPlan;
 
 namespace Nealytics.Engine.Tests.Unit;
 
 public sealed class MetricAccuracyTests
 {
+    [Fact]
+    public void DefaultMetadataKeepsRawExactExecutionAndEmptyAdministrativeCollections()
+    {
+        var response = new AnalyticsPlanResponse();
+        Assert.Equal("", response.Name);
+        Assert.Equal(0, response.Version);
+        Assert.Equal("raw", response.Source);
+        Assert.Equal("exact", response.Accuracy);
+        Assert.Null(response.SelectedRollup);
+        Assert.Empty(response.Candidates);
+        Assert.Empty(response.Slices);
+        Assert.Equal("exact", new NamedMetricResponse().Accuracy);
+        Assert.Equal("exact", new SavedReportResponse().Accuracy);
+        Assert.False(new TelemetryEngineOptions().EnableAnalyticsRollupPlanning);
+        Assert.False(new TelemetryEngineOptions().AnalyticsRollupSourceIsAppendOnly);
+    }
+
     private static NamedMetricRegistry Build(TelemetryEngineOptions options) =>
         new(options, new MeasureRegistry(options, new DimensionRegistry(options)));
 

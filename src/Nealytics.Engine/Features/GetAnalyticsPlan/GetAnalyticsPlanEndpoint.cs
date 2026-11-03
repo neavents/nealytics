@@ -34,7 +34,7 @@ public static class GetAnalyticsPlanEndpoint
             }
             NamedMetricRequest request = parsed.Request;
             MetricProjection projection = new([request.Definition]);
-            AnalyticsPlan plan = planner.Select(projection.Components, request.Scope, null, request.Execution);
+            AnalyticsPlan plan = planner.Select(projection.Components, request.Scope, null, request.Execution, explain: true);
             return Results.Ok(Response(request.Definition.Name, request.Definition.Version, request.Definition.Accuracy, plan));
         })
         .WithName("ExplainNamedMetric")
@@ -68,7 +68,7 @@ public static class GetAnalyticsPlanEndpoint
                 return Results.BadRequest(unsupported);
             }
             MetricProjection projection = new(request.Definition.Fields.Select(field => field.Definition));
-            AnalyticsPlan plan = planner.Select(projection.Components, request.Scope, request.Definition, request.Execution);
+            AnalyticsPlan plan = planner.Select(projection.Components, request.Scope, request.Definition, request.Execution, explain: true);
             return Results.Ok(Response(request.Definition.Name, request.Definition.Version,
                 AnalyticsExecution.Accuracy(request.Definition.Fields.Select(field => field.Definition)), plan));
         })

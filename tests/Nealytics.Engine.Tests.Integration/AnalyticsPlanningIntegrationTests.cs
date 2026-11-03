@@ -33,6 +33,7 @@ public sealed class AnalyticsPlanningIntegrationTests : IAsyncLifetime
         var options = new TelemetryEngineOptions
         {
             EnableAnalyticsRollupPlanning = true,
+            AnalyticsRollupSourceIsAppendOnly = true,
             Dimensions = [new() { Name = Tag, Type = "LowCardinality" }, new() { Name = Nullable }],
             Measures = [new() { Name = Amount, Type = "Float64", Aggregations = "sum,avg,min,max,count,p50,p75,p90,p95,p99" }, new() { Name = Integer, Type = "Int64" }],
             TenantAttributes = [new() { Name = "cohort" }],

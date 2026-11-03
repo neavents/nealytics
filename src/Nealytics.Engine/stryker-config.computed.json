@@ -18,8 +18,8 @@
       "Features/GetNamedMetric/NamedMetricRequestFactory.cs",
       "Features/GetNamedMetric/GetNamedMetricEndpoint.cs",
       "Features/GetSavedReport/GetSavedReportEndpoint.cs",
-      "Program.cs{3137..3596}",
-      "Infrastructure/Configuration/TelemetryEngineOptions.cs{6425..6558}",
+      "Program.cs{3187..3646}",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{6549..6682}",
       "Features/GetSchema/SchemaResponse.cs{3766..3979}"
     ],
     "mutation-level": "Complete",

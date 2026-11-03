@@ -11,9 +11,9 @@ using Nealytics.Engine.Infrastructure.Storage;
 public sealed class GetNamedMetricQuery
 {
     private readonly MetricAggregateReader _reader;
-    private readonly AnalyticsPlanner? _planner;
+    private readonly AnalyticsPlanner _planner;
 
-    public GetNamedMetricQuery(ClickHouseConnectionFactory connections, AnalyticsPlanner? planner = null)
+    public GetNamedMetricQuery(ClickHouseConnectionFactory connections, AnalyticsPlanner planner)
     {
         _reader = new MetricAggregateReader(connections);
         _planner = planner;
@@ -33,8 +33,8 @@ public sealed class GetNamedMetricQuery
     public async Task<NamedMetricResponse> ExecuteAsync(NamedMetricRequest request, CancellationToken cancellationToken)
     {
         MetricProjection projection = new MetricProjection([request.Definition]);
-        AnalyticsPlan? plan = _planner?.Select(projection.Components, request.Scope, null, request.Execution);
-        (string sql, IReadOnlyList<KeyValuePair<string, object?>> parameters) = plan?.Rollup is null
+        AnalyticsPlan plan = _planner.Select(projection.Components, request.Scope, null, request.Execution);
+        (string sql, IReadOnlyList<KeyValuePair<string, object?>> parameters) = plan.Rollup is null
             ? BuildQuery(request) : AnalyticsPlanSql.Build(plan, projection.Components, request.Scope, null);
         IReadOnlyDictionary<string, string?> values = await _reader.ReadAsync(
             sql, parameters, projection.Components, cancellationToken);
@@ -47,7 +47,7 @@ public sealed class GetNamedMetricQuery
             Value = MetricProjection.Evaluate(request.Definition, values),
             Unit = request.Definition.Unit,
             Segment = request.Segment,
-            Source = plan?.Source ?? "raw",
+            Source = plan.Source,
             Accuracy = request.Definition.Accuracy
         };
     }

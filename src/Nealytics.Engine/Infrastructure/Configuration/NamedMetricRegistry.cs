@@ -37,6 +37,10 @@ public sealed record NamedMetric(
 
 public sealed class NamedMetricRegistry
 {
+    private static readonly FrozenSet<string> Aggregations =
+        new[] { "count", "sum", "avg", "min", "max", "formula", "p50", "p75", "p90", "p95", "p99" }
+            .ToFrozenSet(StringComparer.Ordinal);
+
     private static readonly Regex NamePattern = new(
         "^[a-z][a-z0-9_]{0,62}$", RegexOptions.Compiled);
 
@@ -76,7 +80,7 @@ public sealed class NamedMetricRegistry
                 throw Invalid(index, "only version 1 is supported");
             }
             string? aggregation = declaration.Aggregation?.Trim().ToLowerInvariant();
-            if (aggregation is not ("count" or "sum" or "avg" or "min" or "max" or "formula" or "p50" or "p75" or "p90" or "p95" or "p99"))
+            if (aggregation is null || !Aggregations.Contains(aggregation))
             {
                 throw Invalid(index, "aggregation must be count, sum, avg, min, max, formula, p50, p75, p90, p95 or p99");
             }

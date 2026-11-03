@@ -14,6 +14,7 @@ public sealed class AnalyticsPlanningTests
     internal static TelemetryEngineOptions Options() => new()
     {
         EnableAnalyticsRollupPlanning = true,
+        AnalyticsRollupSourceIsAppendOnly = true,
         Dimensions = [new() { Name = "tag", Type = "LowCardinality" }, new() { Name = "nullable_tag" }],
         Measures = [new() { Name = "amount", Type = "Float64", Aggregations = "sum,avg,min,max,count,p50,p75,p90,p95,p99" }, new() { Name = "integer", Type = "Int64" }],
         TenantAttributes = [new() { Name = "cohort" }],
@@ -83,6 +84,8 @@ public sealed class AnalyticsPlanningTests
     [InlineData("disabled", "disabled")]
     [InlineData("raw", "requested")]
     [InlineData("unready", "not ready")]
+    [InlineData("mutable", "Append-only")]
+    [InlineData("retention_unknown", "not reconciled")]
     [InlineData("session", "Session")]
     [InlineData("tenant_group", "tenant-group")]
     [InlineData("before_epoch", "calendar")]
@@ -112,6 +115,8 @@ public sealed class AnalyticsPlanningTests
         {
             case "disabled": options.EnableAnalyticsRollupPlanning = false; break;
             case "raw": execution = "raw"; break;
+            case "mutable": options.AnalyticsRollupSourceIsAppendOnly = false; break;
+            case "retention_unknown": options.RetentionDays = 0; break;
             case "session": options.Rollups[0].Grain = "session"; options.Rollups[0].Dimensions = "tag"; break;
             case "tenant_group": options.Rollups[0].TenantAttributes = "cohort"; break;
             case "before_epoch": scope = Scope(DateTime.UnixEpoch.AddMilliseconds(-1), Start); break;
@@ -132,7 +137,7 @@ public sealed class AnalyticsPlanningTests
         }
         var configured = Build(options, scenario != "unready");
         NamedMetric[] components = scenario == "constant" ? [] : [configured.Metrics.Find(metricName)!];
-        var plan = configured.Planner.Select(components, scope, report, execution);
+        var plan = configured.Planner.Select(components, scope, report, execution, explain: true);
         Assert.Equal("raw", plan.Source);
         Assert.Null(plan.Rollup);
         var candidate = Assert.Single(plan.Candidates);
@@ -184,6 +189,48 @@ public sealed class AnalyticsPlanningTests
         Assert.Contains("delivery identity is ambiguous", plan.Candidates[0].Reason);
         options.Rollups.Clear();
         Assert.Empty(Build(options).Planner.Select([metric], Scope(), null, "auto").Candidates);
+    }
+
+    [Theory]
+    [InlineData(false, "auto")]
+    [InlineData(true, "raw")]
+    public void DisabledAndForcedRawExecutionSkipCandidateWork(bool enabled, string execution)
+    {
+        var options = Options();
+        options.EnableAnalyticsRollupPlanning = enabled;
+        var configured = Build(options);
+        var plan = configured.Planner.Select(configured.Metrics.Declared, Scope(), null, execution);
+        Assert.Equal("raw", plan.Source);
+        Assert.Null(plan.Rollup);
+        Assert.Empty(plan.Candidates);
+        Assert.Equal(new AnalyticsPlanSlice("raw", Start, Start.AddHours(3)), Assert.Single(plan.Slices));
+    }
+
+    [Fact]
+    public void RawRetentionUsesTheShortestPolicyAndAConservativeSecondBoundary()
+    {
+        var options = Options();
+        options.RetentionDays = 10;
+        options.EventTypeRetention = [new() { EventType = "action", Days = 1 }];
+        var configured = Build(options);
+        var clock = new FixedTime(Start.AddMilliseconds(500));
+        var planner = new AnalyticsPlanner(configured.Rollups, configured.Dimensions, Microsoft.Extensions.Options.Options.Create(options), clock);
+        var metric = configured.Metrics.Find("events")!;
+        DateTime cutoff = Start.AddDays(-1).AddSeconds(1);
+        var accepted = planner.Select([metric], Scope(cutoff, Start.AddDays(1)), null, "auto");
+        Assert.Equal("hybrid", accepted.Source);
+        var rejected = planner.Select([metric], Scope(cutoff.AddMilliseconds(-1), Start.AddDays(1)), null, "auto");
+        Assert.Equal("raw", rejected.Source);
+        Assert.Equal("The range may include raw rows removed by retention.", Assert.Single(rejected.Candidates).Reason);
+        options.EventTypeRetention = null!;
+        options.RetentionDays = int.MaxValue;
+        planner = new AnalyticsPlanner(configured.Rollups, configured.Dimensions, Microsoft.Extensions.Options.Options.Create(options), clock);
+        Assert.Equal("rollup", planner.Select([metric], Scope(), null, "auto").Source);
+    }
+
+    private sealed class FixedTime(DateTime now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => new(now);
     }
 
     [Fact]

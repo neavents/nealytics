@@ -1,0 +1,29 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj",
+      "../../tests/Nealytics.Engine.Tests.Integration/Nealytics.Engine.Tests.Integration.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~AnalyticsPlan|FullyQualifiedName~MetricAccuracy|FullyQualifiedName~NamedMetric|FullyQualifiedName~SavedReport",
+    "mutation-level": "Complete",
+    "concurrency": 1,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    },
+    "mutate": [
+      "Infrastructure/Query/AnalyticsPlanSql.cs",
+      "Infrastructure/Query/MetricAggregateSql.cs",
+      "Features/GetNamedMetric/GetNamedMetricQuery.cs",
+      "Features/GetSavedReport/GetSavedReportQuery.cs"
+    ]
+  }
+}

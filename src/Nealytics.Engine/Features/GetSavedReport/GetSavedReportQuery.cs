@@ -13,9 +13,9 @@ using Nealytics.Engine.Infrastructure.Storage;
 public sealed class GetSavedReportQuery
 {
     private readonly MetricAggregateReader _reader;
-    private readonly AnalyticsPlanner? _planner;
+    private readonly AnalyticsPlanner _planner;
 
-    public GetSavedReportQuery(ClickHouseConnectionFactory connections, AnalyticsPlanner? planner = null)
+    public GetSavedReportQuery(ClickHouseConnectionFactory connections, AnalyticsPlanner planner)
     {
         _reader = new MetricAggregateReader(connections);
         _planner = planner;
@@ -38,8 +38,8 @@ public sealed class GetSavedReportQuery
     {
         MetricProjection projection = new MetricProjection(request.Definition.Fields.Select(field => field.Definition));
         SavedReport definition = request.Definition;
-        AnalyticsPlan? plan = _planner?.Select(projection.Components, request.Scope, definition, request.Execution);
-        (string sql, IReadOnlyList<KeyValuePair<string, object?>> parameters) = plan?.Rollup is null
+        AnalyticsPlan plan = _planner.Select(projection.Components, request.Scope, definition, request.Execution);
+        (string sql, IReadOnlyList<KeyValuePair<string, object?>> parameters) = plan.Rollup is null
             ? BuildQuery(request) : AnalyticsPlanSql.Build(plan, projection.Components, request.Scope, definition);
         IReadOnlyList<MetricAggregateRow> selected = await _reader.ReadRowsAsync(
             sql, parameters, projection.Components, definition.GroupBy.Count, definition.Interval is not null,
@@ -70,7 +70,7 @@ public sealed class GetSavedReportQuery
             Shape = definition.Interval is not null ? "timeseries" : definition.IsGrouped ? "table" : "scalar",
             Fields = definition.IsGrouped ? Array.Empty<SavedReportValue>() : Values(definition, selected[0].Values),
             Rows = Array.AsReadOnly(rows),
-            Source = plan?.Source ?? "raw",
+            Source = plan.Source,
             Accuracy = AnalyticsExecution.Accuracy(definition.Fields.Select(field => field.Definition))
         };
     }

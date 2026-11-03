@@ -78,7 +78,11 @@ public sealed class AnalyticsPlanHttpTests
     [Fact]
     public async Task ExplainChoosesOnlyTheAuthenticatedProjectsReadyCandidatesWithoutQueryingStorage()
     {
-        await using var factory = new ProjectContextHttpTests.Factory(customize: options => options.EnableAnalyticsRollupPlanning = true);
+        await using var factory = new ProjectContextHttpTests.Factory(customize: options =>
+        {
+            options.EnableAnalyticsRollupPlanning = true;
+            options.AnalyticsRollupSourceIsAppendOnly = true;
+        });
         using var client = factory.CreateClient();
         var catalog = factory.Services.GetRequiredService<ProjectCatalog>();
         var alpha = catalog.Resolve("alpha")!;

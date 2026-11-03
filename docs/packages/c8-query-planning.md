@@ -18,3 +18,14 @@ collecting execution statistics. No benchmarks or backend-default changes.
 Quantile metrics declare exact or approximate accuracy. Approximate definitions require explicit
 caller opt-in, and exact formulas cannot conceal approximate dependencies. Initial state planning
 supports count, sum, average, minimum and maximum; quantiles use raw data with an explanation.
+
+Rollup admission also requires AnalyticsRollupSourceIsAppendOnly. This is an operator assertion,
+not a duplicate detector: use exclusively governed delivery writes with unique event ordering keys,
+no out-of-band UPDATE/DELETE/truncate or reused event identities, and verified rebuilds after any
+mutation. ReplacingMergeTree replacement and materialized aggregate states cannot retract the same
+rows automatically. Without this assertion, keep the raw path. Standard finite delivery-token
+retention and exclusive-writer recovery preconditions still apply.
+
+Queries crossing the shortest configured raw-retention horizon fall back to raw data, with a
+conservative whole-second TTL boundary. A nonpositive/unreconciled retention policy also falls back.
+This avoids serving retained rollup rows after corresponding raw rows may have expired.

@@ -18,17 +18,29 @@ public sealed class AnalyticsPlanner
     private readonly RollupRegistry _rollups;
     private readonly DimensionRegistry _dimensions;
     private readonly bool _enabled;
+    private readonly bool _appendOnly;
+    private readonly int _retentionDays;
+    private readonly TimeProvider _clock;
 
-    public AnalyticsPlanner(RollupRegistry rollups, DimensionRegistry dimensions, IOptions<TelemetryEngineOptions> options)
+    public AnalyticsPlanner(
+        RollupRegistry rollups, DimensionRegistry dimensions, IOptions<TelemetryEngineOptions> options, TimeProvider? clock = null)
     {
         _rollups = rollups;
         _dimensions = dimensions;
         _enabled = options.Value.EnableAnalyticsRollupPlanning;
+        _appendOnly = options.Value.AnalyticsRollupSourceIsAppendOnly;
+        _retentionDays = (options.Value.EventTypeRetention ?? []).Select(rule => rule.Days)
+            .Append(options.Value.RetentionDays).Min();
+        _clock = clock ?? TimeProvider.System;
     }
 
     internal AnalyticsPlan Select(
-        IReadOnlyList<NamedMetric> components, in QueryScope scope, SavedReport? report, string execution)
+        IReadOnlyList<NamedMetric> components, in QueryScope scope, SavedReport? report, string execution, bool explain = false)
     {
+        if (!explain && (!_enabled || execution == "raw"))
+        {
+            return new AnalyticsPlan("raw", null, [new("raw", scope.From, scope.To)], Array.Empty<AnalyticsPlanCandidate>());
+        }
         List<AnalyticsPlanCandidate> candidates = new(_rollups.Declared.Count);
         Rollup? selected = null;
         DateTime interiorFrom = default;
@@ -87,9 +99,27 @@ public sealed class AnalyticsPlanner
         {
             return "Session and insertion-time tenant-group rollups cannot preserve this query's semantics.";
         }
+        if (!_appendOnly)
+        {
+            return "Append-only source semantics and unique event ordering keys have not been asserted.";
+        }
         if (scope.From < DateTime.UnixEpoch || scope.To > LastBucket)
         {
             return "The range exceeds the rollup bucket's DateTime calendar.";
+        }
+        if (_retentionDays <= 0)
+        {
+            return "The raw retention policy is not reconciled for analytics planning.";
+        }
+        DateTime now = _clock.GetUtcNow().UtcDateTime;
+        if (_retentionDays <= now.Ticks / TimeSpan.TicksPerDay)
+        {
+            DateTime cutoff = now.AddDays(-_retentionDays);
+            cutoff = new DateTime(cutoff.Ticks - cutoff.Ticks % TimeSpan.TicksPerSecond, DateTimeKind.Utc).AddSeconds(1);
+            if (scope.From < cutoff)
+            {
+                return "The range may include raw rows removed by retention.";
+            }
         }
         if (report?.Interval == "hour" && rollup.Grain != RollupGrain.Hour)
         {
