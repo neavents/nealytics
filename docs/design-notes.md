@@ -529,3 +529,39 @@ confirmed cursor and its upper source bound; the redundant explicit disjunct was
 changing accepted states. Manifest serialization now uses a named 8,127-byte payload bound with
 ordinary bounded writer reservations, rather than unused expanded encoding scratch space. The
 65-byte checksum header brings the complete file bound to 8,192 bytes.
+
+## E4 bounded S3 source ownership
+
+S3 is an optional named source adapter around D1's existing checkpoint protocol. Operator-owned
+endpoint, bucket, key prefix and project declarations prevent a request from selecting a different
+resource or credential. A snapshot identity binds the configured resource, key, version, opaque
+ETag and length. It is a reproducible resource identifier, not an authorization token or a content
+checksum; structural input validation and project authorization remain independent checks.
+
+Exact S3 keys include literal percent signs, repeated slashes and dot segments. Strict UTF-8 byte
+encoding and raw URI construction preserve those bytes through signing and HTTP transport. SigV4
+uses sorted signed headers and a cleared pooled workspace. Independent signing vectors include
+short secrets and session tokens. Redirects, cookies, automatic decompression and proxy discovery
+are disabled so transport behavior cannot silently select a different representation or endpoint.
+
+One queue-free source operation owns a bounded pooled response buffer through conditional range
+validation and complete-record framing. D1 may make its existing second bounded copy before WAL
+admission. Each layer retains disposal ownership on faults, cancellation and rejection; buffers
+return cleared. Metadata failures cannot create a checkpoint. Once admission starts, D1 owns the
+intent/receipt ambiguity contract. A confirmed retry refetches the original stored chunk length,
+even after framing limits change, and D1 checks its byte hash before returning the old receipt.
+An unavailable old object cannot be reconstructed from metadata alone.
+
+Mutation review strengthened independently recomputed snapshot validation, exact EOF/range checks,
+response disposal, short-secret signing and control-body I/O diagnostics. UTF-8 encoding uses
+exception fallbacks without an unused BOM setting; URI construction delegates equivalent default
+port normalization to Uri. These simplifications remove irrelevant decisions without reducing
+source validation or excluding maintained code from the test scope.
+
+Published qualification must wait for ClickHouse on its network address. The pinned image first
+runs a localhost-only initialization server, which can answer a local table query before shutting
+down for the real server. A local readiness query could start the engine during that gap and leave
+startup schema reconciliation incomplete. The connector scripts now query the same network alias
+used by the engine; a delayed-initialization reproduction checks refusal during the temporary
+phase and success after network startup. No engine retry/readiness contract is changed by this
+fixture correction.

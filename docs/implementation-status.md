@@ -1,5 +1,15 @@
 # Implementation evidence
 
+E4 checkpointed S3 object import is implemented and functionally qualified. Optional named,
+project-pinned sources use signed conditional ranges, version/ETag fencing and bounded NDJSON
+framing through D1's persisted receipts. The milestone passes 3,589 unit and 313 real-dependency
+integration cases, 527/527 changed executable lines, 375/375 branch outcomes and 518/518 killed
+executable mutants. All 12 canonical/mapped Kafka, NDJSON and S3 published checks pass on actual
+Linux x64/ARM64 with io_uring/custom. See the [E4 ledger](packages/e4-s3-import-verification.md),
+[operator guide](s3-import.md) and [remaining integration groups](integration-delivery-status.md).
+This completes the bounded S3 adapter, not category E or the remaining roadmap. Main stays
+untouched, benchmarks stay stopped and hosted F remains outside current implementation scope.
+
 D1 durable NDJSON import checkpoints are implemented and functionally qualified on
 `feat/developer-operator-tools-d1-import-checkpoints`. Confirmed latest-chunk retries preserve
 their receipt across restart; uncertain processing markers require reconciliation. The milestone

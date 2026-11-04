@@ -2,7 +2,8 @@
 
 Selected by the owner's continuing roadmap goal after qualified D1, 2026-11-04.
 Category: feat/integrations, including D1 through a normal feature merge.
-Step: feat/integrations-e4-s3-import. Status: implementation and qualification in progress.
+Step: feat/integrations-e4-s3-import. Status: bounded implementation functionally qualified;
+see the [evidence ledger](e4-s3-import-verification.md) and [operator guide](../s3-import.md).
 Main and the original unfinished rebase remain untouched.
 
 ## Outcome and compatibility
