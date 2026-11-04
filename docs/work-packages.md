@@ -214,3 +214,11 @@ bindings, bounded multiline-record parsing and accepted-prefix delivery through 
 contracts. The bounded implementation is functionally qualified; see the
 [evidence ledger](packages/e5-csv-import-verification.md) and [operator contract](csv-import.md).
 Durable CSV jobs, S3 CSV framing, Parquet, additional sources and sinks remain distinct steps.
+
+## E6: checkpointed named HTTP sources
+
+After qualified E5, continue the source-expansion group with [named HTTP NDJSON objects](packages/e6-http-import.md)
+on feat/integrations-e6-http-import. The prepared contract uses operator-selected URLs, strong
+conditional ranges and D1 receipts with bounded transport and secret-safe source identities.
+Identity/key lifetime must be resolved before runtime implementation. The adapter is not yet
+implemented or qualified; GCS, further formats, database adapters and sinks remain separate steps.
