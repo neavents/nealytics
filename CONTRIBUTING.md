@@ -50,6 +50,10 @@ The tests never assume a specific container name or port. The owner stopped meas
 2026-10-30; the default script and CI exclude the tagged measurement-harness fixtures. Pure helper
 unit and mutation tests continue without running workloads or collecting performance results.
 
+Direct integration-project runs also require the [pinned S3 protocol fixture](tests/Fixtures/S3/README.md)
+to be built once. The integration script and CI build it automatically; it is a test-only dependency,
+not an engine service or deployment requirement.
+
 ### Coverage
 
 ```bash

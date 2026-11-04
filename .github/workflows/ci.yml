@@ -124,6 +124,9 @@ jobs:
           docker exec ${{ job.services.clickhouse.id }} clickhouse-client --queries-file /tmp/clickhouse-init.sql
           docker exec ${{ job.services.clickhouse.id }} clickhouse-client -q "DESCRIBE nealytics_core.global_events"
 
+      - name: Build the pinned optional S3 test fixture
+        run: docker build --file tests/Fixtures/S3/Dockerfile --tag nealytics-s3-fixture:9e49d5e .
+
       - name: Integration tests
         env:
           TelemetryEngine__ClickHouseConnectionString: "Host=127.0.0.1;Port=9000;Database=nealytics_core;User=default;Password=;"

@@ -203,4 +203,5 @@ public sealed class TelemetryEngineOptions
     public int ImportMaxConcurrency { get; set; } = 2;
     public bool EnableImportJobs { get; set; }
     public int ImportJobMaxJobs { get; set; } = 256;
+    public List<S3SourceOptions> S3Sources { get; set; } = [];
 }

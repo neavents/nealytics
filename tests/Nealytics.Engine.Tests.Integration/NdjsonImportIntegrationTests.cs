@@ -72,10 +72,14 @@ public sealed class NdjsonImportIntegrationTests
         private readonly string _schema;
         private readonly string? _previous;
         private readonly string _directory;
+        private readonly bool _preserveWal;
         private bool _disposed;
-        internal Factory(string project, string measure, string path, bool mapped, bool jobs = false)
+        internal Factory(string project, string measure, string path, bool mapped, bool jobs = false,
+            S3SourceOptions? source = null, string? directory = null, bool preserveWal = false)
         {
-            _directory = Environment.GetEnvironmentVariable("TelemetryEngine__WriteAheadLogDirectory")!;
+            _directory = directory ?? Environment.GetEnvironmentVariable("TelemetryEngine__WriteAheadLogDirectory")!;
+            _preserveWal = preserveWal;
+            if (directory is not null) Environment.SetEnvironmentVariable("TelemetryEngine__WriteAheadLogDirectory", directory);
             _schema = _directory + ".json";
             var options = new TelemetryEngineOptions
             {
@@ -88,6 +92,12 @@ public sealed class NdjsonImportIntegrationTests
                     NamedMetrics = [new() { Name = "total", Aggregation = "sum", Measure = measure }]
                 }]
             };
+            if (source is not null)
+            {
+                options.S3Sources = [source];
+                options.EnableImportJobs = true;
+                options.ImportMaxRecords = 1;
+            }
             if (mapped)
             {
                 options.NdjsonSourceMappings[project] = new()
@@ -117,7 +127,7 @@ public sealed class NdjsonImportIntegrationTests
             {
                 Environment.SetEnvironmentVariable("TelemetryEngine__SchemaFile", _previous);
                 File.Delete(_schema);
-                if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
+                if (!_preserveWal && Directory.Exists(_directory)) Directory.Delete(_directory, true);
             }
         }
     }

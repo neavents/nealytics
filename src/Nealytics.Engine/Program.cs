@@ -35,6 +35,7 @@ using Nealytics.Engine.Features.GetTopEvents;
 using Nealytics.Engine.Features.IngestTelemetry;
 using Nealytics.Engine.Features.ImportNdjson;
 using Nealytics.Engine.Features.ImportJobs;
+using Nealytics.Engine.Features.S3Import;
 using Nealytics.Engine.Features.SourceMapping;
 using Nealytics.Engine.Features.UpsertTenantAttributes;
 using Nealytics.Engine.Infrastructure.Configuration;
@@ -267,6 +268,13 @@ if (engineOpts.EnableImportJobs)
     builder.Services.AddSingleton<ImportJobCoordinator>();
 }
 builder.Services.AddSingleton<WriteAheadLogger>();
+S3Sources s3Sources = new(engineOpts, projectCatalog);
+if (s3Sources.Count != 0)
+{
+    builder.Services.AddSingleton(s3Sources);
+    builder.Services.AddSingleton<S3ObjectClient>();
+    builder.Services.AddSingleton<S3ImportCoordinator>();
+}
 builder.Services.AddSingleton<TelemetryChannelBroker>();
 builder.Services.AddSingleton<ApiKeyValidator>();
 builder.Services.AddSingleton<ITenantAttributeWriter, ClickHouseTenantAttributeWriter>();
@@ -416,6 +424,10 @@ if (engineOpts.EnableNdjsonImport)
 if (engineOpts.EnableImportJobs)
 {
     app.MapImportJobs();
+}
+if (s3Sources.Count != 0)
+{
+    app.MapS3Import();
 }
 app.MapGetProjectTimeline();
 app.MapGetSessionAnalytics();

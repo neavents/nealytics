@@ -20,8 +20,8 @@
     },
     "mutate": [
       "Features/ImportJobs/*.cs",
-      "Program.cs{11115..11728}",
-      "Program.cs{17321..17382}",
+      "Program.cs{11157..11770}",
+      "Program.cs{17605..17666}",
       "Infrastructure/Configuration/TelemetryEngineOptions.cs{7417..7517}"
     ]
   }

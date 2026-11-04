@@ -20,8 +20,8 @@
     },
     "mutate": [
       "Features/ImportNdjson/*.cs",
-      "Program.cs{10501..11051}",
-      "Program.cs{17255..17320}",
+      "Program.cs{10543..11093}",
+      "Program.cs{17539..17604}",
       "Infrastructure/Configuration/TelemetryEngineOptions.cs{7106..7417}"
     ]
   }

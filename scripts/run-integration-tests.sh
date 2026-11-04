@@ -55,4 +55,5 @@ export TelemetryEngine__JwtSymmetricKey="local-integration-test-key-at-least-32-
 export TelemetryEngine__AllowedProjectKeys="test-key-1,test-key-2"
 
 echo "Running integration tests..."
+docker build --file tests/Fixtures/S3/Dockerfile --tag nealytics-s3-fixture:9e49d5e .
 dotnet test tests/Nealytics.Engine.Tests.Integration --filter 'Category!=PerformanceMeasurement' "$@"

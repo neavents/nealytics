@@ -32,6 +32,15 @@ jobs:
       - name: Kafka, WAL, storage, restart and poison-prefix checks
         run: python3 scripts/qualify-kafka.py --image nealytics-kafka-qualification:local --architecture '${{ matrix.architecture }}' --output 'artifacts/kafka/${{ matrix.architecture }}'
 
+      - name: Build the pinned optional S3 test fixture
+        run: docker build --file tests/Fixtures/S3/Dockerfile --tag nealytics-s3-fixture:9e49d5e .
+
+      - name: S3 versioned imports, checkpoint restart and query totals
+        run: python3 scripts/qualify-s3.py --image nealytics-kafka-qualification:local --architecture '${{ matrix.architecture }}' --output 'artifacts/s3/${{ matrix.architecture }}'
+
+      - name: Mapped S3 versioned imports and checkpoint restart
+        run: python3 scripts/qualify-s3.py --mapped --image nealytics-kafka-qualification:local --architecture '${{ matrix.architecture }}' --output 'artifacts/mapped-s3/${{ matrix.architecture }}'
+
       - name: NDJSON streaming, receipts, schema and restart checks
         run: python3 scripts/qualify-ndjson.py --jobs --image nealytics-kafka-qualification:local --architecture '${{ matrix.architecture }}' --output 'artifacts/ndjson/${{ matrix.architecture }}'
 
@@ -51,3 +60,5 @@ jobs:
             artifacts/ndjson/${{ matrix.architecture }}
             artifacts/mapped-kafka/${{ matrix.architecture }}
             artifacts/mapped-ndjson/${{ matrix.architecture }}
+            artifacts/s3/${{ matrix.architecture }}
+            artifacts/mapped-s3/${{ matrix.architecture }}
