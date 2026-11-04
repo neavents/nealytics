@@ -123,7 +123,7 @@ def main():
               'CLICKHOUSE_SKIP_USER_SETUP=1', '--mount', f'type=bind,source={Path.cwd()}/clickhouse-init.sql,target=/docker-entrypoint-initdb.d/init.sql,readonly'])
         start(objects, args.store_image, ['--network-alias', 'objects', '--memory', '1g', '--cpus', '2', '--publish', '127.0.0.1::9000',
               '--env', 'MINIO_ROOT_USER=' + access, '--env', 'MINIO_ROOT_PASSWORD=' + secret, '--env', 'MINIO_BROWSER=off'])
-        wait_for(lambda: subprocess.run(['docker', 'exec', storage, 'clickhouse-client', '-q', 'SELECT count() FROM nealytics_core.global_events'], capture_output=True).returncode == 0, 'storage initialization')
+        wait_for(lambda: subprocess.run(['docker', 'exec', storage, 'clickhouse-client', '--host', 'storage', '-q', 'SELECT count() FROM nealytics_core.global_events'], capture_output=True).returncode == 0, 'storage initialization')
         def object_ready():
             try:
                 connection = http.client.HTTPConnection('127.0.0.1', port(objects, 9000), timeout=2)

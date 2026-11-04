@@ -113,7 +113,7 @@ def main():
         start(storage, CLICKHOUSE, ['--network-alias', 'storage', '--memory', '2g', '--cpus', '2', '--env',
               'CLICKHOUSE_SKIP_USER_SETUP=1', '--mount',
               f'type=bind,source={Path.cwd()}/clickhouse-init.sql,target=/docker-entrypoint-initdb.d/init.sql,readonly'])
-        wait_for(lambda: subprocess.run(['docker', 'exec', storage, 'clickhouse-client', '--query',
+        wait_for(lambda: subprocess.run(['docker', 'exec', storage, 'clickhouse-client', '--host', 'storage', '--query',
                  'SELECT count() FROM nealytics_core.global_events'], capture_output=True).returncode == 0, 'storage initialization')
         settings = {
             'TelemetryEngine__ClickHouseConnectionString': 'Host=storage;Port=9000;Database=nealytics_core;User=default;Password=;',
