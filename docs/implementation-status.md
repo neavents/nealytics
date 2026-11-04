@@ -1,5 +1,15 @@
 # Implementation evidence
 
+D1 durable NDJSON import checkpoints are implemented and functionally qualified on
+`feat/developer-operator-tools-d1-import-checkpoints`. Confirmed latest-chunk retries preserve
+their receipt across restart; uncertain processing markers require reconciliation. The milestone
+passes 3,372 local unit cases, 309 real-ClickHouse CI cases, 485/485 changed executable lines,
+258/258 branch outcomes and 414/414 detected executable mutants. Published actual Linux x64/ARM64
+checks pass with io_uring/custom. See the [D1 ledger](packages/d1-import-checkpoints-verification.md)
+and [operator guide](import-jobs.md). This does not finish category D or the remaining roadmap.
+The older package entries below describe their own qualified snapshots. Main stays untouched,
+benchmarks stay stopped, and hosted F remains outside current implementation scope.
+
 E3 declarative source mapping is implemented and functionally qualified. Kafka and pinned-project
 NDJSON share bounded nested-field bindings, defaults and scalar conversion, followed by existing
 authorization, schema validation and durable delivery. The milestone has 3,210 passing unit cases,

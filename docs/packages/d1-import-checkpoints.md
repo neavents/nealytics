@@ -3,7 +3,8 @@
 Selected on the owner's continuation after qualified E3, 2026-11-04.
 Category: `feat/developer-operator-tools`, advanced normally from its planning ancestor to the
 qualified E3 foundation `1aa755b`. Step: `feat/developer-operator-tools-d1-import-checkpoints`.
-Status: implementation and qualification in progress. Main and the original rebase stay untouched.
+Status: bounded scope implemented and functionally qualified; see the
+[evidence ledger](d1-import-checkpoints-verification.md). Main and the original rebase stay untouched.
 
 ## Outcome and compatibility
 
