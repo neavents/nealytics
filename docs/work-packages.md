@@ -205,3 +205,11 @@ NDJSON chunks, reusing project policy and D1 receipts. The bounded E4 step is fu
 qualified on feat/integrations-e4-s3-import; see the [evidence ledger](packages/e4-s3-import-verification.md)
 and [remaining integration groups](integration-delivery-status.md). Scans, notifications, scheduling, formats beyond NDJSON,
 other storage adapters and sinks remain distinct packages.
+
+## E5: bounded headered CSV import
+
+After qualified E4, continue the integration roadmap with [headered CSV uploads](packages/e5-csv-import.md)
+on feat/integrations-e5-csv-import. This adds a second explicit file format with compiled field
+bindings, bounded multiline-record parsing and accepted-prefix delivery through existing policy/WAL
+contracts. The brief is prepared; CSV runtime implementation and qualification remain open.
+Durable CSV jobs, S3 CSV framing, Parquet, additional sources and sinks remain distinct steps.

@@ -144,6 +144,7 @@ named feat/correctness-and-safety cannot also contain child refs beneath that sa
 | E3 declarative source mapping | feat/integrations-e3-source-mapping |
 | D1 durable import checkpoints | feat/developer-operator-tools-d1-import-checkpoints |
 | E4 S3 object import | feat/integrations-e4-s3-import |
+| E5 headered CSV import | feat/integrations-e5-csv-import |
 
 New C-F steps receive branches when their bounded package scope is defined. Do not invent an
 implementation sequence for those categories just to populate branch names.
