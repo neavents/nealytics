@@ -196,3 +196,11 @@ reconciliation for ambiguous admissions. The bounded D1 step is functionally qua
 [evidence ledger](packages/d1-import-checkpoints-verification.md) and [operator contract](import-jobs.md).
 Scheduling, retention, reconciliation
 resolution and external storage adapters remain separate workflows.
+
+## E4: S3 object import
+
+The continuing roadmap goal selects [checkpointed S3 object import](packages/e4-s3-import.md) after
+D1. Named operator-configured sources inspect and conditionally read one object into bounded
+NDJSON chunks, reusing project policy and D1 receipts. Implementation and qualification are in
+progress on feat/integrations-e4-s3-import. Scans, notifications, scheduling, formats beyond NDJSON,
+other storage adapters and sinks remain distinct packages.

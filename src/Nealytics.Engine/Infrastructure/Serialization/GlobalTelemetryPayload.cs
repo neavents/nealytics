@@ -65,6 +65,8 @@ public sealed class GlobalTelemetryPayload
 [JsonSerializable(typeof(Nealytics.Engine.Features.ImportJobs.ImportJobState))]
 [JsonSerializable(typeof(Nealytics.Engine.Features.ImportJobs.ImportJobResponse))]
 [JsonSerializable(typeof(Nealytics.Engine.Features.ImportJobs.ImportJobError))]
+[JsonSerializable(typeof(Nealytics.Engine.Features.S3Import.S3ObjectRequest))]
+[JsonSerializable(typeof(Nealytics.Engine.Features.S3Import.S3ObjectSnapshot))]
 [JsonSerializable(typeof(Nealytics.Engine.Infrastructure.Configuration.SourceMappingOptions))]
 [JsonSerializable(typeof(TelemetryDeliveryUnit))]
 [JsonSerializable(typeof(List<GlobalTelemetryPayload>))]
