@@ -2,9 +2,9 @@ name: Integration connectors
 
 on:
   push:
-    branches: ['feat/integrations*']
+    branches: ['feat/integrations*', 'feat/developer-operator-tools*']
   pull_request:
-    branches: [main, 'feat/integrations*']
+    branches: [main, 'feat/integrations*', 'feat/developer-operator-tools*']
   workflow_dispatch:
 
 permissions:
@@ -33,13 +33,13 @@ jobs:
         run: python3 scripts/qualify-kafka.py --image nealytics-kafka-qualification:local --architecture '${{ matrix.architecture }}' --output 'artifacts/kafka/${{ matrix.architecture }}'
 
       - name: NDJSON streaming, receipts, schema and restart checks
-        run: python3 scripts/qualify-ndjson.py --image nealytics-kafka-qualification:local --architecture '${{ matrix.architecture }}' --output 'artifacts/ndjson/${{ matrix.architecture }}'
+        run: python3 scripts/qualify-ndjson.py --jobs --image nealytics-kafka-qualification:local --architecture '${{ matrix.architecture }}' --output 'artifacts/ndjson/${{ matrix.architecture }}'
 
       - name: Mapped Kafka source, offsets, storage and restart checks
         run: python3 scripts/qualify-kafka.py --mapped --image nealytics-kafka-qualification:local --architecture '${{ matrix.architecture }}' --output 'artifacts/mapped-kafka/${{ matrix.architecture }}'
 
       - name: Mapped NDJSON source, receipts, schema and restart checks
-        run: python3 scripts/qualify-ndjson.py --mapped --image nealytics-kafka-qualification:local --architecture '${{ matrix.architecture }}' --output 'artifacts/mapped-ndjson/${{ matrix.architecture }}'
+        run: python3 scripts/qualify-ndjson.py --mapped --jobs --image nealytics-kafka-qualification:local --architecture '${{ matrix.architecture }}' --output 'artifacts/mapped-ndjson/${{ matrix.architecture }}'
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()

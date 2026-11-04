@@ -201,4 +201,6 @@ public sealed class TelemetryEngineOptions
     public int ImportMaxLineBytes { get; set; } = 65_536;
     public int ImportMaxRecords { get; set; } = 1_000;
     public int ImportMaxConcurrency { get; set; } = 2;
+    public bool EnableImportJobs { get; set; }
+    public int ImportJobMaxJobs { get; set; } = 256;
 }

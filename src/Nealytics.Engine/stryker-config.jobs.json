@@ -1,0 +1,28 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~ImportJob",
+    "mutation-level": "Complete",
+    "concurrency": 4,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    },
+    "mutate": [
+      "Features/ImportJobs/*.cs",
+      "Program.cs{11115..11728}",
+      "Program.cs{17321..17382}",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{7417..7517}"
+    ]
+  }
+}

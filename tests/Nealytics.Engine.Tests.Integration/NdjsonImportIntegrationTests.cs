@@ -67,19 +67,19 @@ public sealed class NdjsonImportIntegrationTests
         }
     }
 
-    private sealed class Factory : TestWebApplicationFactory
+    internal sealed class Factory : TestWebApplicationFactory
     {
         private readonly string _schema;
         private readonly string? _previous;
         private readonly string _directory;
         private bool _disposed;
-        internal Factory(string project, string measure, string path, bool mapped)
+        internal Factory(string project, string measure, string path, bool mapped, bool jobs = false)
         {
             _directory = Environment.GetEnvironmentVariable("TelemetryEngine__WriteAheadLogDirectory")!;
             _schema = _directory + ".json";
             var options = new TelemetryEngineOptions
             {
-                EnableNdjsonImport = true, IngestionExecutionPath = path,
+                EnableNdjsonImport = true, EnableImportJobs = jobs, IngestionExecutionPath = path,
                 IngestionKeys = [new() { Key = "import-key", Scope = "server", ProjectId = project }],
                 ProjectSchemas = [new()
                 {
