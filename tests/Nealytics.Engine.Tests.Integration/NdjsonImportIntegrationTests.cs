@@ -75,7 +75,8 @@ public sealed class NdjsonImportIntegrationTests
         private readonly bool _preserveWal;
         private bool _disposed;
         internal Factory(string project, string measure, string path, bool mapped, bool jobs = false,
-            S3SourceOptions? source = null, string? directory = null, bool preserveWal = false)
+            S3SourceOptions? source = null, string? directory = null, bool preserveWal = false,
+            Action<TelemetryEngineOptions>? configure = null)
         {
             _directory = directory ?? Environment.GetEnvironmentVariable("TelemetryEngine__WriteAheadLogDirectory")!;
             _preserveWal = preserveWal;
@@ -113,6 +114,7 @@ public sealed class NdjsonImportIntegrationTests
                     }
                 };
             }
+            configure?.Invoke(options);
             File.WriteAllText(_schema, JsonSerializer.Serialize(new Dictionary<string, TelemetryEngineOptions> { ["TelemetryEngine"] = options }));
             _previous = Environment.GetEnvironmentVariable("TelemetryEngine__SchemaFile");
             Environment.SetEnvironmentVariable("TelemetryEngine__SchemaFile", _schema);

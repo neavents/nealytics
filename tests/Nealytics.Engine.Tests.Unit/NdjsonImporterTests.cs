@@ -142,7 +142,7 @@ public sealed class NdjsonImporterTests
         while (!condition()) await Task.Delay(1, deadline.Token);
     }
 
-    private sealed class Harness : IAsyncDisposable
+    internal sealed class Harness : IAsyncDisposable
     {
         private readonly string _directory = Path.Combine(Path.GetTempPath(), "nealytics-import-unit-" + Guid.NewGuid().ToString("N"));
         public Harness(string path = "managed", int capacity = 8, Func<ValueTask>? flush = null, Func<ReadOnlyMemory<byte>, ValueTask>? append = null)
@@ -161,14 +161,19 @@ public sealed class NdjsonImporterTests
             var lifetime = Substitute.For<IHostApplicationLifetime>();
             lifetime.ApplicationStopping.Returns(Stopping.Token);
             var dispatcher = new DurableIngestDispatcher(Wal, Broker, new IngestionRequestReader(configured), lifetime);
-            Importer = new NdjsonImporter(dispatcher, new IngestGate(options, measures),
-                new DimensionSanitizer(dimensions, NullLogger<DimensionSanitizer>.Instance),
-                new MeasureSanitizer(measures, NullLogger<MeasureSanitizer>.Instance), NdjsonImportLimits.Create(options), lifetime);
+            var gate = new IngestGate(options, measures);
+            var dimensionSanitizer = new DimensionSanitizer(dimensions, NullLogger<DimensionSanitizer>.Instance);
+            var measureSanitizer = new MeasureSanitizer(measures, NullLogger<MeasureSanitizer>.Instance);
+            var limits = NdjsonImportLimits.Create(options);
+            Importer = new NdjsonImporter(dispatcher, gate, dimensionSanitizer, measureSanitizer, limits, lifetime);
+            CsvImporter = new Nealytics.Engine.Features.ImportCsv.CsvImporter(
+                dispatcher, gate, dimensionSanitizer, measureSanitizer, limits, lifetime);
         }
         public IngestionKeyPolicy Policy { get; } = new(IngestionKeyScope.Server, "p", EventTypePattern.None);
         public WriteAheadLogger Wal { get; }
         public TelemetryChannelBroker Broker { get; }
         public NdjsonImporter Importer { get; }
+        public Nealytics.Engine.Features.ImportCsv.CsvImporter CsvImporter { get; }
         public FileBoundary File { get; }
         public CancellationTokenSource Stopping { get; } = new();
         public async ValueTask DisposeAsync()
@@ -180,7 +185,7 @@ public sealed class NdjsonImporterTests
         }
     }
 
-    private sealed class FileBoundary(Func<ValueTask>? flush, Func<ReadOnlyMemory<byte>, ValueTask>? append) : IWalFile
+    internal sealed class FileBoundary(Func<ValueTask>? flush, Func<ReadOnlyMemory<byte>, ValueTask>? append) : IWalFile
     {
         public List<byte[]> Records { get; } = [];
         public async ValueTask AppendAsync(ReadOnlyMemory<byte> record)

@@ -50,6 +50,9 @@ jobs:
       - name: Mapped NDJSON source, receipts, schema and restart checks
         run: python3 scripts/qualify-ndjson.py --mapped --jobs --image nealytics-kafka-qualification:local --architecture '${{ matrix.architecture }}' --output 'artifacts/mapped-ndjson/${{ matrix.architecture }}'
 
+      - name: CSV multiline mapping, prefix receipts and restart checks
+        run: python3 scripts/qualify-csv.py --image nealytics-kafka-qualification:local --architecture '${{ matrix.architecture }}' --output 'artifacts/csv/${{ matrix.architecture }}'
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
@@ -62,3 +65,4 @@ jobs:
             artifacts/mapped-ndjson/${{ matrix.architecture }}
             artifacts/s3/${{ matrix.architecture }}
             artifacts/mapped-s3/${{ matrix.architecture }}
+            artifacts/csv/${{ matrix.architecture }}

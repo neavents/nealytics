@@ -8,7 +8,7 @@
     "test-case-filter": "FullyQualifiedName~ProjectContext|FullyQualifiedName~ApiKeyValidator|FullyQualifiedName~IngestionKey|FullyQualifiedName~MeasureColumnBuffer|FullyQualifiedName~TelemetryColumnBuffers|FullyQualifiedName~DurableIngestDispatcher",
     "mutate": [
       "Features/GetSchema/GetSchemaEndpoint.cs{5434..5479}",
-      "Program.cs{12843..13758}"
+      "Program.cs{13125..14040}"
     ],
     "mutation-level": "Complete",
     "concurrency": 1,

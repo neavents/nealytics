@@ -565,3 +565,33 @@ startup schema reconciliation incomplete. The connector scripts now query the sa
 used by the engine; a delayed-initialization reproduction checks refusal during the temporary
 phase and success after network startup. No engine retry/readiness contract is changed by this
 fixture correction.
+
+## E5 CSV record and mapping ownership
+
+CSV framing tracks quotes across pipe segments and records the physical comma positions outside
+quoted fields. Decoding uses those validated boundaries directly; it does not run a second quote
+scanner or build an intermediate JSON row. One bounded pooled raw-record buffer and at most 255
+comma offsets are reused per request. The header's frozen ordinal index and current decoded cells
+provide a narrow value reader to the existing compiled mapping. Constrained struct readers share
+mapping, text-budget and payload construction rules without boxing or a per-row callback closure.
+
+CSV's logical-record budget includes quote syntax, BOM and ending separators; quoted newlines
+remain inside the record. The same import concurrency limiter is shared with NDJSON/job/S3 routes,
+while ordinary track/beacon retains its independent admission. CSV can be enabled without NDJSON.
+Headers validate every referenced column before telemetry admission, but a valid header consumes
+source bytes even when no data row follows. Data receipt positions count records, not lines.
+
+A mapping can name undeclared fields; normal dimension/measure sanitization still runs before WAL
+serialization. Explicit event identity/time and project policy remain shared requirements. CSV
+adds no persisted retry identity, so missing receipts remain ambiguous. Its multiline grammar
+cannot be substituted into S3's NDJSON LF framing or D1 raw chunk contract without a separate
+header/checkpoint design. No persisted format, mandatory dependency or backend default changes.
+
+Initial mutation review exposed missing independent assertions for byte-level BOM preservation,
+per-record parser state, declared-name boundaries, canceled-read progress, source/body ownership
+and serialized sanitization. Tests now compare the UTF-8 bytes of preserved BOM content and use a
+finite reader that rejects reads beyond completed input. Redundant preamble reset/fallthrough
+work was removed: every successfully framed first record has already resolved its preamble state.
+Field-boundary reuse also removes the duplicate scanner's redundant closing-quote bounds and its
+mutated nonprogress loops. Preliminary/failed qualification attempts remain distinct from final
+source evidence; no mutation threshold or maintained responsibility was reduced.
