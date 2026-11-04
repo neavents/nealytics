@@ -13,6 +13,22 @@ public sealed class ImportJobConfigurationTests
             ImportJobTestSupport.Contracts().Find("p"));
     }
 
+    [Fact]
+    public void VersionOneMappingHasAStableOrdinalCanonicalContract()
+    {
+        var options = ImportJobTestSupport.Options();
+        options.NdjsonSourceMappings["p"] = new()
+        {
+            Fields = new()
+            {
+                ["tenantId"] = new() { Default = "t" },
+                ["projectId"] = new() { Default = "p" }
+            }
+        };
+        Assert.Equal("4CCC6BFF4B2FD6DD21E5E30CD2B795D8105B2966396BF157283AE8300E02FC9A",
+            ImportJobTestSupport.Contracts(options).Find("p"));
+    }
+
     [Theory]
     [InlineData(false, 1, 1)]
     [InlineData(true, 0, 1)]

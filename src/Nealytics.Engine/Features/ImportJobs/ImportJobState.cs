@@ -21,7 +21,7 @@ public sealed record ImportJobState(
         {
             throw new InvalidDataException("Import job identity or contract is invalid.");
         }
-        if (SourceBytes < 0 || NextByteOffset < 0 || NextByteOffset > SourceBytes
+        if (NextByteOffset < 0 || NextByteOffset > SourceBytes
             || AcceptedRecords < 0 || AcceptedRecords > NextByteOffset
             || ChunkOffset < 0 || ChunkOffset > NextByteOffset
             || ChunkBytes is < 0 or > 1_048_576 || ChunkBytes > SourceBytes - ChunkOffset)

@@ -12,6 +12,7 @@ using Nealytics.Engine.Infrastructure.Storage.Wal;
 internal sealed class ImportJobJournal : IDisposable
 {
     private const int ManifestBytes = 8_192;
+    private const int PayloadBytes = 8_127;
     private readonly string _directory;
     private readonly FileStream _lease;
     private readonly Func<string, FileMode, FileStream> _open;
@@ -87,7 +88,7 @@ internal sealed class ImportJobJournal : IDisposable
     {
         EnsureOwned();
         state.Validate();
-        using WalRecordBuffer buffer = new(ManifestBytes - 65, reserveForEncoding: true);
+        using WalRecordBuffer buffer = new(PayloadBytes);
         using (Utf8JsonWriter writer = new(buffer))
         {
             JsonSerializer.Serialize(writer, state, TelemetryAotContext.Default.ImportJobState);

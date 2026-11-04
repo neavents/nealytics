@@ -519,3 +519,13 @@ D1 published qualification also restores a checksummed processing-marker fixture
 is stopped, then verifies that actual Linux startup fences it from replay. This is a recovery
 fixture, not evidence of an abrupt-crash timing window. File-level fault tests separately inject
 prepare/final write, flush, rename and directory-sync failures around real manifest storage.
+
+Mutation review strengthened checks for exact chunk/source boundaries, callback-reader completion,
+native lease ownership independent of managed file sharing, lease flush and parent-directory
+synchronization, read-only manifest recovery, maximum padded manifests and stable mapped contract
+vectors. Endpoint metadata checks create their own host so startup mutation coverage belongs to
+the assertion that inspects it. A negative source length is already rejected by the nonnegative
+confirmed cursor and its upper source bound; the redundant explicit disjunct was removed without
+changing accepted states. Manifest serialization now uses a named 8,127-byte payload bound with
+ordinary bounded writer reservations, rather than unused expanded encoding scratch space. The
+65-byte checksum header brings the complete file bound to 8,192 bytes.

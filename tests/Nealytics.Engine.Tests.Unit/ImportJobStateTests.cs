@@ -85,6 +85,7 @@ public sealed class ImportJobStateTests
         };
         state.Validate();
         (state with { Status = "rejected", Receipt = new(10_000, 1_048_576, new string('x', 128)) }).Validate();
+        (ImportJobTestSupport.Ready() with { Status = "rejected", Receipt = new(1, 3, "x") }).Validate();
         (ImportJobTestSupport.Pending() with
         {
             SourceBytes = 0, ChunkBytes = 0, Status = "complete", Receipt = new(0, 0, null)

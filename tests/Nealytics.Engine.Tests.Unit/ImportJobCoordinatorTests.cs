@@ -9,6 +9,52 @@ namespace Nealytics.Engine.Tests.Unit;
 public sealed class ImportJobCoordinatorTests
 {
     [Fact]
+    public async Task AResumedChunkCannotExceedItsRemainingSourceBytes()
+    {
+        using var harness = new ImportJobTestSupport.Harness();
+        var request = ImportJobTestSupport.Request();
+        await harness.Append(request);
+        var resumed = request with { ChunkId = Guid.NewGuid(), Offset = 3 };
+        Assert.Equal(ImportJobResult.Reject(400, "invalid_chunk_boundary"), await harness.Append(resumed, " {}\n",
+            _ => throw new InvalidOperationException("must not admit beyond source length")));
+        Assert.Equal(3, harness.Coordinator.Get(request.JobId, "p").Job!.NextByteOffset);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TheCoordinatorCompletesTheCallbackReaderOnSuccessAndFailure(bool fail)
+    {
+        using var harness = new ImportJobTestSupport.Harness();
+        PipeReader? retained = null;
+        var operation = harness.Append(ImportJobTestSupport.Request(), ingest: reader =>
+        {
+            retained = reader;
+            return fail ? Task.FromException<NdjsonImportResponse>(new IOException("callback failure"))
+                : ImportJobTestSupport.Accept(reader);
+        });
+        if (fail) await Assert.ThrowsAsync<IOException>(() => operation);
+        else Assert.Equal(202, (await operation).StatusCode);
+        Assert.NotNull(retained);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => retained.ReadAsync().AsTask());
+    }
+
+    [Fact]
+    public async Task AnExactlyFullChunkFinishesAfterItsFinalReadWithoutRequestingAnother()
+    {
+        using var harness = new ImportJobTestSupport.Harness();
+        var reader = new ImportJobTestSupport.ChunkReader(
+            new(new ReadOnlySequence<byte>(new byte[2048]), false, false),
+            new(new ReadOnlySequence<byte>(new byte[2048]), false, true));
+        var result = await harness.Coordinator.AppendAsync(ImportJobTestSupport.Request(4096), "p", reader,
+            ImportJobTestSupport.Accept, CancellationToken.None);
+        Assert.Equal(202, result.StatusCode);
+        Assert.Equal(4096, result.Job!.NextByteOffset);
+        Assert.Equal(2, reader.Advances);
+        Assert.Equal(1, reader.Completions);
+    }
+
+    [Fact]
     public async Task ConfirmedChunksResumeAcrossRestartAndTheLastRetryNeverCallsIngestionAgain()
     {
         using var harness = new ImportJobTestSupport.Harness();

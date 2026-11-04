@@ -14,6 +14,68 @@ public sealed class ImportJobJournalTests : IDisposable
     private string Manifest(ImportJobState state) => Path.Combine(JobDirectory, state.Id.ToString("N") + ".json");
 
     [Fact]
+    public void StartupSynchronizesTheLeaseAndEveryNewDirectoryPublication()
+    {
+        List<string> calls = [];
+        using var journal = new ImportJobJournal(_directory,
+            (path, mode) => { var file = new TrackingFile(path, mode, calls); calls.Clear(); return file; },
+            path => { calls.Add(path); WalDirectoryDurability.Synchronize(path); },
+            (source, target) => File.Move(source, target, true));
+        Assert.Equal(new[] { "flush:True", JobDirectory, _directory, Path.GetDirectoryName(_directory)! },
+            calls.Where(call => call != "flush:False"));
+    }
+
+    [Fact]
+    public void NativeLeaseOwnershipDoesNotRelyOnManagedFileSharingChecks()
+    {
+        FileStream Shared(string path, FileMode mode) => new(path, mode, FileAccess.ReadWrite, FileShare.ReadWrite);
+        using (var first = new ImportJobJournal(_directory, Shared, WalDirectoryDurability.Synchronize, File.Move))
+        {
+            Assert.Throws<IOException>(() => new ImportJobJournal(_directory, Shared, WalDirectoryDurability.Synchronize, File.Move));
+        }
+        using var recovered = new ImportJobJournal(_directory, Shared, WalDirectoryDurability.Synchronize, File.Move);
+        Assert.Empty(recovered.Load(1));
+    }
+
+    [Fact]
+    public void RecoveryNeedsOnlyReadAccessToConfirmedManifests()
+    {
+        using var journal = new ImportJobJournal(_directory);
+        var state = ImportJobTestSupport.Ready();
+        journal.Save(state);
+        File.SetAttributes(Manifest(state), FileAttributes.ReadOnly);
+        try { Assert.Equal(state, Assert.Single(journal.Load(1))); }
+        finally { File.SetAttributes(Manifest(state), FileAttributes.Normal); }
+    }
+
+    [Fact]
+    public void TheMaximumManifestBoundaryAndFullyEscapedStateRemainRecoverable()
+    {
+        using var journal = new ImportJobJournal(_directory);
+        var state = ImportJobTestSupport.Ready() with
+        {
+            ProjectId = new string('\u0001', 256), Status = "rejected", Receipt = new(1, 3, new string('\u0002', 128))
+        };
+        journal.Save(state);
+        Assert.Equal(state, Assert.Single(journal.Load(1)));
+        string body = JsonSerializer.Serialize(state, TelemetryAotContext.Default.ImportJobState);
+        body += new string(' ', 8127 - Encoding.UTF8.GetByteCount(body));
+        WriteBody(state.Id, body);
+        Assert.Equal(8192, new FileInfo(Manifest(state)).Length);
+        Assert.Equal(state, Assert.Single(journal.Load(1)));
+    }
+
+    [Fact]
+    public void TemporaryHistoryHasItsOwnCountBoundaryEvenWithoutCommittedJobs()
+    {
+        using var journal = new ImportJobJournal(_directory);
+        File.WriteAllText(Path.Combine(JobDirectory, Guid.NewGuid().ToString("N") + ".tmp"), "first");
+        File.WriteAllText(Path.Combine(JobDirectory, Guid.NewGuid().ToString("N") + ".tmp"), "second");
+        Assert.Equal("Import job temporary files exceed their recovery boundary.",
+            Assert.Throws<InvalidDataException>(() => journal.Load(1).ToArray()).Message);
+    }
+
+    [Fact]
     public void ReplacementCommitsOnlyAfterFileFlushPublishAndDirectorySynchronization()
     {
         List<string> calls = [];

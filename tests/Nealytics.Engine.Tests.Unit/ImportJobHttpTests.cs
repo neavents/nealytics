@@ -209,14 +209,19 @@ public sealed class ImportJobHttpTests : IClassFixture<ImportJobHttpTests.Fixtur
     [Fact]
     public async Task RouteMetadataAndMutableHostLimitDeclareIndependentImportAdmission()
     {
-        var endpoint = Assert.Single(_factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>(),
+        await using var host = new NdjsonImportHttpTests.Factory(configure: options => options.EnableImportJobs = true);
+        var endpoint = Assert.Single(host.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>(),
             route => route.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName == "AppendImportChunk");
+        var read = Assert.Single(host.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>(),
+            route => route.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName == "GetImportJob");
+        Assert.Equal("/api/v1/telemetry/import/jobs/{jobId:guid}", read.RoutePattern.RawText);
+        Assert.Equal(typeof(ImportJobResponse), Assert.Single(read.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>()).Type);
         Assert.Equal("ndjson-import", endpoint.Metadata.GetMetadata<EnableRateLimitingAttribute>()!.PolicyName);
         Assert.Equal(ClickHouseWorkload.Write, endpoint.Metadata.GetMetadata<ClickHouseWorkloadMetadata>()!.Workload);
         var metadata = Assert.Single(endpoint.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>());
         Assert.Equal(202, metadata.StatusCode);
         Assert.Equal(typeof(ImportJobResponse), metadata.Type);
-        using var scope = _factory.Services.CreateScope();
+        using var scope = host.Services.CreateScope();
         var context = new DefaultHttpContext { RequestServices = scope.ServiceProvider };
         context.Request.RouteValues["jobId"] = Guid.NewGuid().ToString();
         context.Request.RouteValues["chunkId"] = Guid.NewGuid().ToString();
