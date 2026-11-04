@@ -203,6 +203,8 @@ public sealed class NdjsonRecordReaderTests
     internal sealed class SegmentedReader : PipeReader
     {
         private ReadOnlySequence<byte> _remaining;
+        private bool _outstanding;
+        private bool _completedEmpty;
         public SegmentedReader(byte[] bytes)
         {
             if (bytes.Length == 0) return;
@@ -222,8 +224,18 @@ public sealed class NdjsonRecordReaderTests
                 return next;
             }
         }
-        public override ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default) => new(new ReadResult(_remaining, false, true));
-        public override void AdvanceTo(SequencePosition consumed) => _remaining = _remaining.Slice(consumed);
+        public override ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default)
+        {
+            if (_outstanding || _completedEmpty) throw new IOException("Reader progress contract was violated.");
+            _outstanding = true;
+            _completedEmpty = _remaining.IsEmpty;
+            return new(new ReadResult(_remaining, false, true));
+        }
+        public override void AdvanceTo(SequencePosition consumed)
+        {
+            _remaining = _remaining.Slice(consumed);
+            _outstanding = false;
+        }
         public override void AdvanceTo(SequencePosition consumed, SequencePosition examined) => AdvanceTo(consumed);
         public override void Complete(Exception? exception = null) { }
         public override void CancelPendingRead() { }

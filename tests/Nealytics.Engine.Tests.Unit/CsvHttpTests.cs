@@ -160,6 +160,22 @@ public sealed class CsvHttpTests
     }
 
     [Fact]
+    public async Task ASourceColumnCannotMoveThePinnedServerKeyIntoAnotherProject()
+    {
+        await using var host = Host(configure: options =>
+        {
+            options.CsvSourceMappings["p"].Fields["projectId"] = new() { Path = ["project"] };
+        });
+        string body = "id,time,tenant,tag,project\n" + Row("x") + ",foreign\n";
+        using var response = await host.Client.SendAsync(Request(body));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var receipt = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(0, receipt.RootElement.GetProperty("acceptedRecords").GetInt32());
+        Assert.Equal(0, host.Wal.UncommittedRecordCount);
+        Assert.False(host.Services.GetRequiredService<TelemetryChannelBroker>().Reader.TryRead(out _));
+    }
+
+    [Fact]
     public async Task ExistingEventPolicyRejectsMappedRowsBeforePersistence()
     {
         await using var host = Host(configure: options => options.CsvSourceMappings["p"].Fields["eventType"].Default = "forbidden");
