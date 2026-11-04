@@ -111,7 +111,8 @@ schemas and opt-in hybrid planning. Qualification includes 2,874 unit cases, 297
 cases, changed-code coverage, scoped mutation and a published native/custom executable check.
 Broader scripts, historical cohorts, external enrichment, automatic rollups,
 result caching and live definition deployment are deferred in the completion contract.
-D packages have not started; delivered E scopes are listed below. Hosted-platform work remains outside current scope.
+D1 import checkpoints are in implementation/qualification; delivered E scopes are listed below.
+Hosted-platform work remains outside current scope.
 
 C3 is functionally qualified on `feat/analytics-customization-c3-saved-reports`; see the
 [saved scalar-report brief](packages/c3-saved-reports.md) and
@@ -186,3 +187,11 @@ receipts. The bounded implementation is qualified on `feat/integrations-e3-sourc
 see the [evidence ledger](packages/e3-source-mapping-verification.md).
 Custom time formats, scripts, durable jobs, storage sources, sinks and connector expansion remain
 separate packages. See the [configuration contract](source-mapping.md).
+
+## D1: durable import checkpoints
+
+The owner's continuation after E3 selects the [import-checkpoint foundation](packages/d1-import-checkpoints.md).
+It adds persisted caller-driven NDJSON chunk progress and confirmed retry receipts, with fail-closed
+reconciliation for ambiguous admissions. Implementation and qualification are in progress on the
+D1 step branch. See the [operator contract](import-jobs.md). Scheduling, retention, reconciliation
+resolution and external storage adapters remain separate workflows.

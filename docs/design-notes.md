@@ -492,3 +492,30 @@ hold the mapped envelope, so replay never applies a later mapping to acknowledge
 uncommitted Kafka replay can observe a new declaration after restart and requires operator review.
 Durable source identities, retry/deduplication, import jobs and live mapping changes need separate
 contracts. This package does not change persistent formats or backend defaults.
+
+## D1 import checkpoint ownership
+
+The caller supplies stable source/job/chunk identities and submits complete bounded decoded
+chunks. Buffering one chunk before admission permits hashing its exact original bytes before
+looking up a confirmed retry. It is opt-in and separately serialized; E2 streaming and ordinary
+track/beacon stay independent. Existing WAL I/O selection remains internal and unchanged.
+
+The manifest and WAL do not share a transaction. A synchronized processing marker precedes the
+import callback; a synchronized atomic replacement records its confirmed receipt afterwards.
+Unconfirmed markers recover as needs_reconciliation. This avoids treating a crash after a WAL
+append as permission to append the same source again. It does not provide automatic resume of
+an ambiguous prefix or general source deduplication. A metadata fault latches only the job service
+until restart, because a failed directory synchronization can have published a newer manifest
+than the in-memory snapshot. Recovery trusts only validated on-disk state.
+
+Manifests contain no source bodies/credentials. Size, history count, versions, checksums, identities
+and progress relations are validated before recovery; temporary replacements cannot manufacture
+a receipt. File/directory synchronization and exclusive ownership reuse the existing WAL platform
+boundary. A frozen ingestion fingerprint fences new chunks across mapping/schema/limit changes,
+while confirmed receipts remain accessible. No eviction/deletion policy is implied: terminal
+history consumes the configured job cap until a separately designed retention workflow exists.
+
+D1 published qualification also restores a checksummed processing-marker fixture while the engine
+is stopped, then verifies that actual Linux startup fences it from replay. This is a recovery
+fixture, not evidence of an abrupt-crash timing window. File-level fault tests separately inject
+prepare/final write, flush, rename and directory-sync failures around real manifest storage.

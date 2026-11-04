@@ -42,8 +42,8 @@
       "Features/KafkaIngestion/KafkaConnectorSettings.cs{5203..5452}",
       "Infrastructure/Configuration/KafkaConnectorOptions.cs{140..201}",
       "Infrastructure/Configuration/TelemetryEngineOptions.cs{7156..7249}",
-      "Program.cs{1496..1543}",
-      "Program.cs{10620..10709}"
+      "Program.cs{1540..1587}",
+      "Program.cs{10664..10753}"
     ]
   }
 }
