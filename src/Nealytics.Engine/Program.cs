@@ -34,6 +34,7 @@ using Nealytics.Engine.Features.GetSessionAnalytics;
 using Nealytics.Engine.Features.GetTopEvents;
 using Nealytics.Engine.Features.IngestTelemetry;
 using Nealytics.Engine.Features.ImportNdjson;
+using Nealytics.Engine.Features.ImportJobs;
 using Nealytics.Engine.Features.SourceMapping;
 using Nealytics.Engine.Features.UpsertTenantAttributes;
 using Nealytics.Engine.Infrastructure.Configuration;
@@ -255,6 +256,16 @@ if (engineOpts.EnableNdjsonImport)
 }
 
 builder.Services.AddSingleton<ClickHouseConnectionFactory>();
+if (engineOpts.EnableImportJobs)
+{
+    ImportJobLimits jobLimits = ImportJobLimits.Create(engineOpts);
+    builder.Services.AddSingleton(jobLimits);
+    builder.Services.AddSingleton(new ImportJobContracts(engineOpts, projectCatalog, jobLimits));
+    builder.Services.AddSingleton(services => new ImportJobStore(new ImportJobJournal(
+        services.GetRequiredService<IOptions<TelemetryEngineOptions>>().Value.WriteAheadLogDirectory), jobLimits.Jobs));
+    builder.Services.AddHostedService(services => services.GetRequiredService<ImportJobStore>());
+    builder.Services.AddSingleton<ImportJobCoordinator>();
+}
 builder.Services.AddSingleton<WriteAheadLogger>();
 builder.Services.AddSingleton<TelemetryChannelBroker>();
 builder.Services.AddSingleton<ApiKeyValidator>();
@@ -401,6 +412,10 @@ app.MapBeaconIngestion();
 if (engineOpts.EnableNdjsonImport)
 {
     app.MapNdjsonImport();
+}
+if (engineOpts.EnableImportJobs)
+{
+    app.MapImportJobs();
 }
 app.MapGetProjectTimeline();
 app.MapGetSessionAnalytics();

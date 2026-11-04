@@ -1,5 +1,8 @@
 # Bounded NDJSON import
 
+For optional persisted chunk progress and confirmed retries, see [checkpointed imports](import-jobs.md).
+The standalone E2 route described below retains its request-relative receipt contract.
+
 E2 adds an opt-in raw-body file import to the same executable and ingestion pipeline used by
 track/beacon. Existing callers keep their current contracts. There is no URL fetcher, helper
 service, upload-storage service or background import job.

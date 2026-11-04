@@ -34,6 +34,7 @@ def main():
     parser.add_argument('--architecture', choices=['amd64', 'arm64'], required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--mapped', action='store_true')
+    parser.add_argument('--jobs', action='store_true')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     architecture = run(['docker', 'image', 'inspect', '--format', '{{.Architecture}}', args.image])
@@ -65,9 +66,11 @@ def main():
             'project_id': 'p', 'tenant_id': 't', 'scope': 'metrics', 'exp': int(time.time()) + 900}).encode())
         return unsigned + '.' + encode(hmac.new(secret.encode(), unsigned.encode(), hashlib.sha256).digest())
 
-    def request(method, path, body=None, key='source-key', content_type='application/x-ndjson', compressed=False, chunked=False):
+    def request(method, path, body=None, key='source-key', content_type='application/x-ndjson', compressed=False, chunked=False, metadata=None):
         connection = http.client.HTTPConnection('127.0.0.1', port(), timeout=5)
         headers = {'X-Project-Key': key, 'Content-Type': content_type, 'Authorization': 'Bearer ' + token()}
+        if metadata:
+            headers.update(metadata)
         if compressed:
             headers['Content-Encoding'] = 'gzip'
             body = gzip.compress(body)
@@ -132,6 +135,8 @@ def main():
             'TelemetryEngine__IngestionExecutionPath': 'custom', 'TelemetryEngine__WalIoBackend': 'io_uring',
             'TelemetryEngine__ForceFlushIntervalSeconds': '1'
         }
+        if args.jobs:
+            settings['TelemetryEngine__EnableImportJobs'] = 'true'
         if args.mapped:
             prefix = 'TelemetryEngine__NdjsonSourceMappings__p__Fields__'
             for target, source in {'eventId': 'id', 'timestamp': 'time', 'tenantId': 'tenant',
@@ -180,14 +185,79 @@ def main():
         run(['docker', 'start', engine])
         wait_for(ready, 'restart readiness')
         assert total(13), 'Restart changed the accepted event set'
+        if args.jobs:
+            job = str(uuid.uuid4())
+            first_id, second_id = str(uuid.uuid4()), str(uuid.uuid4())
+            first, second = event(2) + b'\r\n', event(4)
+            whole = first + second
+            metadata = {'X-Import-Source': hashlib.sha256(whole).hexdigest(), 'X-Import-Source-Bytes': str(len(whole))}
+            job_route = '/api/v1/telemetry/import/jobs/' + job
+            first_route = job_route + '/chunks/' + first_id + '?offset=0'
+            second_route = job_route + '/chunks/' + second_id + '?offset=' + str(len(first))
+            assert request('GET', job_route, key='unknown')[0] == 401
+            assert request('GET', job_route, key='public-key')[0] == 403
+            assert request('GET', job_route)[0] == 404
+            status, receipt = request('POST', first_route, first, metadata=metadata, chunked=True)
+            assert status == 202 and receipt['state'] == 'ready', (status, receipt)
+            assert receipt['acceptedRecords'] == 1 and receipt['nextByteOffset'] == len(first), receipt
+            assert request('GET', job_route) == (200, receipt)
+            assert request('POST', first_route, first, metadata=metadata, compressed=True) == (202, receipt)
+            wait_for(lambda: total(15), 'job first chunk is visible without duplicate aggregate')
+            run(['docker', 'stop', '--time', '30', engine])
+            run(['docker', 'start', engine])
+            wait_for(ready, 'job checkpoint restart readiness')
+            assert request('GET', job_route) == (200, receipt)
+            assert request('POST', first_route, first, metadata=metadata) == (202, receipt)
+            assert total(15), 'Confirmed retry changed the aggregate after restart'
+            status, finished = request('POST', second_route, second, metadata=metadata, chunked=True)
+            assert status == 202 and finished['state'] == 'complete', (status, finished)
+            assert finished['acceptedRecords'] == 2 and finished['nextByteOffset'] == len(whole), finished
+            assert request('POST', second_route, second, metadata=metadata) == (202, finished)
+            wait_for(lambda: total(19), 'job second chunk is visible exactly once')
+            assert request('POST', first_route, first, metadata=metadata) == (409, {'error': 'job_terminal'})
+            rejected_route = '/api/v1/telemetry/import/jobs/' + str(uuid.uuid4()) + '/chunks/' + str(uuid.uuid4()) + '?offset=0'
+            rejected_body = event(5) + b'\n{\n'
+            rejected_metadata = {'X-Import-Source': hashlib.sha256(rejected_body).hexdigest(), 'X-Import-Source-Bytes': str(len(rejected_body))}
+            status, rejected = request('POST', rejected_route, rejected_body, metadata=rejected_metadata)
+            assert status == 400 and rejected['state'] == 'rejected' and rejected['acceptedRecords'] == 1, rejected
+            assert rejected['receipt']['error'] == 'invalid_json', rejected
+            assert request('POST', rejected_route, rejected_body, metadata=rejected_metadata) == (400, rejected)
+            wait_for(lambda: total(24), 'rejected job preserves only the durable prefix')
+            run(['docker', 'stop', '--time', '30', engine])
+            run(['docker', 'start', engine])
+            wait_for(ready, 'terminal job checkpoint restart readiness')
+            assert request('GET', job_route) == (200, finished)
+            assert request('POST', second_route, second, metadata=metadata) == (202, finished)
+            assert request('POST', rejected_route, rejected_body, metadata=rejected_metadata) == (400, rejected)
+            assert total(24), 'Terminal job retries changed stored aggregates'
+            run(['docker', 'stop', '--time', '30', engine])
+            manifest = args.output / 'processing-recovery-fixture.json'
+            run(['docker', 'cp', engine + ':/app/logs/import-jobs/' + uuid.UUID(job).hex + '.json', str(manifest)])
+            confirmed = json.loads(manifest.read_bytes()[65:])
+            uncertain_job, uncertain_chunk = str(uuid.uuid4()), str(uuid.uuid4())
+            confirmed.update({'id': uncertain_job, 'status': 'processing', 'nextByteOffset': 0,
+                'acceptedRecords': 0, 'chunkId': uncertain_chunk, 'chunkOffset': 0,
+                'chunkBytes': len(first), 'chunkHash': hashlib.sha256(first).hexdigest().upper(), 'receipt': None})
+            body = json.dumps(confirmed, separators=(',', ':')).encode()
+            manifest.write_bytes(hashlib.sha256(body).hexdigest().upper().encode() + b'\n' + body)
+            run(['docker', 'cp', str(manifest), engine + ':/app/logs/import-jobs/' + uuid.UUID(uncertain_job).hex + '.json'])
+            run(['docker', 'start', engine])
+            wait_for(ready, 'processing marker fixture recovery readiness')
+            uncertain_route = '/api/v1/telemetry/import/jobs/' + uncertain_job
+            status, uncertain = request('GET', uncertain_route)
+            assert status == 200 and uncertain['state'] == 'needs_reconciliation', (status, uncertain)
+            assert uncertain['acceptedRecords'] == 0 and uncertain['nextByteOffset'] == 0 and uncertain.get('receipt') is None
+            assert request('POST', uncertain_route + '/chunks/' + uncertain_chunk + '?offset=0', first, metadata=metadata) == (409, {'error': 'needs_reconciliation'})
+            assert total(24), 'Ambiguous processing fixture was replayed'
         logs = run(['docker', 'logs', engine])
         assert any(json.loads(line).get('Properties', {}).get('Backend') == 'io_uring'
                    for line in logs.splitlines() if line.startswith('{'))
         (args.output / 'summary.json').write_text(json.dumps({
             'source': run(['git', 'rev-parse', 'HEAD']), 'image': args.image,
-            'architecture': architecture, 'hostArchitecture': host, 'sourceMapping': args.mapped,
+            'architecture': architecture, 'hostArchitecture': host, 'sourceMapping': args.mapped, 'importJobs': args.jobs,
             'checks': ['custom-io_uring', 'authentication', 'streamed-utf8-prefix-receipt', 'pinned-project-schema',
-                       'sanitization', 'exact-record-limit', 'final-line', 'line-body-limits', 'compression', 'restart-visibility'],
+                       'sanitization', 'exact-record-limit', 'final-line', 'line-body-limits', 'compression', 'restart-visibility']
+                      + (['job-checkpoint-restart', 'confirmed-chunk-retry', 'job-terminal-retry', 'job-prefix-rejection', 'processing-manifest-recovery-fixture'] if args.jobs else []),
             'result': 'passed', 'measurements': 'disabled'
         }, indent=2) + '\n')
         print('NDJSON published-artifact functional checks passed on ' + architecture + '.')
