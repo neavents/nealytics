@@ -1,7 +1,7 @@
 # Bounded CSV upload
 
-Implementation and qualification are in progress on feat/integrations-e5-csv-import. This guide
-specifies the implemented contract; consult the package ledger before treating it as qualified.
+The bounded implementation is functionally qualified on feat/integrations-e5-csv-import; see the
+[evidence ledger](packages/e5-csv-import-verification.md). This guide specifies its supported contract.
 The route is disabled by default. Existing track/beacon, Kafka, NDJSON and S3 contracts stay intact.
 
 ## Enable and declare columns

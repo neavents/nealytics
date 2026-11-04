@@ -10,12 +10,12 @@ category E and the broader product roadmap remain open. Hosting is outside curre
 | --- | --- | --- |
 | Events ingestion | Existing track/beacon contracts, WAL persistence, optional custom dispatcher and Linux io_uring | Backend defaults stay unchanged; no current speed claims |
 | Kafka | One configured project/topic/group; manual offsets after durable handoff | At-least-once replay; poison/failure stops the host; broader topology/security qualification remains |
-| File upload | Streamed UTF-8 NDJSON, accepted-prefix receipts and bounded source mapping | CSV/Parquet and automatic source retry are separate |
+| File upload | Streamed UTF-8 NDJSON and headered CSV, accepted-prefix receipts and bounded source mapping | CSV checkpoints, object-store CSV, Parquet and automatic source retry are separate |
 | Durable import progress | Caller-driven chunk jobs, persisted latest receipt, status and contract fencing | Uncertain admissions require reconciliation; no automatic resolution, scheduling or retention |
 | S3 objects | Named project-pinned sources, signed inspection/ranges, version/ETag fencing, bounded NDJSON chunks and checkpoint retries | No scans, notifications, credential discovery/refresh or other formats |
 | Custom source declarations | Nested JSON bindings, defaults, dimensions/measures and existing policy validation | No arbitrary scripts, generated identities/times or externally supplied internal delivery identities |
 
-Use the [delivery index](work-packages.md), [S3 guide](s3-import.md),
+Use the [delivery index](work-packages.md), [CSV guide](csv-import.md), [S3 guide](s3-import.md),
 [Kafka guide](kafka-connector.md), [NDJSON guide](ndjson-import.md),
 [mapping guide](source-mapping.md) and [job contract](import-jobs.md) for precise scopes.
 
@@ -23,18 +23,18 @@ Use the [delivery index](work-packages.md), [S3 guide](s3-import.md),
 
 | Group | Separate implementation slices | Acceptance boundary |
 | --- | --- | --- |
-| Additional file formats | Headered CSV first; Parquet separately | Explicit schema mapping, bounded decoding and format-specific accepted-prefix/checkpoint rules |
+| Additional file formats | CSV checkpoint/object-store framing; Parquet separately | Explicit schema mapping, bounded decoding and format-specific accepted-prefix/checkpoint rules |
 | Additional object/HTTP sources | GCS; then named operator-controlled HTTP sources | Credentials, immutable validators, exact range semantics, redirect/endpoint policy and real protocol qualification per adapter |
 | Kafka operational breadth | Secured broker fixtures, independent source health, operator-controlled poison recovery, additional topic/group declarations | Resource/assignment limits and replay semantics must stay explicit |
 | Database changes | One PostgreSQL or MySQL snapshot/CDC workflow; DynamoDB separately | Snapshot-to-stream boundary, offsets, deletes/schema changes and restart semantics |
 | Exports and sinks | One bounded S3 export, then Kafka/GCS separately | Stable output manifests/identities, retry behavior and partial-publication handling |
 | Client integrations | Optional query clients, BI protocol adapters and scoped read-only MCP | Authentication, parameter/schema discovery and query budgets; no mandatory client service |
 
-CSV is the next format slice because it broadens the current file workflow without adding a
-remote credential lifecycle. Its first contract should cover one explicit header, strict UTF-8,
-quoted commas/quotes/newlines, source field bindings and bounded accepted-prefix ingestion.
-Object-store CSV framing and durable cross-chunk CSV resume need separate header/record-state
-contracts; S3's NDJSON LF framing cannot be reused for quoted multiline CSV unchanged.
+CSV upload is qualified with an explicit header, strict UTF-8, quoted commas/quotes/newlines,
+literal source bindings and bounded accepted-prefix ingestion. Object-store CSV framing and durable
+cross-chunk CSV resume still need separate header/record-state contracts; S3's NDJSON LF framing
+cannot be reused for quoted multiline CSV unchanged. Named HTTP sources and GCS remain the next
+source-expansion group; they need provider-specific validators, credentials and transport tests.
 
 ## Operator prerequisites that stay in D
 

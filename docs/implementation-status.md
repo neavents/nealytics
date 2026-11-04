@@ -1,5 +1,15 @@
 # Implementation evidence
 
+E5 headered CSV upload is implemented and functionally qualified. CSV-only or shared import hosts
+support literal column mappings, strict UTF-8, quoted multiline fields and bounded accepted-prefix
+receipts through existing policy/sanitization/WAL contracts. The milestone passes 3,723 local unit
+cases, 315 integration cases, 329/329 changed executable lines and 176/176 branch outcomes.
+CSV/shared-mapping mutation kills all 384 executable mutants; the separate shared NDJSON/startup
+gate kills all 154. Actual Linux x64/ARM64 checks pass all 14 connector summaries with io_uring/custom.
+See the [E5 ledger](packages/e5-csv-import-verification.md), [operator guide](csv-import.md) and
+[remaining integration groups](integration-delivery-status.md). CSV checkpoints, S3 CSV and further
+formats/adapters/sinks remain separate. Main stays untouched and measurements stay stopped.
+
 E4 checkpointed S3 object import is implemented and functionally qualified. Optional named,
 project-pinned sources use signed conditional ranges, version/ETag fencing and bounded NDJSON
 framing through D1's persisted receipts. The milestone passes 3,589 unit and 313 real-dependency

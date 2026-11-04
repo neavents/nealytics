@@ -2,8 +2,8 @@
 
 Selected from the continuing integration roadmap after qualified E4, 2026-11-04.
 Category: feat/integrations. Step: feat/integrations-e5-csv-import.
-Status: runtime implemented; qualification and mutation investigation are in progress.
-See the [operator contract](../csv-import.md). This brief does not declare CSV qualified.
+Status: bounded runtime implementation functionally qualified.
+See the [evidence ledger](e5-csv-import-verification.md) and [operator contract](../csv-import.md).
 
 ## Outcome and compatibility
 
