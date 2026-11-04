@@ -211,5 +211,6 @@ other storage adapters and sinks remain distinct packages.
 After qualified E4, continue the integration roadmap with [headered CSV uploads](packages/e5-csv-import.md)
 on feat/integrations-e5-csv-import. This adds a second explicit file format with compiled field
 bindings, bounded multiline-record parsing and accepted-prefix delivery through existing policy/WAL
-contracts. The brief is prepared; CSV runtime implementation and qualification remain open.
+contracts. Runtime implementation is in progress with focused functional coverage; consolidated
+qualification and mutation investigation remain open. See the [operator contract](csv-import.md).
 Durable CSV jobs, S3 CSV framing, Parquet, additional sources and sinks remain distinct steps.

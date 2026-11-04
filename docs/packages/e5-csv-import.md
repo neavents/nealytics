@@ -2,7 +2,8 @@
 
 Selected from the continuing integration roadmap after qualified E4, 2026-11-04.
 Category: feat/integrations. Step: feat/integrations-e5-csv-import.
-Status: contract preparation; no CSV runtime is qualified by this brief.
+Status: runtime implemented; qualification and mutation investigation are in progress.
+See the [operator contract](../csv-import.md). This brief does not declare CSV qualified.
 
 ## Outcome and compatibility
 
@@ -28,7 +29,10 @@ No delimiter guessing, legacy encodings, spreadsheet evaluation or implicit JSON
 An optional initial UTF-8 BOM is recognized only at the start of the header.
 
 Require one nonempty unique ordinal header name per column, with explicit name/column/record-byte
-bounds. Bind fields by literal header name. Missing declared columns must fail before data admission;
+bounds. Allow at most 256 columns, with nonempty ordinal-unique header names up to 128 UTF-16 code units.
+ImportMaxLineBytes bounds the entire logical record including BOM/quotes/record separators;
+ImportMaxRecords and shared ImportMaxConcurrency retain their existing limits.
+Bind fields by literal header name. Missing declared columns must fail before data admission;
 constant defaults may supply optional/fixed envelope fields, with no identity/time defaults.
 Duplicate/empty headers, unsupported nested paths and invalid declarations fail safely. A mapping
 cannot set internal WAL identity or bypass the authenticated project and current schema policy.

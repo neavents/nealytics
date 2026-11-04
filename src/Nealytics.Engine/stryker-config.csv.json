@@ -1,0 +1,31 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~Csv|FullyQualifiedName~SourceMapping|FullyQualifiedName~SourceRecordMapping|FullyQualifiedName~Ndjson|FullyQualifiedName~Kafka",
+    "mutation-level": "Complete",
+    "concurrency": 4,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    },
+    "mutate": [
+      "Features/ImportCsv/*.cs",
+      "Features/SourceMapping/SourceValues.cs",
+      "Features/SourceMapping/SourceRecordMapping.cs",
+      "Program.cs{10586..11027}",
+      "Program.cs{11207..11375}",
+      "Program.cs{17766..17825}",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{7107..7243}"
+    ]
+  }
+}

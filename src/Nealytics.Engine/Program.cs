@@ -34,6 +34,7 @@ using Nealytics.Engine.Features.GetSessionAnalytics;
 using Nealytics.Engine.Features.GetTopEvents;
 using Nealytics.Engine.Features.IngestTelemetry;
 using Nealytics.Engine.Features.ImportNdjson;
+using Nealytics.Engine.Features.ImportCsv;
 using Nealytics.Engine.Features.ImportJobs;
 using Nealytics.Engine.Features.S3Import;
 using Nealytics.Engine.Features.SourceMapping;
@@ -242,18 +243,27 @@ builder.Services.AddOptions<RateLimiterOptions>().Configure<IOptions<TelemetryEn
     });
 });
 
-if (engineOpts.EnableNdjsonImport)
+if (engineOpts.EnableNdjsonImport || engineOpts.EnableCsvImport)
 {
     NdjsonImportLimits importLimits = NdjsonImportLimits.Create(engineOpts);
     builder.Services.AddSingleton(importLimits);
-    builder.Services.AddSingleton(new NdjsonSourceMappings(engineOpts, projectCatalog));
-    builder.Services.AddScoped<NdjsonImporter>();
     builder.Services.Configure<RateLimiterOptions>(options =>
         options.AddConcurrencyLimiter("ndjson-import", limiter =>
         {
             limiter.PermitLimit = importLimits.Concurrency;
             limiter.QueueLimit = 0;
         }));
+}
+
+if (engineOpts.EnableNdjsonImport)
+{
+    builder.Services.AddSingleton(new NdjsonSourceMappings(engineOpts, projectCatalog));
+    builder.Services.AddScoped<NdjsonImporter>();
+}
+if (engineOpts.EnableCsvImport)
+{
+    builder.Services.AddSingleton(new CsvSourceMappings(engineOpts, projectCatalog));
+    builder.Services.AddScoped<CsvImporter>();
 }
 
 builder.Services.AddSingleton<ClickHouseConnectionFactory>();
@@ -415,6 +425,10 @@ app.UseAuthentication();
 app.UseProjectSchemas();
 app.UseAuthorization();
 
+if (engineOpts.EnableCsvImport)
+{
+    app.MapCsvImport();
+}
 app.MapTelemetryIngestion();
 app.MapBeaconIngestion();
 if (engineOpts.EnableNdjsonImport)

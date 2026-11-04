@@ -21,9 +21,9 @@
     "mutate": [
       "Features/S3Import/*.cs",
       "Infrastructure/Configuration/S3SourceOptions.cs",
-      "Program.cs{11822..12063}",
-      "Program.cs{17667..17719}",
-      "Infrastructure/Configuration/TelemetryEngineOptions.cs{7517..7579}"
+      "Program.cs{12104..12345}",
+      "Program.cs{18009..18061}",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{7653..7715}"
     ]
   }
 }

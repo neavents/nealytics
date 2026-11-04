@@ -69,13 +69,22 @@ internal sealed class SourceRecordMapping
         {
             throw new InvalidDataException("Source mapping requires a JSON object.");
         }
+        return Read(new JsonSourceValues(root), textByteLimit);
+    }
+
+    public GlobalTelemetryPayload Read(
+        IReadOnlyDictionary<string, int> columns, IReadOnlyList<string> cells, int textByteLimit) =>
+        Read(new ColumnSourceValues(columns, cells), textByteLimit);
+
+    private GlobalTelemetryPayload Read<T>(T source, int textByteLimit) where T : struct, ISourceValues
+    {
         Dictionary<string, string> values = new(StringComparer.Ordinal);
         Dictionary<string, string> dimensions = new(StringComparer.Ordinal);
         Dictionary<string, string> measures = new(StringComparer.Ordinal);
         int remaining = textByteLimit;
         foreach (SourceField field in _fields)
         {
-            string? value = field.Read(root);
+            string? value = source.Read(field);
             if (value is null)
             {
                 continue;

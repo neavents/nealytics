@@ -4,7 +4,7 @@
     "test-projects": [
       "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
     ],
-    "test-case-filter": "FullyQualifiedName~SourceMapping|FullyQualifiedName~SourceRecordMapping|FullyQualifiedName~Kafka|FullyQualifiedName~Ndjson",
+    "test-case-filter": "FullyQualifiedName~SourceMapping|FullyQualifiedName~SourceRecordMapping|FullyQualifiedName~Kafka|FullyQualifiedName~Ndjson|FullyQualifiedName~Csv",
     "mutation-level": "Complete",
     "concurrency": 4,
     "break-on-initial-test-failure": true,
@@ -41,9 +41,9 @@
       "Features/KafkaIngestion/KafkaConnectorSettings.cs{869..924}",
       "Features/KafkaIngestion/KafkaConnectorSettings.cs{5203..5452}",
       "Infrastructure/Configuration/KafkaConnectorOptions.cs{140..201}",
-      "Infrastructure/Configuration/TelemetryEngineOptions.cs{7156..7249}",
-      "Program.cs{1582..1629}",
-      "Program.cs{10706..10795}"
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{7292..7385}",
+      "Program.cs{1625..1672}",
+      "Program.cs{11066..11155}"
     ]
   }
 }

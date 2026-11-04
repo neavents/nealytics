@@ -196,6 +196,8 @@ public sealed class TelemetryEngineOptions
     public int MaxSavedReports { get; set; } = 128;
     public KafkaConnectorOptions? Kafka { get; set; }
 
+    public bool EnableCsvImport { get; set; }
+    public Dictionary<string, SourceMappingOptions> CsvSourceMappings { get; set; } = [];
     public bool EnableNdjsonImport { get; set; }
     public Dictionary<string, SourceMappingOptions> NdjsonSourceMappings { get; set; } = [];
     public int ImportMaxLineBytes { get; set; } = 65_536;
