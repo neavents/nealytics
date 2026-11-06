@@ -62,6 +62,12 @@ public sealed class ImportJobIntegrationTests
                 using var repeated = await client.SendAsync(retry);
                 Assert.Equal(HttpStatusCode.Accepted, repeated.StatusCode);
                 Assert.Equal(latest, await repeated.Content.ReadAsStringAsync());
+                using var listing = await client.GetAsync("/api/v1/telemetry/import/jobs?k=import-key&limit=1");
+                Assert.Equal(HttpStatusCode.OK, listing.StatusCode);
+                using var page = JsonDocument.Parse(await listing.Content.ReadAsStringAsync());
+                Assert.Equal(latest,
+                    Assert.Single(page.RootElement.GetProperty("jobs").EnumerateArray()).GetRawText());
+                Assert.True(!page.RootElement.TryGetProperty("nextAfter", out var after) || after.ValueKind == JsonValueKind.Null);
             }
             using var status = await client.GetAsync(route + "?k=import-key");
             Assert.Equal(HttpStatusCode.OK, status.StatusCode);

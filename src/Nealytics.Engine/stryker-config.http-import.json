@@ -1,0 +1,34 @@
+{
+  "stryker-config": {
+    "project": "Nealytics.Engine.csproj",
+    "test-projects": [
+      "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
+    ],
+    "test-case-filter": "FullyQualifiedName~HttpSource|FullyQualifiedName~HttpObject|FullyQualifiedName~HttpCoordinator|FullyQualifiedName~HttpImport|FullyQualifiedName~S3|FullyQualifiedName~ImportJob",
+    "mutation-level": "Complete",
+    "concurrency": 4,
+    "break-on-initial-test-failure": true,
+    "reporters": [
+      "dots",
+      "json",
+      "html"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    },
+    "mutate": [
+      "Features/HttpImport/*.cs",
+      "Infrastructure/Configuration/HttpSourceOptions.cs",
+      "Infrastructure/Networking/ObjectSourceChunk.cs",
+      "Infrastructure/Networking/ObjectSourceTransport.cs",
+      "Features/ImportJobs/ObjectImportControl.cs",
+      "Features/ImportNdjson/NdjsonChunkBoundary.cs",
+      "Features/ImportJobs/ImportJobState.cs{568..868}",
+      "Program.cs{12140..12399}",
+      "Program.cs{18504..18560}",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{7718..7784}"
+    ]
+  }
+}

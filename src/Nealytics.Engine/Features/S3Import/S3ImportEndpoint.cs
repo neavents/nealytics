@@ -3,9 +3,7 @@ namespace Nealytics.Engine.Features.S3Import;
 using System;
 using System.Globalization;
 using System.IO;
-using System.Net.Http.Headers;
 using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -13,7 +11,6 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using Nealytics.Engine.Features.ImportJobs;
 using Nealytics.Engine.Features.ImportNdjson;
-using Nealytics.Engine.Features.IngestTelemetry;
 using Nealytics.Engine.Infrastructure.Configuration;
 using Nealytics.Engine.Infrastructure.Security;
 using Nealytics.Engine.Infrastructure.Serialization;
@@ -45,7 +42,7 @@ public static class S3ImportEndpoint
         }
         try
         {
-            S3ObjectRequest? request = await ReadAsync(context, options.Value.MaxRequestBodyBytes,
+            S3ObjectRequest? request = await ObjectImportControl.ReadAsync(context, options.Value.MaxRequestBodyBytes,
                 TelemetryAotContext.Default.S3ObjectRequest);
             if (request is null)
             {
@@ -55,6 +52,10 @@ public static class S3ImportEndpoint
             return Results.Json(snapshot);
         }
         catch (S3ImportException exception)
+        {
+            return Error(exception.StatusCode, exception.Error);
+        }
+        catch (ObjectControlException exception)
         {
             return Error(exception.StatusCode, exception.Error);
         }
@@ -83,7 +84,7 @@ public static class S3ImportEndpoint
         }
         try
         {
-            S3ObjectSnapshot? request = await ReadAsync(context, options.Value.MaxRequestBodyBytes,
+            S3ObjectSnapshot? request = await ObjectImportControl.ReadAsync(context, options.Value.MaxRequestBodyBytes,
                 TelemetryAotContext.Default.S3ObjectSnapshot);
             if (request is null)
             {
@@ -96,6 +97,10 @@ public static class S3ImportEndpoint
                 : Results.Json(result.Job, statusCode: result.StatusCode);
         }
         catch (S3ImportException exception)
+        {
+            return Error(exception.StatusCode, exception.Error);
+        }
+        catch (ObjectControlException exception)
         {
             return Error(exception.StatusCode, exception.Error);
         }
@@ -113,47 +118,16 @@ public static class S3ImportEndpoint
         }
     }
 
-    private static async Task<T?> ReadAsync<T>(HttpContext context, int requestLimit, JsonTypeInfo<T> type)
-    {
-        if (!MediaTypeHeaderValue.TryParse(context.Request.ContentType, out MediaTypeHeaderValue? media)
-            || !string.Equals(media.MediaType, "application/json", StringComparison.OrdinalIgnoreCase)
-            || (media.CharSet is not null && !media.CharSet.Trim('"').Equals("utf-8", StringComparison.OrdinalIgnoreCase)))
-        {
-            throw new S3ImportException(415, "unsupported_content_type");
-        }
-        int limit = Math.Min(requestLimit, 16_384);
-        if (IngestValidation.ExceedsBodyLimit(context.Request.ContentLength, limit))
-        {
-            throw new S3ImportException(413, "control_body_too_large");
-        }
-        IngestValidation.ApplyBodyLimit(context, limit);
-        using LengthLimitedStream body = new(context.Request.Body, limit);
-        try
-        {
-            return await JsonSerializer.DeserializeAsync(body, type, context.RequestAborted);
-        }
-        catch (IOException exception) when (exception is not BadHttpRequestException)
-        {
-            throw new S3ImportException(400, "control_body_unavailable");
-        }
-    }
-
     private static IResult? Authenticate(string name, HttpContext context, ApiKeyValidator keys, S3Sources sources,
         out IngestionKeyPolicy? policy, out S3Source? source)
     {
         source = null;
-        string key = IngestValidation.ResolveProjectKey(context.Request.Headers["X-Project-Key"].ToString(),
-            context.Request.Query["k"].ToString());
-        if (!keys.TryResolve(key, out policy))
+        IResult? rejected = ObjectImportControl.Authenticate(context, keys, out policy);
+        if (rejected is not null)
         {
-            return Results.Unauthorized();
+            return rejected;
         }
-        if (!policy.IsServer || string.IsNullOrEmpty(policy.PinnedProject)
-            || !ApiKeyValidator.MayWriteProject(policy, policy.PinnedProject))
-        {
-            return Results.Forbid();
-        }
-        source = sources.Find(name, policy.PinnedProject);
+        source = sources.Find(name, policy!.PinnedProject!);
         return source is null ? Error(404, "source_not_found") : null;
     }
 

@@ -595,3 +595,83 @@ work was removed: every successfully framed first record has already resolved it
 Field-boundary reuse also removes the duplicate scanner's redundant closing-quote bounds and its
 mutated nonprogress loops. Preliminary/failed qualification attempts remain distinct from final
 source evidence; no mutation threshold or maintained responsibility was reduced.
+
+## E6 HTTP resource identity and shared transport
+
+HTTP exports can place selection or credential material in their URL query and headers. Each
+source therefore owns a mandatory 32-byte secret identity key from deployment configuration.
+A domain-separated keyed digest binds canonical URL and sorted normalized headers; a second
+keyed digest binds that selection to the opaque ETag/length. Descriptors contain only the latter
+identifier and representation metadata. Structural validation and project authorization remain
+independent. Fixed-time identifier comparison does not turn SourceId into an authorization token.
+
+There is no new key file or hidden generation policy. Identical settings/key preserve identity
+across restart; resource/header/key rotation fences old snapshots. That deliberate fence covers
+credential and signed-URL rotation too, so transparent refresh remains outside this package.
+Normal D1 status remains available and an expired old representation cannot be reconstructed.
+Startup copies credentials/headers, clears owned binary keys on failure/disposal and returns
+serialized secret-bearing buffers cleared. The process configuration still owns immutable secret
+strings; deployments must protect their secret configuration as for existing credentials.
+
+S3 and HTTP reuse the concrete socket policy, exact bounded body reader, pooled chunk owner,
+NDJSON chunk boundary, authenticated JSON control reader and confirmed-chunk matching rule.
+Signing/version rules and resource selection remain provider-specific. No generic connector
+framework or mandatory dependency is introduced. The extra helpers do not affect ordinary
+track/beacon requests, and D1 manifest/WAL formats remain unchanged. Source-specific gates and
+existing global/import budgets bound concurrency and preserve normal ingestion availability.
+
+The configuration digest budget accounts for JSON escaping of both a maximal URL and aggregate
+header text; it is separate from downloaded chunk/control-body budgets. HTTP accepts canonical
+strong ETags including an empty quoted tag, while S3 retains its existing stricter validator rule.
+Inspection takes no caller body; all selection comes from the pinned named declaration. This
+prevents an ingestion caller from replacing the operator's endpoint or request credentials.
+
+The HTTP source identity buffer retains its JSON encoding reservation: a legal 1,024-character
+strong ETag containing escaped characters can exceed the writer's unreserved size hint despite
+fitting the final 8-KiB payload bound. The boundary test rejects removal of that reservation.
+EntityTagHeaderValue.TryParse already rejects the wildcard, so a duplicate wildcard comparison
+is unnecessary. Header normalization/order uses an independent two-header HMAC vector; key
+failure and truncated-response tests observe owned storage cleanup directly.
+
+HTTP header token validation inspects the declared spelling before using the normalized name.
+Invariant Unicode case folding maps the Kelvin sign to ASCII k; validating only normalized text
+would silently accept and rename a non-ASCII declaration. Original-token tests cover that case.
+
+## E7 GCS protocol foundation
+
+Google's XML interoperability path supports the existing AWS4 request-signature form with HMAC
+credentials and region auto. The concrete AwsV4RequestSigner now lives in Networking, accepts
+only request/credential/clock/pool values and has no feature dependency. S3 retains its existing
+wrapper and all byte-level signature tests. A separate Python-derived vector covers a Google
+object path, generation query and generation/metageneration preconditions. This is a protocol
+foundation, not a GCS adapter or live Google qualification. No credential discovery/token exchange
+or new executable dependency is added. The following adapter will enforce provider-specific
+metadata, stored encoding, generation selection and exact response ranges before D1 admission.
+
+The GCS adapter keeps generation and metageneration as Int64 internally and writes their public
+JSON fields as decimal strings. Input accepts both strings and integers; opaque descriptors must
+not be rounded by JavaScript clients. Its private identity MAC uses canonical typed numbers and
+excludes rotating HMAC access credentials. Root URI compilation probes IDN canonicalization so
+malformed Unicode hosts fail with the fixed startup diagnostic before any private key is decoded.
+The shared ObjectPathEncoding is the existing S3 encoder moved without algorithm changes; both
+S3 and GCS mutation scopes retain that responsibility. The existing ranged scopes all relocate
+with identical source fragments rather than silently dropping changed registration blocks.
+
+GCS structural validation is asserted independently of descriptor integrity: tests compute valid
+private MACs for invalid prefixes/generations/metadata and still require rejection. Catalogue
+shutdown checks every owned key and invalidates every compiled source, rather than only testing
+direct source disposal. The bounded 32-KiB static configuration writer does not need extra JSON
+encoding reservation; the maximal legal escaped configuration fits directly. The snapshot writer
+retains its separate reservation for worst-case escaped object names and ETags. Initial mutation
+survivors also drove inclusive secret/bucket alphabet and mixed numeric-domain component tests.
+
+## D2 import-job discovery
+
+The read-only list reuses the project-pinned server key and immutable manifest states rather than
+adding a second registry or cursor journal. The existing store lock yields a detached page,
+project filtering precedes keyset ordering, and only public status/receipt fields are copied.
+At most 4,096 existing states are inspected and at most 100 records returned; no external I/O,
+new queue, persistent version, provider call or ingestion admission belongs to discovery.
+GUID ordering is stable but random IDs are not creation timestamps, so pages explicitly expose a
+live view rather than a snapshot guarantee. Restarting discovery is how callers find later-created
+IDs below their prior cursor. Retention and ambiguous-admission resolution remain separate work.

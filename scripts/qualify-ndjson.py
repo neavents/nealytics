@@ -186,6 +186,12 @@ def main():
         wait_for(ready, 'restart readiness')
         assert total(13), 'Restart changed the accepted event set'
         if args.jobs:
+            list_route = '/api/v1/telemetry/import/jobs'
+            assert request('GET', list_route, key='unknown')[0] == 401
+            assert request('GET', list_route, key='public-key')[0] == 403
+            status, empty_page = request('GET', list_route)
+            assert status == 200 and empty_page['jobs'] == [] and empty_page.get('nextAfter') is None
+            assert request('GET', list_route + '?limit=0') == (400, {'error': 'invalid_job_list_request'})
             job = str(uuid.uuid4())
             first_id, second_id = str(uuid.uuid4()), str(uuid.uuid4())
             first, second = event(2) + b'\r\n', event(4)
@@ -201,12 +207,16 @@ def main():
             assert status == 202 and receipt['state'] == 'ready', (status, receipt)
             assert receipt['acceptedRecords'] == 1 and receipt['nextByteOffset'] == len(first), receipt
             assert request('GET', job_route) == (200, receipt)
+            status, page = request('GET', list_route + '?limit=1')
+            assert status == 200 and page['jobs'] == [receipt] and page.get('nextAfter') is None
             assert request('POST', first_route, first, metadata=metadata, compressed=True) == (202, receipt)
             wait_for(lambda: total(15), 'job first chunk is visible without duplicate aggregate')
             run(['docker', 'stop', '--time', '30', engine])
             run(['docker', 'start', engine])
             wait_for(ready, 'job checkpoint restart readiness')
             assert request('GET', job_route) == (200, receipt)
+            status, page = request('GET', list_route + '?limit=1')
+            assert status == 200 and page['jobs'] == [receipt] and page.get('nextAfter') is None
             assert request('POST', first_route, first, metadata=metadata) == (202, receipt)
             assert total(15), 'Confirmed retry changed the aggregate after restart'
             status, finished = request('POST', second_route, second, metadata=metadata, chunked=True)
@@ -249,6 +259,21 @@ def main():
             assert uncertain['acceptedRecords'] == 0 and uncertain['nextByteOffset'] == 0 and uncertain.get('receipt') is None
             assert request('POST', uncertain_route + '/chunks/' + uncertain_chunk + '?offset=0', first, metadata=metadata) == (409, {'error': 'needs_reconciliation'})
             assert total(24), 'Ambiguous processing fixture was replayed'
+            discovered, cursor = [], None
+            for _ in range(4):
+                status, page = request('GET', list_route + '?limit=1' + ('&after=' + cursor if cursor else ''))
+                assert status == 200 and len(page['jobs']) == 1, (status, page)
+                discovered.extend(page['jobs'])
+                cursor = page.get('nextAfter')
+                if cursor is None:
+                    break
+                assert cursor == page['jobs'][-1]['jobId']
+            assert [item['jobId'] for item in discovered] == sorted([job, rejected['jobId'], uncertain_job])
+            assert {item['state'] for item in discovered} == {'complete', 'rejected', 'needs_reconciliation'}
+            assert {item['jobId']: item for item in discovered} == {item['jobId']: item for item in [finished, rejected, uncertain]}
+            status, page = request('GET', list_route + '?after=' + discovered[-1]['jobId'])
+            assert status == 200 and page['jobs'] == [] and page.get('nextAfter') is None
+            assert total(24), 'Discovery changed persisted events'
         logs = run(['docker', 'logs', engine])
         assert any(json.loads(line).get('Properties', {}).get('Backend') == 'io_uring'
                    for line in logs.splitlines() if line.startswith('{'))
@@ -257,7 +282,7 @@ def main():
             'architecture': architecture, 'hostArchitecture': host, 'sourceMapping': args.mapped, 'importJobs': args.jobs,
             'checks': ['custom-io_uring', 'authentication', 'streamed-utf8-prefix-receipt', 'pinned-project-schema',
                        'sanitization', 'exact-record-limit', 'final-line', 'line-body-limits', 'compression', 'restart-visibility']
-                      + (['job-checkpoint-restart', 'confirmed-chunk-retry', 'job-terminal-retry', 'job-prefix-rejection', 'processing-manifest-recovery-fixture'] if args.jobs else []),
+                      + (['job-checkpoint-restart', 'confirmed-chunk-retry', 'job-terminal-retry', 'job-prefix-rejection', 'processing-manifest-recovery-fixture', 'project-job-discovery-pagination', 'discovery-restart-and-uncertain-state'] if args.jobs else []),
             'result': 'passed', 'measurements': 'disabled'
         }, indent=2) + '\n')
         print('NDJSON published-artifact functional checks passed on ' + architecture + '.')

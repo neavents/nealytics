@@ -143,8 +143,13 @@ named feat/correctness-and-safety cannot also contain child refs beneath that sa
 | E2 bounded NDJSON import | feat/integrations-e2-ndjson-import |
 | E3 declarative source mapping | feat/integrations-e3-source-mapping |
 | D1 durable import checkpoints | feat/developer-operator-tools-d1-import-checkpoints |
+| D2 import-job discovery | feat/developer-operator-tools-d2-import-job-discovery |
+| D3 Kafka source health | feat/developer-operator-tools-d3-kafka-source-health |
 | E4 S3 object import | feat/integrations-e4-s3-import |
 | E5 headered CSV import | feat/integrations-e5-csv-import |
+| E6 named HTTP object import | feat/integrations-e6-http-import |
+| E7 generation-pinned GCS import | feat/integrations-e7-gcs-import |
+| E8 Kafka security qualification | feat/integrations-e8-kafka-security |
 
 New C-F steps receive branches when their bounded package scope is defined. Do not invent an
 implementation sequence for those categories just to populate branch names.

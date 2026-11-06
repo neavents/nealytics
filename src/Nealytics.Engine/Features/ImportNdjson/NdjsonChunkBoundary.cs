@@ -1,8 +1,8 @@
-namespace Nealytics.Engine.Features.S3Import;
+namespace Nealytics.Engine.Features.ImportNdjson;
 
 using System;
 
-internal static class S3ChunkBoundary
+internal static class NdjsonChunkBoundary
 {
     public static int Length(ReadOnlySpan<byte> bytes, bool final, int records)
     {

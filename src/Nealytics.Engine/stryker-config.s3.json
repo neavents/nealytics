@@ -21,9 +21,16 @@
     "mutate": [
       "Features/S3Import/*.cs",
       "Infrastructure/Configuration/S3SourceOptions.cs",
-      "Program.cs{12104..12345}",
-      "Program.cs{18009..18061}",
-      "Infrastructure/Configuration/TelemetryEngineOptions.cs{7653..7715}"
+      "Program.cs{12707..12948}",
+      "Program.cs{18799..18851}",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{7785..7847}",
+      "Infrastructure/Networking/ObjectSourceChunk.cs",
+      "Infrastructure/Networking/ObjectSourceTransport.cs",
+      "Features/ImportJobs/ObjectImportControl.cs",
+      "Features/ImportNdjson/NdjsonChunkBoundary.cs",
+      "Features/ImportJobs/ImportJobState.cs{568..868}",
+      "Infrastructure/Networking/AwsV4RequestSigner.cs",
+      "Infrastructure/Networking/ObjectPathEncoding.cs"
     ]
   }
 }

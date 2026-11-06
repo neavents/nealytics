@@ -4,7 +4,7 @@
     "test-projects": [
       "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
     ],
-    "test-case-filter": "FullyQualifiedName~Ndjson|FullyQualifiedName~Csv|FullyQualifiedName~SourceMapping",
+    "test-case-filter": "FullyQualifiedName~Ndjson|FullyQualifiedName~Csv|FullyQualifiedName~SourceMapping|FullyQualifiedName~S3",
     "mutation-level": "Complete",
     "concurrency": 2,
     "break-on-initial-test-failure": true,
@@ -20,9 +20,9 @@
     },
     "mutate": [
       "Features/ImportNdjson/*.cs",
-      "Program.cs{10586..11027}",
-      "Program.cs{11029..11206}",
-      "Program.cs{17881..17946}",
+      "Program.cs{10673..11114}",
+      "Program.cs{11116..11293}",
+      "Program.cs{18671..18736}",
       "Infrastructure/Configuration/TelemetryEngineOptions.cs{7242..7553}"
     ]
   }

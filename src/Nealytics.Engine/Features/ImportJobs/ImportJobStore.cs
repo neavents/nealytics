@@ -3,6 +3,7 @@ namespace Nealytics.Engine.Features.ImportJobs;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -52,6 +53,27 @@ internal sealed class ImportJobStore : IHostedService, IDisposable
         {
             EnsureReady();
             return _states.GetValueOrDefault(id);
+        }
+    }
+
+    public ImportJobPage List(string project, int limit, Guid after)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(limit, 100);
+        lock (_sync)
+        {
+            EnsureReady();
+            ImportJobState[] candidates = _states.Values
+                .Where(state => state.ProjectId == project && state.Id.CompareTo(after) > 0)
+                .OrderBy(state => state.Id)
+                .Take(limit + 1)
+                .ToArray();
+            ImportJobResponse[] jobs = new ImportJobResponse[Math.Min(limit, candidates.Length)];
+            for (int index = 0; index < jobs.Length; index++)
+            {
+                jobs[index] = candidates[index].Response();
+            }
+            return new(jobs, candidates.Length > limit ? jobs[^1].JobId : null);
         }
     }
 

@@ -15,16 +15,18 @@ internal sealed class KafkaConnector : BackgroundService
     private readonly DurableIngestDispatcher _dispatcher;
     private readonly Func<IConsumer<Ignore, byte[]>> _createConsumer;
     private readonly IHostApplicationLifetime _lifetime;
+    private readonly KafkaSourceHealth _health;
 
     public KafkaConnector(KafkaConnectorSettings settings, KafkaRecordParser parser,
         DurableIngestDispatcher dispatcher, Func<IConsumer<Ignore, byte[]>> createConsumer,
-        IHostApplicationLifetime lifetime)
+        IHostApplicationLifetime lifetime, KafkaSourceHealth health)
     {
         _settings = settings;
         _parser = parser;
         _dispatcher = dispatcher;
         _createConsumer = createConsumer;
         _lifetime = lifetime;
+        _health = health;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -42,6 +44,7 @@ internal sealed class KafkaConnector : BackgroundService
             {
                 stage = "subscribe";
                 consumer.Subscribe(_settings.Topic);
+                _health.Subscribed();
                 while (!cancellationToken.IsCancellationRequested)
                 {
                     stage = "consume";
@@ -54,6 +57,7 @@ internal sealed class KafkaConnector : BackgroundService
                     await _dispatcher.AppendAsync(payload, cancellationToken);
                     stage = "commit";
                     consumer.Commit([new TopicPartitionOffset(record.TopicPartition, record.Offset + 1)]);
+                    _health.Confirmed();
                 }
                 stage = "close";
             }
@@ -67,7 +71,12 @@ internal sealed class KafkaConnector : BackgroundService
         }
         catch (Exception)
         {
+            _health.Failed();
             throw new InvalidOperationException($"Kafka connector stopped during {stage} on topic {_settings.Topic}, partition {partition}, offset {offset}. No unacknowledged record was skipped; replay may duplicate durable events.");
+        }
+        finally
+        {
+            _health.Stopped();
         }
     }
 }

@@ -73,10 +73,11 @@ internal static class KafkaTestSupport
                 token.ThrowIfCancellationRequested();
                 throw new InvalidOperationException("test consumer cancellation did not propagate");
             });
-            Connector = new KafkaConnector(Settings, Parser, dispatcher, factory ?? (() => Consumer), lifetime);
+            Connector = new KafkaConnector(Settings, Parser, dispatcher, factory ?? (() => Consumer), lifetime, Health);
         }
         public KafkaConnectorSettings Settings { get; }
         public KafkaRecordParser Parser { get; }
+        public KafkaSourceHealth Health { get; } = new();
         public IConsumer<Ignore, byte[]> Consumer { get; }
         public KafkaConnector Connector { get; private set; }
         public WriteAheadLogger Wal { get; }

@@ -1,5 +1,43 @@
 # Implementation evidence
 
+E8 real Kafka security is locally qualified: TLS plus PLAIN/SCRAM-SHA-256/SCRAM-SHA-512 over TLS,
+explicit trust/hostname/password rejection and encrypted offset/crash/poison behavior. All 4,233
+units, 348 real-dependency integrations, 185 Kafka mutants and thirteen published actual ARM64
+scenarios pass, with a zero-warning/error build. E8 changes qualification tooling and evidence;
+engine/native/packaging trees remain unchanged. Whole maintained coverage stays 15,185/15,707
+lines and 6,179/6,553 branches, with inherited 522-line/374-branch gaps. See the
+[E8 ledger](packages/e8-kafka-security-verification.md) and [Kafka guide](kafka-connector.md).
+Remote/x64 remain owner-deferred, Archy unavailable, measurements stopped and main untouched.
+
+D2 import-job discovery is locally qualified at production e44d9d1. Existing pinned server keys
+can list only their own project through bounded UUID keyset pages; immutable public receipts,
+fault fencing and restart uncertainty are preserved without provider calls or persistent-format
+changes. All 4,233 unit cases and 323 real-dependency integrations pass, with complete changed
+coverage (52 executable lines/34 branch outcomes), 123 killed mutants, canonical/mapped actual
+ARM64 published NDJSON/job checks and a zero-warning/error build. See the
+[D2 ledger](packages/d2-import-job-discovery-verification.md) and [job guide](import-jobs.md).
+Remote CI/actual x64 remain owner-deferred; broader D/E and hosted F scopes remain open.
+
+E7 generation-pinned GCS NDJSON imports are locally qualified at production ced3b09. Named,
+project-pinned sources use explicit HMAC interoperability credentials, private keyed descriptors
+and conditional generation/metageneration ranges through existing durable checkpoints. All 4,182
+full unit cases, 323 real-dependency integration cases and eleven actual ARM64 published connector
+checks pass. Same-source coverage reaches all 557 changed executable lines and 357 branch outcomes;
+GCS/shared mutation kills all 567 executable mutants and preserved S3/shared mutation kills all 519.
+The build has zero warnings/errors. Remote CI/actual x64 are owner-deferred; live Google-service
+verification remains unrun. See the [adapter ledger](packages/e7-gcs-import-adapter-verification.md),
+[operator guide](gcs-import.md) and [remaining integration groups](integration-delivery-status.md).
+Category E remains open; main and stopped measurements remain untouched.
+
+E6 named HTTP object import is implemented on feat/integrations-e6-http-import at 118da51.
+Local qualification passes 3,933 unit cases, all 319 real-dependency integration cases and all nine
+published actual ARM64 connector checks. Same-source coverage covers all 517 changed executable
+lines and 303 branch outcomes. HTTP/S3 mutation detects all executable mutants. Actual x64 and remote CI are deferred by the
+owner on 2026-11-06 because GitHub access could not be restored.
+See the [E6 ledger](packages/e6-http-import-verification.md) and [operator guide](http-import.md).
+Local implementation is qualified; deferred platform checks and category E remain open.
+Main remains untouched and measurements remain stopped.
+
 E5 headered CSV upload is implemented and functionally qualified. CSV-only or shared import hosts
 support literal column mappings, strict UTF-8, quoted multiline fields and bounded accepted-prefix
 receipts through existing policy/sanitization/WAL contracts. The milestone passes 3,723 local unit
@@ -54,7 +92,7 @@ replay semantics. The milestone has 2,988 passing unit and 299 passing integrati
 226/226 changed executable lines, 124/124 branch outcomes and 179/179 killed executable mutants.
 Published actual Linux x64/ARM64 checks pass with io_uring/custom ingestion. See the
 [E1 evidence ledger](packages/e1-kafka-verification.md) and [operator guide](kafka-connector.md).
-Adapters beyond the delivered E1–E3 scopes remain unselected/deferred; D and hosted F work have not started. Benchmarks
+This E3 record is historical. D1 and later E deliveries are recorded above; hosted F remains outside scope. Benchmarks
 remain stopped and main remains untouched.
 
 Category C's selected C1–C8 contract is implemented and functionally qualified. All C4–C8

@@ -12,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Nealytics.Engine.Features.ImportJobs;
 using Nealytics.Engine.Features.ImportNdjson;
+using Nealytics.Engine.Infrastructure.Networking;
 using Nealytics.Engine.Infrastructure.Storage.Wal;
 
 internal sealed class S3ObjectClient : IDisposable
@@ -37,18 +38,7 @@ internal sealed class S3ObjectClient : IDisposable
         _pool = pool ?? ArrayPool<byte>.Shared;
     }
 
-    internal static SocketsHttpHandler CreateHandler() => new()
-    {
-        AllowAutoRedirect = false,
-        AutomaticDecompression = DecompressionMethods.None,
-        UseCookies = false,
-        UseProxy = false,
-        MaxConnectionsPerServer = 1,
-        MaxResponseHeadersLength = 16,
-        ConnectTimeout = TimeSpan.FromSeconds(5),
-        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-        PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30)
-    };
+    internal static SocketsHttpHandler CreateHandler() => ObjectSourceTransport.CreateHandler();
 
     public Task<S3ObjectSnapshot> InspectAsync(S3Source source, S3ObjectRequest descriptor, CancellationToken cancellationToken)
     {
@@ -81,7 +71,7 @@ internal sealed class S3ObjectClient : IDisposable
         }, cancellationToken);
     }
 
-    public async Task<S3ObjectChunk> ReadChunkAsync(S3Source source, S3ObjectSnapshot snapshot, long offset,
+    public async Task<ObjectSourceChunk> ReadChunkAsync(S3Source source, S3ObjectSnapshot snapshot, long offset,
         int? exactLength, CancellationToken cancellationToken)
     {
         if (!snapshot.IsValid(source) || offset < 0 || offset > snapshot.Bytes
@@ -121,8 +111,11 @@ internal sealed class S3ObjectClient : IDisposable
                     throw new S3ImportException(502, "source_protocol_error");
                 }
                 Stream body = await response.Content.ReadAsStreamAsync(token);
-                await ReadAsync(body, buffer, count, token);
-                int framed = exactLength ?? S3ChunkBoundary.Length(buffer.WrittenMemory.Span,
+                if (!await ObjectSourceTransport.ReadExactlyAsync(body, buffer, count, token))
+                {
+                    throw new S3ImportException(502, "source_protocol_error");
+                }
+                int framed = exactLength ?? NdjsonChunkBoundary.Length(buffer.WrittenMemory.Span,
                     offset + count == snapshot.Bytes, _input.Records);
                 if (framed == 0)
                 {
@@ -160,25 +153,6 @@ internal sealed class S3ObjectClient : IDisposable
             {
                 throw new S3ImportException(502, "source_unavailable");
             }
-        }
-    }
-
-    private static async Task ReadAsync(Stream body, WalRecordBuffer buffer, int count, CancellationToken cancellationToken)
-    {
-        while (buffer.WrittenMemory.Length < count)
-        {
-            int size = Math.Min(8_192, count - buffer.WrittenMemory.Length);
-            int read = await body.ReadAsync(buffer.GetMemory(size)[..size], cancellationToken);
-            if (read == 0)
-            {
-                throw new S3ImportException(502, "source_protocol_error");
-            }
-            buffer.Advance(read);
-        }
-        byte[] extra = new byte[1];
-        if (await body.ReadAsync(extra, cancellationToken) != 0)
-        {
-            throw new S3ImportException(502, "source_protocol_error");
         }
     }
 

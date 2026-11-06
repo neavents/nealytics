@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Nealytics.Engine.Features.ImportJobs;
 using Nealytics.Engine.Features.ImportNdjson;
+using Nealytics.Engine.Infrastructure.Networking;
 
 internal sealed class S3ImportCoordinator(
     S3ObjectClient client, ImportJobCoordinator jobs, ImportJobStore store, ImportJobLimits limits) : IDisposable
@@ -38,15 +39,13 @@ internal sealed class S3ImportCoordinator(
         try
         {
             ImportJobState? previous = store.Find(jobId);
-            int? exactLength = previous is not null && previous.ProjectId == source.ProjectId
-                && previous.ChunkId == chunkId && previous.Receipt is not null
-                && previous.SourceId == snapshot.SourceId && previous.SourceBytes == snapshot.Bytes
-                && previous.ChunkOffset == offset ? previous.ChunkBytes : null;
+            int? exactLength = previous?.ConfirmedChunkBytes(source.ProjectId, chunkId,
+                snapshot.SourceId, snapshot.Bytes, offset);
             if (exactLength > limits.ChunkBytes)
             {
                 return ImportJobResult.Reject(409, "contract_changed");
             }
-            using S3ObjectChunk chunk = await client.ReadChunkAsync(source, snapshot, offset, exactLength, cancellationToken);
+            using ObjectSourceChunk chunk = await client.ReadChunkAsync(source, snapshot, offset, exactLength, cancellationToken);
             return await jobs.AppendAsync(new(jobId, chunkId, snapshot.SourceId, snapshot.Bytes, offset),
                 source.ProjectId, PipeReader.Create(new ReadOnlySequence<byte>(chunk.Bytes)), ingest, cancellationToken);
         }

@@ -19,7 +19,7 @@ beacon and standalone NDJSON contracts stay compatible.
 
 Use an existing server ingestion key pinned to one permitted project, following the
 [NDJSON guide](ndjson-import.md). X-Project-Key takes precedence over k. Public, legacy/unscoped
-and unpinned keys cannot use either route. Another project's job returns 404 for reads and writes.
+and unpinned keys cannot use the import-job routes. Another project's job returns 404 for reads and writes.
 
 ## Submit and inspect
 
@@ -77,6 +77,32 @@ bytes to receive the same HTTP status and stored response without another WAL ap
 rejection receipts also support this retry. Older chunks are not a replay ledger. Changed bytes,
 identities, offsets, terminal jobs and out-of-order chunks reject with 409. This is not general
 event deduplication or an exactly-once ingestion guarantee.
+
+## Discover existing jobs
+
+GET /api/v1/telemetry/import/jobs lists only the authenticated key's pinned project. Use the same
+server key as single-job reads. Optional limit defaults to 50 and accepts 1–100 decimal records;
+optional after is one nonzero UUID in its hyphenated D format. Blank, duplicated, malformed or
+out-of-range parameters return 400 invalid_job_list_request. A query project cannot override the
+key's project. The listing does not fetch a remote object or write a WAL record/manifest.
+
+```sh
+curl "http://localhost:5000/api/v1/telemetry/import/jobs?limit=50" \
+  -H "X-Project-Key: $NEALYTICS_SERVER_KEY"
+```
+
+The response contains jobs, an array of the existing public job/receipt records, in ascending UUID
+order. When more matching jobs exist, nextAfter is the last returned job ID. Pass it as after for
+the next page. Otherwise nextAfter is null or omitted. No total count or foreign-project cursor
+lookup is performed. A cursor is only an exclusive ordering hint and grants no access.
+
+Each page copies immutable states under the existing store lock, then serializes after releasing
+it. Pages are live views: progress may change between reads, and newly created random UUIDs below
+a previous cursor require restarting discovery from the first page. This is not a historical
+snapshot. Storage history remains bounded by ImportJobMaxJobs (at most 4,096), and a page returns
+at most 100 records. Discovery preserves processing, ready, complete, rejected and recovered
+needs_reconciliation states without resolving or retrying them. A faulted journal returns 503
+job_storage_unavailable with no partial list. Disabling jobs also disables the list route.
 
 ## Recovery and failures
 

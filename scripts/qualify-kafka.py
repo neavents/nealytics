@@ -101,10 +101,10 @@ def main():
 
     port = None
 
-    def request(path):
+    def request(path, key='source-key'):
         connection = http.client.HTTPConnection('127.0.0.1', port, timeout=2)
         try:
-            connection.request('GET', path, headers={'Authorization': 'Bearer ' + token()})
+            connection.request('GET', path, headers={'Authorization': 'Bearer ' + token(), 'X-Project-Key': key})
             response = connection.getresponse()
             return response.status, response.read()
         except (OSError, http.client.HTTPException):
@@ -137,6 +137,12 @@ def main():
             'TelemetryEngine__IngestionKeys__0__Key': 'source-key',
             'TelemetryEngine__IngestionKeys__0__Scope': 'server',
             'TelemetryEngine__IngestionKeys__0__ProjectId': 'p',
+            'TelemetryEngine__IngestionKeys__1__Key': 'public-key',
+            'TelemetryEngine__IngestionKeys__1__Scope': 'public',
+            'TelemetryEngine__IngestionKeys__1__ProjectId': 'p',
+            'TelemetryEngine__IngestionKeys__2__Key': 'other-key',
+            'TelemetryEngine__IngestionKeys__2__Scope': 'server',
+            'TelemetryEngine__IngestionKeys__2__ProjectId': 'other',
             'TelemetryEngine__NamedMetrics__0__Name': 'activity',
             'TelemetryEngine__NamedMetrics__0__EventType': 'action',
             'TelemetryEngine__Kafka__Enabled': 'true',
@@ -167,6 +173,14 @@ def main():
             binary = Path(directory) / 'Nealytics.Engine'
             run(['docker', 'cp', engine + ':/app/Nealytics.Engine', str(binary)])
             digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+        health_route = '/api/v1/telemetry/sources/kafka/default'
+        assert request(health_route, 'unknown')[0] == 401
+        assert request(health_route, 'public-key')[0] == 403
+        assert request(health_route, 'other-key')[0] == 404
+        def assigned():
+            status, body = request(health_route)
+            return status == 200 and json.loads(body)['state'] == 'assigned' and json.loads(body).get('issue') is None
+        wait_for(assigned, 'idle source assignment health')
         produce([event(1)])
         wait_for(lambda: offset() == 1, 'durable first offset')
         def metric_visible():
@@ -179,6 +193,7 @@ def main():
         port = int(run(['docker', 'port', engine, '5000/tcp']).split(':')[-1])
         wait_for(lambda: request('/ready')[0] == 200, 'restart readiness')
         wait_for(lambda: offset() == 2, 'restart resumes from committed offset')
+        wait_for(assigned, 'restart source assignment health')
         wait_for(lambda: sql("SELECT count() FROM nealytics_core.global_events WHERE project_id='p'") == '2', 'stored restart count')
         produce(['{"invalid-secret-payload":true}' if args.mapped else '{invalid-secret-payload}', event(3)])
         wait_for(lambda: run(['docker', 'inspect', '--format', '{{.State.Running}}', engine]) == 'false', 'poison input stops host')
@@ -193,7 +208,7 @@ def main():
             'source': run(['git', 'rev-parse', 'HEAD']), 'image': args.image, 'architecture': architecture,
             'hostArchitecture': host_architecture, 'sha256': digest, 'sourceMapping': args.mapped,
             'checks': ['native-single-file-loading', 'custom-io_uring', 'kafka-to-wal-to-clickhouse',
-                       'named-metric-visibility', 'committed-offset-restart', 'poison-prefix-stop', 'payload-log-redaction'],
+                       'named-metric-visibility', 'committed-offset-restart', 'poison-prefix-stop', 'payload-log-redaction', 'project-scoped-source-health', 'idle-and-restart-assignment-health'],
             'result': 'passed', 'measurements': 'disabled'
         }, indent=2) + '\n')
         print('Kafka published-artifact functional checks passed on ' + architecture + '.')

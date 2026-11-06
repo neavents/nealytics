@@ -2,7 +2,9 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Nealytics.Engine.Features.S3Import;
+using Nealytics.Engine.Features.ImportNdjson;
 using Nealytics.Engine.Infrastructure.Serialization;
+using Nealytics.Engine.Infrastructure.Networking;
 
 namespace Nealytics.Engine.Tests.Unit;
 
@@ -64,6 +66,28 @@ public sealed class S3ProtocolTests
         Assert.False(request.Headers.Contains("x-amz-security-token"));
     }
 
+    [Fact]
+    public void SharedSigningMatchesAnIndependentGoogleInteropGenerationRequestVector()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            "https://storage.googleapis.com/example-bucket/events/%E6%97%A5%E6%9C%AC%E8%AA%9E%20%2B%25.ndjson?generation=1486161811706000");
+        request.Headers.Range = new RangeHeaderValue(0, 9);
+        request.Headers.IfMatch.Add(new("\"tag\""));
+        request.Headers.AcceptEncoding.ParseAdd("identity");
+        request.Headers.Add("x-goog-if-generation-match", "1486161811706000");
+        request.Headers.Add("x-goog-if-metageneration-match", "15");
+        var pool = new ImportJobCoordinatorTests.TrackingPool();
+        AwsV4RequestSigner.Sign(request, "GOOGEXAMPLEACCESSID", "google-fixture-secret+/=", "auto", "",
+            new DateTimeOffset(2013, 5, 24, 3, 0, 0, TimeSpan.FromHours(3)), pool);
+        Assert.Equal("AWS4-HMAC-SHA256 Credential=GOOGEXAMPLEACCESSID/20130524/auto/s3/aws4_request,"
+            + "SignedHeaders=accept-encoding;host;if-match;range;x-amz-content-sha256;x-amz-date;"
+            + "x-goog-if-generation-match;x-goog-if-metageneration-match,Signature=bf79576b8e0164426c590373d5c22f09597dee7499a2aa66333879eaa9501be2",
+            Assert.Single(request.Headers.GetValues("Authorization")));
+        Assert.Equal("storage.googleapis.com", request.Headers.Host);
+        Assert.False(request.Headers.Contains("x-amz-security-token"));
+        Assert.Single(pool.Rented); Assert.True(Assert.Single(pool.Returned));
+    }
+
     [Theory]
     [InlineData(true, "https://s3.amazonaws.com/examplebucket/a//./../%25/%E6%97%A5%E6%9C%AC%E8%AA%9E%20%2B%3F%23", "/examplebucket/a//./../%25/%E6%97%A5%E6%9C%AC%E8%AA%9E%20%2B%3F%23")]
     [InlineData(false, "https://examplebucket.s3.amazonaws.com/a//./../%25/%E6%97%A5%E6%9C%AC%E8%AA%9E%20%2B%3F%23", "/a//./../%25/%E6%97%A5%E6%9C%AC%E8%AA%9E%20%2B%3F%23")]
@@ -100,7 +124,7 @@ public sealed class S3ProtocolTests
     [InlineData("\n\n", true, 1, 1)]
     public void FramingRetainsOriginalBytesAndRespectsRecordAndSourceBoundaries(string body, bool final, int records, int expected)
     {
-        Assert.Equal(expected, S3ChunkBoundary.Length(Encoding.UTF8.GetBytes(body), final, records));
+        Assert.Equal(expected, NdjsonChunkBoundary.Length(Encoding.UTF8.GetBytes(body), final, records));
     }
 
     [Theory]

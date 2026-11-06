@@ -15,6 +15,8 @@ public static class ImportJobsEndpoint
 {
     public static void MapImportJobs(this IEndpointRouteBuilder endpoints)
     {
+        endpoints.MapGet("/api/v1/telemetry/import/jobs", List)
+            .WithName("ListImportJobs").Produces<ImportJobPage>();
         endpoints.MapGet("/api/v1/telemetry/import/jobs/{jobId:guid}", Get)
             .WithName("GetImportJob").Produces<ImportJobResponse>();
         endpoints.MapPost("/api/v1/telemetry/import/jobs/{jobId:guid}/chunks/{chunkId:guid}", AppendAsync)
@@ -22,6 +24,28 @@ public static class ImportJobsEndpoint
             .WithMetadata(new ClickHouseWorkloadMetadata(ClickHouseWorkload.Write))
             .Produces<ImportJobResponse>(StatusCodes.Status202Accepted)
             .RequireRateLimiting("ndjson-import");
+    }
+
+    private static IResult List(HttpContext context, ApiKeyValidator keys, ImportJobStore jobs)
+    {
+        IResult? rejected = Authenticate(context, keys, out IngestionKeyPolicy? policy);
+        if (rejected is not null)
+        {
+            return rejected;
+        }
+        ImportJobListRequest? request = ImportJobListRequest.Parse(context.Request.Query);
+        if (request is null)
+        {
+            return Results.Json(new ImportJobError("invalid_job_list_request"), statusCode: 400);
+        }
+        try
+        {
+            return Results.Json(jobs.List(policy!.PinnedProject!, request.Limit, request.After));
+        }
+        catch (IOException)
+        {
+            return Results.Json(new ImportJobError("job_storage_unavailable"), statusCode: 503);
+        }
     }
 
     private static IResult Get(Guid jobId, HttpContext context, ApiKeyValidator keys, ImportJobCoordinator jobs)

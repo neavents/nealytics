@@ -12,6 +12,10 @@ public sealed record ImportJobState(
     public ImportJobResponse Response() => new(Id, SourceId, SourceBytes, Status,
         NextByteOffset, AcceptedRecords, ChunkId, Receipt);
 
+    public int? ConfirmedChunkBytes(string project, Guid chunkId, string sourceId, long sourceBytes, long offset) =>
+        ProjectId == project && ChunkId == chunkId && Receipt is not null && SourceId == sourceId
+        && SourceBytes == sourceBytes && ChunkOffset == offset ? ChunkBytes : null;
+
     public void Validate()
     {
         if (Version != 1 || Id == Guid.Empty || ChunkId == Guid.Empty

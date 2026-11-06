@@ -8,8 +8,9 @@
     "mutate": [
       "Features/KafkaIngestion/*.cs",
       "Infrastructure/Configuration/KafkaConnectorOptions.cs",
-      "Program.cs{14799..14862}",
-      "Infrastructure/Configuration/TelemetryEngineOptions.cs{7052..7105}"
+      "Program.cs{15402..15465}",
+      "Infrastructure/Configuration/TelemetryEngineOptions.cs{7052..7105}",
+      "Program.cs{18429..18503}"
     ],
     "mutation-level": "Complete",
     "concurrency": 2,

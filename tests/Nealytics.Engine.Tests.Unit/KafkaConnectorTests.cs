@@ -20,6 +20,28 @@ public sealed class KafkaConnectorTests
         Assert.DoesNotContain("secret", error.ToString());
         Assert.Null(error.InnerException);
         Assert.Empty(harness.Consumer.ReceivedCalls());
+        Assert.Equal("failed", harness.Health.Snapshot().State);
+        Assert.Equal("worker_failed", harness.Health.Snapshot().Issue);
+    }
+
+    [Fact]
+    public async Task SourceHealthConfirmsProgressOnlyAfterTheOffsetCommitReturns()
+    {
+        await using var harness = new Harness(); int received = 0;
+        harness.Consumer.Configure().Consume(Arg.Any<CancellationToken>()).Returns(call =>
+        {
+            if (Interlocked.Increment(ref received) == 1) return Record();
+            var token = call.Arg<CancellationToken>(); token.WaitHandle.WaitOne(); throw new OperationCanceledException(token);
+        });
+        harness.Consumer.When(consumer => consumer.Commit(Arg.Any<IEnumerable<TopicPartitionOffset>>())).Do(_ =>
+        {
+            Assert.Equal("waiting", harness.Health.Snapshot().State);
+            Assert.Equal(1, harness.Wal.UncommittedRecordCount);
+            Assert.True(harness.Broker.Reader.TryRead(out var delivered));
+        });
+        await harness.Start(); await WaitFor(() => Volatile.Read(ref received) == 2);
+        Assert.Equal("assigned", harness.Health.Snapshot().State); Assert.Null(harness.Health.Snapshot().Issue);
+        await harness.Stop(); Assert.Equal("stopped", harness.Health.Snapshot().State);
     }
 
     [Fact]
@@ -46,6 +68,7 @@ public sealed class KafkaConnectorTests
         await harness.Connector.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
         await harness.Connector.ExecuteTask!;
         Assert.False(harness.Stopping.IsCancellationRequested);
+        Assert.Equal("stopped", harness.Health.Snapshot().State);
         harness.Consumer.DidNotReceive().Commit(Arg.Any<IEnumerable<TopicPartitionOffset>>());
         harness.Consumer.Received(1).Close();
         harness.Consumer.Received(1).Dispose();
@@ -142,7 +165,7 @@ public sealed class KafkaConnectorTests
         Assert.DoesNotContain("secret", error.ToString());
         Assert.Null(error.InnerException);
         Assert.Equal(1, harness.Wal.UncommittedRecordCount);
-        Assert.True(harness.Broker.Reader.TryRead(out _));
+        Assert.True(harness.Broker.Reader.TryRead(out var delivered));
         harness.Consumer.Received(1).Consume(Arg.Any<CancellationToken>());
         harness.Consumer.Received(1).Close();
         harness.Consumer.Received(1).Dispose();

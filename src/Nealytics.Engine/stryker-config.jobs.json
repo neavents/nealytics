@@ -4,7 +4,7 @@
     "test-projects": [
       "../../tests/Nealytics.Engine.Tests.Unit/Nealytics.Engine.Tests.Unit.csproj"
     ],
-    "test-case-filter": "FullyQualifiedName~ImportJob",
+    "test-case-filter": "FullyQualifiedName~ImportJob|FullyQualifiedName~S3",
     "mutation-level": "Complete",
     "concurrency": 4,
     "break-on-initial-test-failure": true,
@@ -20,8 +20,8 @@
     },
     "mutate": [
       "Features/ImportJobs/*.cs",
-      "Program.cs{11439..12052}",
-      "Program.cs{17947..18008}",
+      "Program.cs{11526..12139}",
+      "Program.cs{18737..18798}",
       "Infrastructure/Configuration/TelemetryEngineOptions.cs{7553..7653}"
     ]
   }

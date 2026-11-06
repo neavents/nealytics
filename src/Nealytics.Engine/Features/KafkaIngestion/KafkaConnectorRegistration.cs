@@ -26,10 +26,19 @@ internal static class KafkaConnectorRegistration
         services.AddSingleton(provider => new KafkaRecordParser(
             provider.GetRequiredService<KafkaConnectorSettings>(), options,
             provider.GetRequiredService<ILoggerFactory>()));
-        services.AddSingleton<Func<IConsumer<Ignore, byte[]>>>(provider => () =>
-            new ConsumerBuilder<Ignore, byte[]>(provider.GetRequiredService<KafkaConnectorSettings>().Consumer)
+        services.AddSingleton<KafkaSourceHealth>();
+        services.AddSingleton<Func<IConsumer<Ignore, byte[]>>>(provider =>
+        {
+            KafkaConnectorSettings settings = provider.GetRequiredService<KafkaConnectorSettings>();
+            KafkaSourceHealth health = provider.GetRequiredService<KafkaSourceHealth>();
+            return () => new ConsumerBuilder<Ignore, byte[]>(settings.Consumer)
                 .SetLogHandler((_, _) => { })
-                .Build());
+                .SetErrorHandler((_, error) => health.NativeError(error))
+                .SetPartitionsAssignedHandler((_, partitions) => health.Assigned(partitions.Count))
+                .SetPartitionsRevokedHandler((_, _) => health.Revoked())
+                .SetPartitionsLostHandler((_, _) => health.Lost())
+                .Build();
+        });
         services.AddHostedService<KafkaConnector>();
     }
 }

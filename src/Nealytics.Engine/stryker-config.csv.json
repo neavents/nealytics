@@ -22,9 +22,9 @@
       "Features/ImportCsv/*.cs",
       "Features/SourceMapping/SourceValues.cs",
       "Features/SourceMapping/SourceRecordMapping.cs",
-      "Program.cs{10586..11027}",
-      "Program.cs{11207..11375}",
-      "Program.cs{17766..17825}",
+      "Program.cs{10673..11114}",
+      "Program.cs{11294..11462}",
+      "Program.cs{18369..18428}",
       "Infrastructure/Configuration/TelemetryEngineOptions.cs{7107..7243}"
     ]
   }

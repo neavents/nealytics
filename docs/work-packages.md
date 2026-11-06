@@ -214,3 +214,67 @@ bindings, bounded multiline-record parsing and accepted-prefix delivery through 
 contracts. The bounded implementation is functionally qualified; see the
 [evidence ledger](packages/e5-csv-import-verification.md) and [operator contract](csv-import.md).
 Durable CSV jobs, S3 CSV framing, Parquet, additional sources and sinks remain distinct steps.
+
+## E6: checkpointed named HTTP sources
+
+After qualified E5, continue the source-expansion group with [named HTTP NDJSON objects](packages/e6-http-import.md)
+on feat/integrations-e6-http-import. The prepared contract uses operator-selected URLs, strong
+conditional ranges and D1 receipts with bounded transport and secret-safe source identities.
+Identity uses a configured per-source 32-byte secret key, with explicit restart/rotation fences.
+Local runtime implementation is qualified; remote/x64 checks are deferred by the owner. GCS,
+further formats, database adapters and sinks remain separate steps.
+
+E6 runtime is implemented at 118da51. All 3,933 local units, 319 real-dependency integrations,
+517 changed executable lines/303 branch outcomes and nine actual ARM64 published connector
+checks pass. HTTP/S3 mutation detects all executable mutants; the deadline assertion recheck also
+passes without timeout. See the [E6 ledger](packages/e6-http-import-verification.md). Actual x64 and
+remote CI are deferred by the owner on 2026-11-06; development continues locally. No main integration.
+
+## E7: generation-pinned GCS objects
+
+Continue the object-source group locally with [GCS NDJSON imports](packages/e7-gcs-import.md) on
+feat/integrations-e7-gcs-import, based on local E6 merge 2278bf4. Start with the shared concrete
+request signer and provider protocol boundaries, then add declarations, conditional generation
+reads and D1 composition. No GCS route or provider qualification is claimed by the foundation.
+Remote/x64 gates remain deferred; actual local tests, coverage and mutation continue normally.
+
+E7's signing foundation is locally verified at 83113c9: 847 focused cases, four real-dependency
+S3 regressions, complete 49-line/six-branch changed coverage, 519 killed mutants and canonical/
+mapped published ARM64 S3 checks. See the [foundation ledger](packages/e7-gcs-import-verification.md).
+The adapter milestone below now adds named declarations, conditional ranges and checkpoint composition.
+
+The GCS adapter is locally qualified at production ced3b09: 4,182 full unit cases, 323 full
+real-dependency integrations, all eleven actual ARM64 published connector checks, all 557 changed
+executable lines/357 branch outcomes, 567 killed GCS/shared mutants and 519 killed S3/shared mutants.
+See the [adapter ledger](packages/e7-gcs-import-adapter-verification.md) and [operator guide](gcs-import.md).
+Remote CI/actual x64 remain owner-deferred; live Google-service verification is unrun. Neither
+full category E nor live-provider qualification is claimed.
+
+## D2: bounded import-job discovery
+
+After locally qualified E7, add [project-scoped job discovery](packages/d2-import-job-discovery.md)
+on feat/developer-operator-tools-d2-import-job-discovery. This read-only operator workflow reuses
+persisted states with bounded keyset pages, existing pinned server authorization and fault fencing.
+Local qualification passes 4,233 units, 323 integrations, all 52 changed executable lines/34
+branch outcomes, 123 killed mutants and canonical/mapped actual ARM64 NDJSON/job checks. See the
+[evidence ledger](packages/d2-import-job-discovery-verification.md). Retention, deletion, scheduling
+and reconciliation actions remain separate steps. Remote/x64 checks remain owner-deferred, measurements stopped and main untouched.
+
+## E8: Kafka TLS and SASL qualification
+
+Continue the Kafka operational group with [real encrypted broker qualification](packages/e8-kafka-security.md)
+on feat/integrations-e8-kafka-security after D2. Exercise existing TLS/SASL settings and rejection
+behavior with ephemeral secured broker fixtures, preserving mapping, durable offsets and packaged
+io_uring/custom execution. Local qualification passes 4,233 units, 348 real-dependency integrations,
+185 killed Kafka mutants and thirteen published actual ARM64 scenarios. Engine/native/packaging
+sources remain unchanged; whole-engine coverage and inherited gaps remain explicit in the
+[evidence ledger](packages/e8-kafka-security-verification.md). Independent source health, poison
+recovery and broader topology remain separate steps. Remote/x64 checks remain owner-deferred.
+
+## D3: project-scoped Kafka source health
+
+After qualified E8, add [observed connector health](packages/d3-kafka-source-health.md) on
+feat/developer-operator-tools-d3-kafka-source-health. A bounded read-only snapshot distinguishes
+assignment, transport/security failure and lifecycle state without probing the broker or changing
+offsets/retries. Implementation is in progress; source repair, additional declarations and active
+probe/lag semantics remain separate. Remote/x64 and benchmarks retain their owner deferrals.

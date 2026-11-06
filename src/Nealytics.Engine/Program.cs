@@ -37,6 +37,8 @@ using Nealytics.Engine.Features.ImportNdjson;
 using Nealytics.Engine.Features.ImportCsv;
 using Nealytics.Engine.Features.ImportJobs;
 using Nealytics.Engine.Features.S3Import;
+using Nealytics.Engine.Features.HttpImport;
+using Nealytics.Engine.Features.GcsImport;
 using Nealytics.Engine.Features.SourceMapping;
 using Nealytics.Engine.Features.UpsertTenantAttributes;
 using Nealytics.Engine.Infrastructure.Configuration;
@@ -277,6 +279,22 @@ if (engineOpts.EnableImportJobs)
     builder.Services.AddHostedService(services => services.GetRequiredService<ImportJobStore>());
     builder.Services.AddSingleton<ImportJobCoordinator>();
 }
+using HttpSources httpSources = new(engineOpts, projectCatalog);
+if (httpSources.Count != 0)
+{
+    builder.Services.AddSingleton(httpSources);
+    builder.Services.AddSingleton<HttpObjectClient>();
+    builder.Services.AddSingleton<HttpImportCoordinator>();
+}
+
+using GcsSources gcsSources = new(engineOpts, projectCatalog);
+if (gcsSources.Count != 0)
+{
+    builder.Services.AddSingleton(gcsSources);
+    builder.Services.AddSingleton<GcsObjectClient>();
+    builder.Services.AddSingleton<GcsImportCoordinator>();
+}
+
 builder.Services.AddSingleton<WriteAheadLogger>();
 S3Sources s3Sources = new(engineOpts, projectCatalog);
 if (s3Sources.Count != 0)
@@ -428,6 +446,18 @@ app.UseAuthorization();
 if (engineOpts.EnableCsvImport)
 {
     app.MapCsvImport();
+}
+if (engineOpts.Kafka?.Enabled == true)
+{
+    app.MapKafkaSourceHealth();
+}
+if (httpSources.Count != 0)
+{
+    app.MapHttpImport();
+}
+if (gcsSources.Count != 0)
+{
+    app.MapGcsImport();
 }
 app.MapTelemetryIngestion();
 app.MapBeaconIngestion();

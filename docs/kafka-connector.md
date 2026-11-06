@@ -129,7 +129,23 @@ into the self-contained executable; native assets are extracted into the engine'
 location. No customer-installed librdkafka is required. The published checks run on actual Linux
 x64 and ARM64 with io_uring/custom ingestion. The feature leaves existing backend defaults intact.
 
-The qualified real-broker fixtures use plaintext Kafka 4.1.1 and ClickHouse 25.3.14.14. TLS/SASL
-settings and credential validation have unit coverage; these fixtures do not certify every broker
+The original E1 fixtures use plaintext Kafka 4.1.1 and ClickHouse 25.3.14.14. E8 adds real
+TLS/SASL and actual ARM64 security qualification below; neither set certifies every broker vendor,
 security deployment, multi-broker topology or network failure. See the
-[E1 evidence ledger](packages/e1-kafka-verification.md) for exact scope and source revisions.
+[E1 evidence ledger](packages/e1-kafka-verification.md) for its historical scope/source revisions.
+
+## Encrypted broker qualification
+
+E8 locally qualifies the existing ssl and sasl_ssl settings against real brokers and the
+published actual Linux ARM64 executable. Its scope covers private-CA trust, hostname verification, PLAIN, SCRAM-SHA-256
+and SCRAM-SHA-512, together with mapping, committed-offset restart, poison-prefix stops and
+credential/payload redaction. All 25 new integration cases and thirteen published ARM64 scenarios
+pass. See the [E8 evidence](packages/e8-kafka-security-verification.md). Remote CI/actual x64 remain
+owner-deferred; the E1 plaintext evidence above remains a historical source-specific record.
+
+The test-only secured broker fixture creates fresh signing keys, one-day leaf certificates and
+fixture credentials on each run. Its plaintext administration listener belongs only to the
+isolated setup/offset-inspection path. Engine reads use encrypted listeners with verification
+enabled. Fixture credentials and certificate generation are not engine deployment requirements.
+Source health, operator-controlled poison recovery, vendor-specific authentication, ACL management
+and multi-broker failover remain separate qualification/workflow boundaries.
